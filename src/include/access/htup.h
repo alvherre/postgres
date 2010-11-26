@@ -164,12 +164,15 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_HASVARWIDTH		0x0002	/* has variable-width attribute(s) */
 #define HEAP_HASEXTERNAL		0x0004	/* has external stored attribute(s) */
 #define HEAP_HASOID				0x0008	/* has an object-id field */
-/* bit 0x0010 is available */
+#define HEAP_XMAX_KEY_LOCK		0x0010	/* xmax is a "key" locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
 #define HEAP_XMAX_SHARED_LOCK	0x0080	/* xmax is shared locker */
+/* if either SHARE or KEY lock bit is set, this is a "shared" lock */
+#define HEAP_IS_SHARE_LOCKED (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)
 /* if either LOCK bit is set, xmax hasn't deleted the tuple, only locked it */
-#define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK)
+#define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK | \
+						 HEAP_XMAX_KEY_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */
 #define HEAP_XMAX_COMMITTED		0x0400	/* t_xmax committed */
@@ -727,10 +730,10 @@ typedef struct xl_heap_lock
 	xl_heaptid	target;			/* locked tuple id */
 	TransactionId locking_xid;	/* might be a MultiXactId not xid */
 	bool		xid_is_mxact;	/* is it? */
-	bool		shared_lock;	/* shared or exclusive row lock? */
+	char		lock_strength;	/* keylock, shared, exclusive lock? */
 } xl_heap_lock;
 
-#define SizeOfHeapLock	(offsetof(xl_heap_lock, shared_lock) + sizeof(bool))
+#define SizeOfHeapLock	(offsetof(xl_heap_lock, lock_strength) + sizeof(char))
 
 /* This is what we need to know about in-place update */
 typedef struct xl_heap_inplace

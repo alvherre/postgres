@@ -33,6 +33,7 @@ typedef struct BulkInsertStateData *BulkInsertState;
 
 typedef enum
 {
+	LockTupleKeylock,
 	LockTupleShared,
 	LockTupleExclusive
 } LockTupleMode;

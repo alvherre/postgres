@@ -3198,7 +3198,20 @@ heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 	LOCKMODE	tuple_lock_type;
 	bool		have_tuple_lock = false;
 
-	tuple_lock_type = (mode == LockTupleShared) ? ShareLock : ExclusiveLock;
+	/* in FOR KEY LOCK mode, we use a share lock temporarily */
+	switch (mode)
+	{
+		case LockTupleShared:
+		case LockTupleKeylock:
+			tuple_lock_type = ShareLock;
+			break;
+		case LockTupleExclusive:
+			tuple_lock_type = ExclusiveLock;
+			break;
+		default:
+			elog(ERROR, "invalid tuple lock mode");
+			tuple_lock_type = 0;	/* keep compiler quiet */
+	}
 
 	*buffer = ReadBuffer(relation, ItemPointerGetBlockNumber(tid));
 	LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3231,18 +3244,18 @@ l3:
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
 		/*
-		 * If we wish to acquire share lock, and the tuple is already
-		 * share-locked by a multixact that includes any subtransaction of the
+		 * If we wish to acquire a key or share lock, and the tuple is already
+		 * share- or key-locked by a multixact that includes any subtransaction of the
 		 * current top transaction, then we effectively hold the desired lock
 		 * already.  We *must* succeed without trying to take the tuple lock,
 		 * else we will deadlock against anyone waiting to acquire exclusive
 		 * lock.  We don't need to make any state changes in this case.
 		 */
-		if (mode == LockTupleShared &&
+		if ((mode == LockTupleShared || mode == LockTupleKeylock) &&
 			(infomask & HEAP_XMAX_IS_MULTI) &&
 			MultiXactIdIsCurrent((MultiXactId) xwait))
 		{
-			Assert(infomask & HEAP_XMAX_SHARED_LOCK);
+			Assert(infomask & HEAP_IS_SHARE_LOCKED);
 			/* Probably can't hold tuple lock here, but may as well check */
 			if (have_tuple_lock)
 				UnlockTuple(relation, tid, tuple_lock_type);
@@ -3273,10 +3286,11 @@ l3:
 			have_tuple_lock = true;
 		}
 
-		if (mode == LockTupleShared && (infomask & HEAP_XMAX_SHARED_LOCK))
+		if ((mode == LockTupleShared || mode == LockTupleKeylock) &&
+			(infomask & HEAP_IS_SHARE_LOCKED))
 		{
 			/*
-			 * Acquiring sharelock when there's at least one sharelocker
+			 * Acquiring sharelock or keylock when there's at least one such locker
 			 * already.  We need not wait for him/them to complete.
 			 */
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3285,7 +3299,7 @@ l3:
 			 * Make sure it's still a shared lock, else start over.  (It's OK
 			 * if the ownership of the shared lock has changed, though.)
 			 */
-			if (!(tuple->t_data->t_infomask & HEAP_XMAX_SHARED_LOCK))
+			if (!(tuple->t_data->t_infomask & HEAP_IS_SHARE_LOCKED))
 				goto l3;
 		}
 		else if (infomask & HEAP_XMAX_IS_MULTI)
@@ -3395,8 +3409,10 @@ l3:
 	if (!(old_infomask & (HEAP_XMAX_INVALID |
 						  HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_IS_MULTI)) &&
-		(mode == LockTupleShared ?
+		(mode == LockTupleKeylock ?
 		 (old_infomask & HEAP_IS_LOCKED) :
+		 mode == LockTupleShared ?
+		 (old_infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_EXCL_LOCK)) :
 		 (old_infomask & HEAP_XMAX_EXCL_LOCK)) &&
 		TransactionIdIsCurrentTransactionId(xmax))
 	{
@@ -3420,10 +3436,10 @@ l3:
 									HEAP_IS_LOCKED |
 									HEAP_MOVED);
 
-	if (mode == LockTupleShared)
+	if (mode == LockTupleShared || mode == LockTupleKeylock)
 	{
 		/*
-		 * If this is the first acquisition of a shared lock in the current
+		 * If this is the first acquisition of a keylock or shared lock in the current
 		 * transaction, set my per-backend OldestMemberMXactId setting. We can
 		 * be certain that the transaction will never become a member of any
 		 * older MultiXactIds than that.  (We have to do this even if we end
@@ -3432,7 +3448,8 @@ l3:
 		 */
 		MultiXactIdSetOldestMember();
 
-		new_infomask |= HEAP_XMAX_SHARED_LOCK;
+		new_infomask |= mode == LockTupleShared ? HEAP_XMAX_SHARED_LOCK :
+			HEAP_XMAX_KEY_LOCK;
 
 		/*
 		 * Check to see if we need a MultiXactId because there are multiple
@@ -3532,7 +3549,7 @@ l3:
 		xlrec.target.tid = tuple->t_self;
 		xlrec.locking_xid = xid;
 		xlrec.xid_is_mxact = ((new_infomask & HEAP_XMAX_IS_MULTI) != 0);
-		xlrec.shared_lock = (mode == LockTupleShared);
+		xlrec.lock_strength = mode == LockTupleShared ? 's' : mode == LockTupleKeylock ? 'k' : 'x';
 		rdata[0].data = (char *) &xlrec;
 		rdata[0].len = SizeOfHeapLock;
 		rdata[0].buffer = InvalidBuffer;
@@ -4987,8 +5004,10 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 						  HEAP_MOVED);
 	if (xlrec->xid_is_mxact)
 		htup->t_infomask |= HEAP_XMAX_IS_MULTI;
-	if (xlrec->shared_lock)
+	if (xlrec->lock_strength == 's')
 		htup->t_infomask |= HEAP_XMAX_SHARED_LOCK;
+	else if (xlrec->lock_strength == 'k')
+		htup->t_infomask |= HEAP_XMAX_KEY_LOCK;
 	else
 		htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
 	HeapTupleHeaderClearHotUpdated(htup);
@@ -5194,8 +5213,10 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 	{
 		xl_heap_lock *xlrec = (xl_heap_lock *) rec;
 
-		if (xlrec->shared_lock)
+		if (xlrec->lock_strength == 's')
 			appendStringInfo(buf, "shared_lock: ");
+		else if (xlrec->lock_strength == 'k')
+			appendStringInfo(buf, "key_lock: ");
 		else
 			appendStringInfo(buf, "exclusive_lock: ");
 		if (xlrec->xid_is_mxact)

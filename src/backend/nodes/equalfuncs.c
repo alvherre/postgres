@@ -2291,7 +2291,7 @@ static bool
 _equalLockingClause(LockingClause *a, LockingClause *b)
 {
 	COMPARE_NODE_FIELD(lockedRels);
-	COMPARE_SCALAR_FIELD(forUpdate);
+	COMPARE_SCALAR_FIELD(strength);
 	COMPARE_SCALAR_FIELD(noWait);
 
 	return true;
@@ -2362,7 +2362,7 @@ static bool
 _equalRowMarkClause(RowMarkClause *a, RowMarkClause *b)
 {
 	COMPARE_SCALAR_FIELD(rti);
-	COMPARE_SCALAR_FIELD(forUpdate);
+	COMPARE_SCALAR_FIELD(strength);
 	COMPARE_SCALAR_FIELD(noWait);
 	COMPARE_SCALAR_FIELD(pushedDown);
 

@@ -113,8 +113,15 @@ lnext:
 		/* okay, try to lock the tuple */
 		if (erm->markType == ROW_MARK_EXCLUSIVE)
 			lockmode = LockTupleExclusive;
-		else
+		else if (erm->markType == ROW_MARK_SHARE)
 			lockmode = LockTupleShared;
+		else if (erm->markType == ROW_MARK_KEYLOCK)
+			lockmode = LockTupleKeylock;
+		else
+		{
+			elog(ERROR, "unsupported rowmark type");
+			lockmode = LockTupleExclusive;	/* keep compiler quiet */
+		}
 
 		test = heap_lock_tuple(erm->relation, &tuple, &buffer,
 							   &update_ctid, &update_xmax,
