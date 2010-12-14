@@ -3625,6 +3625,8 @@ RelationGetIndexPredicate(Relation relation)
  * simple index keys, but attributes used in expressions and partial-index
  * predicates.)
  *
+ * If "unique" is true, only attributes of unique indexes are considered.
+ *
  * Attribute numbers are offset by FirstLowInvalidHeapAttributeNumber so that
  * we can include system attributes (e.g., OID) in the bitmap representation.
  *
@@ -3636,16 +3638,17 @@ RelationGetIndexPredicate(Relation relation)
  * be bms_free'd when not needed anymore.
  */
 Bitmapset *
-RelationGetIndexAttrBitmap(Relation relation)
+RelationGetIndexAttrBitmap(Relation relation, bool unique)
 {
 	Bitmapset  *indexattrs;
+	Bitmapset  *uindexattrs;
 	List	   *indexoidlist;
 	ListCell   *l;
 	MemoryContext oldcxt;
 
 	/* Quick exit if we already computed the result. */
 	if (relation->rd_indexattr != NULL)
-		return bms_copy(relation->rd_indexattr);
+		return bms_copy(unique ? relation->rd_uindexattr : relation->rd_indexattr);
 
 	/* Fast path if definitely no indexes */
 	if (!RelationGetForm(relation)->relhasindex)
@@ -3664,6 +3667,7 @@ RelationGetIndexAttrBitmap(Relation relation)
 	 * For each index, add referenced attributes to indexattrs.
 	 */
 	indexattrs = NULL;
+	uindexattrs = NULL;
 	foreach(l, indexoidlist)
 	{
 		Oid			indexOid = lfirst_oid(l);
@@ -3682,15 +3686,24 @@ RelationGetIndexAttrBitmap(Relation relation)
 			int			attrnum = indexInfo->ii_KeyAttrNumbers[i];
 
 			if (attrnum != 0)
+			{
 				indexattrs = bms_add_member(indexattrs,
 							   attrnum - FirstLowInvalidHeapAttributeNumber);
+				if (indexInfo->ii_Unique)
+					uindexattrs = bms_add_member(uindexattrs,
+											   	 attrnum - FirstLowInvalidHeapAttributeNumber);
+			}
 		}
 
 		/* Collect all attributes used in expressions, too */
 		pull_varattnos((Node *) indexInfo->ii_Expressions, &indexattrs);
+		if (indexInfo->ii_Unique)
+			pull_varattnos((Node *) indexInfo->ii_Expressions, &uindexattrs);
 
 		/* Collect all attributes in the index predicate, too */
 		pull_varattnos((Node *) indexInfo->ii_Predicate, &indexattrs);
+		if (indexInfo->ii_Unique)
+			pull_varattnos((Node *) indexInfo->ii_Predicate, &uindexattrs);
 
 		index_close(indexDesc, AccessShareLock);
 	}
@@ -3700,10 +3713,11 @@ RelationGetIndexAttrBitmap(Relation relation)
 	/* Now save a copy of the bitmap in the relcache entry. */
 	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
 	relation->rd_indexattr = bms_copy(indexattrs);
+	relation->rd_uindexattr = bms_copy(uindexattrs);
 	MemoryContextSwitchTo(oldcxt);
 
 	/* We return our original working copy for caller to play with */
-	return indexattrs;
+	return unique ? uindexattrs : indexattrs;
 }
 
 /*
