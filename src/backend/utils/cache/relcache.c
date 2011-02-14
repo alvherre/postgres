@@ -3625,7 +3625,8 @@ RelationGetIndexPredicate(Relation relation)
  * simple index keys, but attributes used in expressions and partial-index
  * predicates.)
  *
- * If "unique" is true, only attributes of unique indexes are considered.
+ * If "keyAttrs" is true, only attributes that can be referenced by foreign
+ * keys are considered.
  *
  * Attribute numbers are offset by FirstLowInvalidHeapAttributeNumber so that
  * we can include system attributes (e.g., OID) in the bitmap representation.
@@ -3638,7 +3639,7 @@ RelationGetIndexPredicate(Relation relation)
  * be bms_free'd when not needed anymore.
  */
 Bitmapset *
-RelationGetIndexAttrBitmap(Relation relation, bool unique)
+RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
 {
 	Bitmapset  *indexattrs;
 	Bitmapset  *uindexattrs;
@@ -3648,7 +3649,7 @@ RelationGetIndexAttrBitmap(Relation relation, bool unique)
 
 	/* Quick exit if we already computed the result. */
 	if (relation->rd_indexattr != NULL)
-		return bms_copy(unique ? relation->rd_uindexattr : relation->rd_indexattr);
+		return bms_copy(keyAttrs ? relation->rd_keyattr : relation->rd_indexattr);
 
 	/* Fast path if definitely no indexes */
 	if (!RelationGetForm(relation)->relhasindex)
@@ -3674,11 +3675,17 @@ RelationGetIndexAttrBitmap(Relation relation, bool unique)
 		Relation	indexDesc;
 		IndexInfo  *indexInfo;
 		int			i;
+		bool		isKey;
 
 		indexDesc = index_open(indexOid, AccessShareLock);
 
 		/* Extract index key information from the index's pg_index row */
 		indexInfo = BuildIndexInfo(indexDesc);
+
+		/* Can this index be referenced by a foreign key? */
+		isKey = indexInfo->ii_Unique &&
+				indexInfo->ii_Expressions == NIL &&
+				indexInfo->ii_Predicate == NIL;
 
 		/* Collect simple attribute references */
 		for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
@@ -3689,7 +3696,7 @@ RelationGetIndexAttrBitmap(Relation relation, bool unique)
 			{
 				indexattrs = bms_add_member(indexattrs,
 							   attrnum - FirstLowInvalidHeapAttributeNumber);
-				if (indexInfo->ii_Unique)
+				if (isKey)
 					uindexattrs = bms_add_member(uindexattrs,
 											   	 attrnum - FirstLowInvalidHeapAttributeNumber);
 			}
@@ -3697,13 +3704,9 @@ RelationGetIndexAttrBitmap(Relation relation, bool unique)
 
 		/* Collect all attributes used in expressions, too */
 		pull_varattnos((Node *) indexInfo->ii_Expressions, &indexattrs);
-		if (indexInfo->ii_Unique)
-			pull_varattnos((Node *) indexInfo->ii_Expressions, &uindexattrs);
 
 		/* Collect all attributes in the index predicate, too */
 		pull_varattnos((Node *) indexInfo->ii_Predicate, &indexattrs);
-		if (indexInfo->ii_Unique)
-			pull_varattnos((Node *) indexInfo->ii_Predicate, &uindexattrs);
 
 		index_close(indexDesc, AccessShareLock);
 	}
@@ -3713,11 +3716,11 @@ RelationGetIndexAttrBitmap(Relation relation, bool unique)
 	/* Now save a copy of the bitmap in the relcache entry. */
 	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
 	relation->rd_indexattr = bms_copy(indexattrs);
-	relation->rd_uindexattr = bms_copy(uindexattrs);
+	relation->rd_keyattr = bms_copy(uindexattrs);
 	MemoryContextSwitchTo(oldcxt);
 
 	/* We return our original working copy for caller to play with */
-	return unique ? uindexattrs : indexattrs;
+	return keyAttrs ? uindexattrs : indexattrs;
 }
 
 /*
