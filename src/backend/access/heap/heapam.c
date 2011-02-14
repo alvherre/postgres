@@ -2707,10 +2707,11 @@ l2:
 		newtup->t_data->t_infomask |= (oldtup.t_data->t_infomask & 
 									   (HEAP_XMAX_IS_MULTI |
 										HEAP_XMAX_KEY_LOCK));
+
 		/*
-		 * we also need to copy the combo CID stuff, but only if the original
-		 * tuple was created by us; otherwise the combocid module complains
-		 * (Alternatively we could use HeapTupleHeaderGetRawCommandId)
+		 * If the tuple was created in this transaction, and we're going to
+		 * delete it, then it must have a combo-cid, which we need to preserve.
+		 * Otherwise, just use the passed cid.
 		 */
 		if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(oldtup.t_data)))
 		{
@@ -2719,6 +2720,8 @@ l2:
 			HeapTupleHeaderSetCmin(newtup->t_data,
 								   HeapTupleHeaderGetRawCommandId(oldtup.t_data));
 		}
+		else
+			HeapTupleHeaderSetCmin(newtup->t_data, cid);
 
 	}
 	else
