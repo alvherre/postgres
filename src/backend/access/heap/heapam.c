@@ -3602,7 +3602,7 @@ l3:
 		xlrec.target.tid = tuple->t_self;
 		xlrec.locking_xid = xid;
 		xlrec.xid_is_mxact = ((new_infomask & HEAP_XMAX_IS_MULTI) != 0);
-		xlrec.lock_strength = mode == LockTupleShared ? 's' : mode == LockTupleKeylock ? 'k' : 'x';
+		xlrec.lock_strength = mode;
 		rdata[0].data = (char *) &xlrec;
 		rdata[0].len = SizeOfHeapLock;
 		rdata[0].buffer = InvalidBuffer;
@@ -5057,12 +5057,15 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 						  HEAP_MOVED);
 	if (xlrec->xid_is_mxact)
 		htup->t_infomask |= HEAP_XMAX_IS_MULTI;
-	if (xlrec->lock_strength == 's')
+	if (xlrec->lock_strength == LockTupleShared)
 		htup->t_infomask |= HEAP_XMAX_SHARED_LOCK;
-	else if (xlrec->lock_strength == 'k')
+	else if (xlrec->lock_strength == LockTupleKeylock)
 		htup->t_infomask |= HEAP_XMAX_KEY_LOCK;
 	else
+	{
+		Assert(xlrec->lock_strength == LockTupleExclusive);
 		htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
+	}
 	HeapTupleHeaderClearHotUpdated(htup);
 	HeapTupleHeaderSetXmax(htup, xlrec->locking_xid);
 	HeapTupleHeaderSetCmax(htup, FirstCommandId, false);

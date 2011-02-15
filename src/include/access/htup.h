@@ -730,10 +730,10 @@ typedef struct xl_heap_lock
 	xl_heaptid	target;			/* locked tuple id */
 	TransactionId locking_xid;	/* might be a MultiXactId not xid */
 	bool		xid_is_mxact;	/* is it? */
-	char		lock_strength;	/* keylock, shared, exclusive lock? */
+	int8		lock_strength;	/* keylock, shared, exclusive lock? */
 } xl_heap_lock;
 
-#define SizeOfHeapLock	(offsetof(xl_heap_lock, lock_strength) + sizeof(char))
+#define SizeOfHeapLock	(offsetof(xl_heap_lock, lock_strength) + sizeof(int8))
 
 /* This is what we need to know about in-place update */
 typedef struct xl_heap_inplace
