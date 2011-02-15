@@ -2696,10 +2696,6 @@ l2:
 	HeapTupleHeaderSetXmin(newtup->t_data, xid);
 	newtup->t_tableOid = RelationGetRelid(relation);
 
-	/*
-	 * If this update is touching a tuple that was key-locked, we need to
-	 * carry forward some bits from the old tuple into the new copy.
-	 */
 	if (keylocked_update)
 	{
 		HeapTupleHeaderSetXmax(newtup->t_data,
@@ -2707,35 +2703,32 @@ l2:
 		newtup->t_data->t_infomask |= (oldtup.t_data->t_infomask & 
 									   (HEAP_XMAX_IS_MULTI |
 										HEAP_XMAX_KEY_LOCK));
-
-		/*
-		 * If the tuple was created in this transaction, and we're going to
-		 * delete it, then it must have a combo-cid, which we need to preserve.
-		 * Otherwise, just use the passed cid.
-		 */
-		if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(oldtup.t_data)))
-		{
-			newtup->t_data->t_infomask |= (oldtup.t_data->t_infomask & 
-										   HEAP_COMBOCID);
-			HeapTupleHeaderSetCmin(newtup->t_data,
-								   HeapTupleHeaderGetRawCommandId(oldtup.t_data));
-		}
-		else
-			HeapTupleHeaderSetCmin(newtup->t_data, cid);
-
 	}
 	else
 	{
 		newtup->t_data->t_infomask |= HEAP_XMAX_INVALID;
 		HeapTupleHeaderSetXmax(newtup->t_data, 0);	/* for cleanliness */
-		HeapTupleHeaderSetCmin(newtup->t_data, cid);
 	}
 
 	/*
-	 * Replace cid with a combo cid if necessary.  Note that we already put
-	 * the plain cid into the new tuple.
+	 * Replace cid in the original tuple with a combo cid if necessary.  We
+	 * need to do this before filling in the CID in the new tuple, because
+	 * we may need to copy the combo_cid.
 	 */
 	HeapTupleHeaderAdjustCmax(oldtup.t_data, &cid, &iscombo);
+
+	/*
+	 * If the old tuple has a combo CID, we need to carry it forward, too.
+	 */
+	if (iscombo)
+	{
+		newtup->t_data->t_infomask |= (oldtup.t_data->t_infomask & 
+									   HEAP_COMBOCID);
+		HeapTupleHeaderSetCmin(newtup->t_data,
+							   HeapTupleHeaderGetRawCommandId(oldtup.t_data));
+	}
+	else
+		HeapTupleHeaderSetCmin(newtup->t_data, cid);
 
 	/*
 	 * If the toaster needs to be activated, OR if the new tuple will not fit
