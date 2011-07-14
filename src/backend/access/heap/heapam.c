@@ -2722,8 +2722,8 @@ l2:
 	 */
 	if (iscombo)
 	{
-		newtup->t_data->t_infomask |= (oldtup.t_data->t_infomask & 
-									   HEAP_COMBOCID);
+		newtup->t_data->t_infomask |=
+			(oldtup.t_data->t_infomask & HEAP_COMBOCID);
 		HeapTupleHeaderSetCmin(newtup->t_data,
 							   HeapTupleHeaderGetRawCommandId(oldtup.t_data));
 	}
