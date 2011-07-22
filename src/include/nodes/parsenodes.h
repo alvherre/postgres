@@ -119,7 +119,7 @@ typedef struct Query
 	bool		hasDistinctOn;	/* distinctClause is from DISTINCT ON */
 	bool		hasRecursive;	/* WITH RECURSIVE was specified */
 	bool		hasModifyingCTE;	/* has INSERT/UPDATE/DELETE in WITH */
-	bool		hasForUpdate;	/* FOR UPDATE or FOR SHARE was specified */
+	bool		hasForUpdate;	/* FOR UPDATE/SHARE/KEY LOCK was specified */
 
 	List	   *cteList;		/* WITH list (of CommonTableExpr's) */
 
@@ -877,7 +877,7 @@ typedef struct WindowClause
  * subquery rels in the subquery, but they are marked pushedDown = true to
  * distinguish them from clauses that were explicitly written at this query
  * level.  Also, Query.hasForUpdate tells whether there were explicit FOR
- * UPDATE/SHARE clauses in the current query level.
+ * UPDATE/SHARE/KEY LOCK clauses in the current query level.
  */
 typedef struct RowMarkClause
 {

@@ -2527,11 +2527,8 @@ l2:
 	}
 	else if (result == HeapTupleBeingUpdated && wait)
 	{
-		TransactionId xwait;
 		uint16		infomask;
 
-		/* must copy state data before unlocking buffer */
-		xwait = HeapTupleHeaderGetXmax(oldtup.t_data);
 		infomask = oldtup.t_data->t_infomask;
 
 		/*
@@ -2550,6 +2547,11 @@ l2:
 
 		if (!keylocked_update)
 		{
+			TransactionId xwait;
+
+			/* must copy state data before unlocking buffer */
+			xwait = HeapTupleHeaderGetXmax(oldtup.t_data);
+
 			LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 
 			/*
@@ -2652,6 +2654,7 @@ l2:
 		if (vmbuffer != InvalidBuffer)
 			ReleaseBuffer(vmbuffer);
 		bms_free(hot_attrs);
+		bms_free(keylck_attrs);
 		return result;
 	}
 
@@ -2690,12 +2693,15 @@ l2:
 		Assert(!(newtup->t_data->t_infomask & HEAP_HASOID));
 	}
 
+	/*
+	 * Prepare the new tuple with the appropriate initial values of Xmin and
+	 * Xmax, as well as initial infomask bits.
+	 */
 	newtup->t_data->t_infomask &= ~(HEAP_XACT_MASK);
 	newtup->t_data->t_infomask2 &= ~(HEAP2_XACT_MASK);
 	newtup->t_data->t_infomask |= HEAP_UPDATED;
 	HeapTupleHeaderSetXmin(newtup->t_data, xid);
 	newtup->t_tableOid = RelationGetRelid(relation);
-
 	if (keylocked_update)
 	{
 		HeapTupleHeaderSetXmax(newtup->t_data,
@@ -2711,24 +2717,10 @@ l2:
 	}
 
 	/*
-	 * Replace cid in the original tuple with a combo cid if necessary.  We
-	 * need to do this before filling in the CID in the new tuple, because
-	 * we may need to copy the combo_cid.
+	 * Replace cid in the original tuple with a combo cid if necessary.
 	 */
 	HeapTupleHeaderAdjustCmax(oldtup.t_data, &cid, &iscombo);
-
-	/*
-	 * If the old tuple has a combo CID, we need to carry it forward, too.
-	 */
-	if (iscombo)
-	{
-		newtup->t_data->t_infomask |=
-			(oldtup.t_data->t_infomask & HEAP_COMBOCID);
-		HeapTupleHeaderSetCmin(newtup->t_data,
-							   HeapTupleHeaderGetRawCommandId(oldtup.t_data));
-	}
-	else
-		HeapTupleHeaderSetCmin(newtup->t_data, cid);
+	HeapTupleHeaderSetCmin(newtup->t_data, cid);
 
 	/*
 	 * If the toaster needs to be activated, OR if the new tuple will not fit
@@ -3012,6 +3004,7 @@ l2:
 	}
 
 	bms_free(hot_attrs);
+	bms_free(keylck_attrs);
 
 	return HeapTupleMayBeUpdated;
 }
@@ -3244,7 +3237,6 @@ heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 	LOCKMODE	tuple_lock_type;
 	bool		have_tuple_lock = false;
 
-	/* in FOR KEY LOCK mode, we use a share lock temporarily */
 	switch (mode)
 	{
 		case LockTupleShared:
@@ -3290,18 +3282,25 @@ l3:
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
 		/*
-		 * If we wish to acquire a key or share lock, and the tuple is already
-		 * share- or key-locked by a multixact that includes any subtransaction of the
+		 * If we wish to acquire a share lock, and the tuple is already
+		 * share-locked by a multixact that includes any subtransaction of the
 		 * current top transaction, then we effectively hold the desired lock
 		 * already.  We *must* succeed without trying to take the tuple lock,
 		 * else we will deadlock against anyone waiting to acquire exclusive
 		 * lock.  We don't need to make any state changes in this case.
+		 *
+		 * Likewise, if we wish to acquire a key lock, and the tuple is already
+		 * share- or key-locked by us, we effectively hold the lock already.
+		 *
+		 * Note we cannot do this if we're asking for share lock and the tuple
+		 * is only key-locked.
 		 */
-		if ((mode == LockTupleShared || mode == LockTupleKeylock) &&
-			(infomask & HEAP_XMAX_IS_MULTI) &&
+		if ((infomask & HEAP_XMAX_IS_MULTI) &&
+			(((mode == LockTupleShared) && (infomask & HEAP_XMAX_SHARED_LOCK)) ||
+			 ((mode == LockTupleKeylock) &&
+			  (infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)))) &&
 			MultiXactIdIsCurrent((MultiXactId) xwait))
 		{
-			Assert(infomask & HEAP_IS_SHARE_LOCKED);
 			/* Probably can't hold tuple lock here, but may as well check */
 			if (have_tuple_lock)
 				UnlockTuple(relation, tid, tuple_lock_type);
@@ -3332,11 +3331,10 @@ l3:
 			have_tuple_lock = true;
 		}
 
-		if ((mode == LockTupleShared || mode == LockTupleKeylock) &&
-			(infomask & HEAP_IS_SHARE_LOCKED))
+		if (mode == LockTupleShared && (infomask & HEAP_XMAX_SHARED_LOCK))
 		{
 			/*
-			 * Acquiring sharelock or keylock when there's at least one such locker
+			 * Acquiring sharelock when there's at least one such locker
 			 * already.  We need not wait for him/them to complete.
 			 */
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3345,7 +3343,22 @@ l3:
 			 * Make sure it's still a shared lock, else start over.  (It's OK
 			 * if the ownership of the shared lock has changed, though.)
 			 */
-			if (!(tuple->t_data->t_infomask & HEAP_IS_SHARE_LOCKED))
+			if (!(tuple->t_data->t_infomask & HEAP_XMAX_SHARED_LOCK))
+				goto l3;
+		}
+		else if (mode == LockTupleKeylock &&
+				 (infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)))
+		{
+			/*
+			 * As above: acquiring keylock when there's at least one shared- or
+			 * key-locker already.  We need not wait for him/them to complete.
+			 */
+			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+
+			/*
+			 * Make sure it's still an appropriate lock, else start over.
+			 */
+			if (!(tuple->t_data->t_infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)))
 				goto l3;
 		}
 		else if (infomask & HEAP_XMAX_IS_MULTI)
@@ -5262,12 +5275,14 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 	{
 		xl_heap_lock *xlrec = (xl_heap_lock *) rec;
 
-		if (xlrec->lock_strength == 's')
+		if (xlrec->lock_strength == LockTupleShared)
 			appendStringInfo(buf, "shared_lock: ");
-		else if (xlrec->lock_strength == 'k')
+		else if (xlrec->lock_strength == LockTupleKeylock)
 			appendStringInfo(buf, "key_lock: ");
-		else
+		else if (xlrec->lock_strength == LockTupleExclusive)
 			appendStringInfo(buf, "exclusive_lock: ");
+		else
+			appendStringInfo(buf, "unknown_type_lock: ");
 		if (xlrec->xid_is_mxact)
 			appendStringInfo(buf, "mxid ");
 		else

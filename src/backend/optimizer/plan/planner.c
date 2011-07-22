@@ -1905,6 +1905,8 @@ preprocess_rowmarks(PlannerInfo *root)
 			case LCS_FORKEYLOCK:
 				newrc->markType = ROW_MARK_KEYLOCK;
 				break;
+			default:
+				elog(ERROR, "unsupported rowmark type %d", rc->strength);
 		}
 		newrc->noWait = rc->noWait;
 		newrc->isParent = false;

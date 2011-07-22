@@ -130,7 +130,7 @@ CommandIsReadOnly(Node *parsetree)
 				if (stmt->intoClause != NULL)
 					return false;		/* SELECT INTO */
 				else if (stmt->rowMarks != NIL)
-					return false;		/* SELECT FOR UPDATE/SHARE */
+					return false;		/* SELECT FOR UPDATE/SHARE/KEY LOCK */
 				else if (stmt->hasModifyingCTE)
 					return false;		/* data-modifying CTE */
 				else
@@ -2181,10 +2181,21 @@ CreateCommandTag(Node *parsetree)
 						else if (stmt->rowMarks != NIL)
 						{
 							/* not 100% but probably close enough */
-							if (((PlanRowMark *) linitial(stmt->rowMarks))->markType == ROW_MARK_EXCLUSIVE)
-								tag = "SELECT FOR UPDATE";
-							else
-								tag = "SELECT FOR SHARE";
+							switch (((RowMarkClause *) linitial(stmt->rowMarks))->strength)
+							{
+								case LCS_FORUPDATE:
+									tag = "SELECT FOR UPDATE";
+									break;
+								case LCS_FORSHARE:
+									tag = "SELECT FOR SHARE";
+									break;
+								case LCS_FORKEYLOCK:
+									tag = "SELECT FOR KEY LOCK";
+									break;
+								default:
+									tag =  "???";
+									break;
+							}
 						}
 						else
 							tag = "SELECT";

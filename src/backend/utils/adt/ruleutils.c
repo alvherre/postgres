@@ -2871,6 +2871,8 @@ get_select_query_def(Query *query, deparse_context *context,
 					appendContextKeyword(context, " FOR UPDATE",
 										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 					break;
+				default:
+					elog(ERROR, "unrecognized row locking clause %d", rc->strength);
 			}
 
 			appendStringInfo(buf, " OF %s",

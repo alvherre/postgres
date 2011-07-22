@@ -170,7 +170,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_SHARED_LOCK	0x0080	/* xmax is shared locker */
 /* if either SHARE or KEY lock bit is set, this is a "shared" lock */
 #define HEAP_IS_SHARE_LOCKED (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)
-/* if either LOCK bit is set, xmax hasn't deleted the tuple, only locked it */
+/* if any LOCK bit is set, xmax hasn't deleted the tuple, only locked it */
 #define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK | \
 						 HEAP_XMAX_KEY_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
@@ -771,8 +771,7 @@ extern void HeapTupleHeaderAdvanceLatestRemovedXid(HeapTupleHeader tuple,
 extern CommandId HeapTupleHeaderGetCmin(HeapTupleHeader tup);
 extern CommandId HeapTupleHeaderGetCmax(HeapTupleHeader tup);
 extern void HeapTupleHeaderAdjustCmax(HeapTupleHeader tup,
-						  CommandId *cmax,
-						  bool *iscombo);
+						  CommandId *cmax, bool *iscombo);
 
 /* ----------------
  *		fastgetattr
