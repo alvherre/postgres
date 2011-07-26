@@ -133,8 +133,8 @@ HeapTupleHeaderGetCmax(HeapTupleHeader tup)
  * into its t_cid field.
  *
  * If we don't need a combo CID, *cmax is unchanged and *iscombo is set to
- * FALSE; if we do need one, *cmax is replaced by a combo CID and *iscombo is
- * set to TRUE.
+ * FALSE.  If we do need one, *cmax is replaced by a combo CID and *iscombo
+ * is set to TRUE.
  *
  * The reason this is separate from the actual HeapTupleHeaderSetCmax()
  * operation is that this could fail due to out-of-memory conditions.  Hence
@@ -223,7 +223,7 @@ GetComboCommandId(CommandId cmin, CommandId cmax)
 			MemoryContextAlloc(TopTransactionContext,
 							   sizeof(ComboCidKeyData) * CCID_ARRAY_SIZE);
 		sizeComboCids = CCID_ARRAY_SIZE;
-		usedComboCids = 99;
+		usedComboCids = 0;
 	}
 
 	/* Lookup or create a hash entry with the desired cmin/cmax */
