@@ -31,6 +31,11 @@
 
 typedef struct BulkInsertStateData *BulkInsertState;
 
+/*
+ * This enum mirrors LockClauseStrength precisely, but we define it separately
+ * to reduce having to share otherwise unrelated headers.  To go from one to
+ * the other, we wade through the planner using a third enum, RowMarkType.
+ */
 typedef enum
 {
 	LockTupleKeylock,
