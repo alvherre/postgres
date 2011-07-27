@@ -2718,7 +2718,8 @@ l2:
 	}
 
 	/*
-	 * Replace cid in the original tuple with a combo cid if necessary.
+	 * Replace cid with a combo cid if necessary.  Note that we already put
+	 * the plain cid into the new tuple.
 	 */
 	HeapTupleHeaderAdjustCmax(oldtup.t_data, &cid, &iscombo);
 
@@ -3282,7 +3283,7 @@ l3:
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
 		/*
-		 * If we wish to acquire a share lock, and the tuple is already
+		 * If we wish to acquire share lock, and the tuple is already
 		 * share-locked by a multixact that includes any subtransaction of the
 		 * current top transaction, then we effectively hold the desired lock
 		 * already.  We *must* succeed without trying to take the tuple lock,
@@ -3334,7 +3335,7 @@ l3:
 		if (mode == LockTupleShared && (infomask & HEAP_XMAX_SHARED_LOCK))
 		{
 			/*
-			 * Acquiring sharelock when there's at least one such locker
+			 * Acquiring sharelock when there's at least one sharelocker
 			 * already.  We need not wait for him/them to complete.
 			 */
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3350,7 +3351,7 @@ l3:
 				 (infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)))
 		{
 			/*
-			 * As above: acquiring keylock when there's at least one shared- or
+			 * As above: acquiring keylock when there's at least one share- or
 			 * key-locker already.  We need not wait for him/them to complete.
 			 */
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
