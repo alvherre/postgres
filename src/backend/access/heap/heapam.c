@@ -2701,6 +2701,7 @@ l2:
 	newtup->t_data->t_infomask2 &= ~(HEAP2_XACT_MASK);
 	newtup->t_data->t_infomask |= HEAP_UPDATED;
 	HeapTupleHeaderSetXmin(newtup->t_data, xid);
+	HeapTupleHeaderSetCmin(newtup->t_data, cid);
 	newtup->t_tableOid = RelationGetRelid(relation);
 	if (keylocked_update)
 	{
@@ -2720,7 +2721,6 @@ l2:
 	 * Replace cid in the original tuple with a combo cid if necessary.
 	 */
 	HeapTupleHeaderAdjustCmax(oldtup.t_data, &cid, &iscombo);
-	HeapTupleHeaderSetCmin(newtup->t_data, cid);
 
 	/*
 	 * If the toaster needs to be activated, OR if the new tuple will not fit
