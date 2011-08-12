@@ -4,7 +4,7 @@
  *		PostgreSQL multi-transaction-log manager
  *
  * The pg_multixact manager is a pg_clog-like manager that stores an array
- * of TransactionIds for each MultiXactId.	It is a fundamental part of the
+ * of MultiXactMember for each MultiXactId.	It is a fundamental part of the
  * shared-row-lock implementation.	A share-locked tuple stores a
  * MultiXactId in its Xmax, and a transaction that needs to wait for the
  * tuple to be unlocked can sleep on the potentially-several TransactionIds
@@ -67,23 +67,35 @@
  * Defines for MultiXactOffset page sizes.	A page is the same BLCKSZ as is
  * used everywhere else in Postgres.
  *
- * Note: because both MultiXactOffsets and TransactionIds are 32 bits and
- * wrap around at 0xFFFFFFFF, MultiXact page numbering also wraps around at
- * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE, and segment numbering at
- * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need take no
- * explicit notice of that fact in this module, except when comparing segment
- * and page numbers in TruncateMultiXact
- * (see MultiXact{Offset,Member}PagePrecedes).
+ * Note: because MultiXactOffsets are 32 bits and wrap around at 0xFFFFFFFF,
+ * MultiXact page numbering also wraps around at
+ * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE, and segment numbering at
+ * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need
+ * take no explicit notice of that fact in this module, except when comparing
+ * segment and page numbers in TruncateMultiXact (see
+ * MultiXactOffsetPagePrecedes).
  */
 
-/* We need four bytes per offset and also four bytes per member */
+/* We need four bytes per offset */
 #define MULTIXACT_OFFSETS_PER_PAGE (BLCKSZ / sizeof(MultiXactOffset))
-#define MULTIXACT_MEMBERS_PER_PAGE (BLCKSZ / sizeof(TransactionId))
 
 #define MultiXactIdToOffsetPage(xid) \
 	((xid) / (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
 #define MultiXactIdToOffsetEntry(xid) \
 	((xid) % (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
+
+
+/*
+ * The situation for members is a bit more complex: we first store a bitmask
+ * containing the MultiXactStatus flag of each comprising TransactionId, two
+ * bits per Xid (as many full bytes as necessary to store bit pairs for all
+ * Xids); then the TransactionId themselves.  This is more compact than storing
+ * the flags together with each TransactionId.
+ *
+ * FIXME -- this is stupid (and impossible to implement anyway).  Just use
+ * constant positions, and reuse flag bytes for members of different mxacts.
+ */
+#define MULTIXACT_MEMBERS_PER_PAGE ((4 * BLCKSZ) / (4 * sizeof(TransactionId) + 1))
 
 #define MXOffsetToMemberPage(xid) \
 	((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_PAGE)
@@ -191,7 +203,7 @@ typedef struct mXactCacheEnt
 	struct mXactCacheEnt *next;
 	MultiXactId multi;
 	int			nxids;
-	TransactionId xids[1];		/* VARIABLE LENGTH ARRAY */
+	MultiXactMember members[FLEXIBLE_ARRAY_MEMBER];
 } mXactCacheEnt;
 
 static mXactCacheEnt *MXactCache = NULL;
@@ -212,18 +224,18 @@ static MemoryContext MXactContext = NULL;
 
 /* internal MultiXactId management */
 static void MultiXactIdSetOldestVisible(void);
-static MultiXactId CreateMultiXactId(int nxids, TransactionId *xids);
+static MultiXactId CreateMultiXactId(int nmembers, MultiXactMember *members);
 static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
-				   int nxids, TransactionId *xids);
-static MultiXactId GetNewMultiXactId(int nxids, MultiXactOffset *offset);
+				   int nmembers, MultiXactMember *members);
+static MultiXactId GetNewMultiXactId(int nmembers, MultiXactOffset *offset);
 
 /* MultiXact cache management */
-static MultiXactId mXactCacheGetBySet(int nxids, TransactionId *xids);
-static int	mXactCacheGetById(MultiXactId multi, TransactionId **xids);
-static void mXactCachePut(MultiXactId multi, int nxids, TransactionId *xids);
+static MultiXactId mXactCacheGetBySet(int nmembers, MultiXactMember *members);
+static int	mXactCacheGetById(MultiXactId multi, MultiXactMember **members);
+static void mXactCachePut(MultiXactId multi, int nmembers, TransactionId *members);
 
 #ifdef MULTIXACT_DEBUG
-static char *mxid_to_string(MultiXactId multi, int nxids, TransactionId *xids);
+static char *mxid_to_string(MultiXactId multi, int nmembers, TransactionId *members);
 #endif
 
 /* management of SLRU infrastructure */
@@ -250,10 +262,11 @@ static void WriteMZeroPageXlogRec(int pageno, uint8 info);
  * is handled by the lower-level routines.
  */
 MultiXactId
-MultiXactIdCreate(TransactionId xid1, TransactionId xid2)
+MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
+				  TransactionId xid2, MultiXactStatus status2)
 {
 	MultiXactId newMulti;
-	TransactionId xids[2];
+	MultiXactMember members[2];
 
 	AssertArg(TransactionIdIsValid(xid1));
 	AssertArg(TransactionIdIsValid(xid2));
@@ -269,8 +282,9 @@ MultiXactIdCreate(TransactionId xid1, TransactionId xid2)
 	xids[0] = xid1;
 	xids[1] = xid2;
 
-	newMulti = CreateMultiXactId(2, xids);
+	newMulti = CreateMultiXactId(2, members);
 
+	/* FIXME -- need better debug? */
 	debug_elog5(DEBUG2, "Create: returning %u for %u, %u",
 				newMulti, xid1, xid2);
 
@@ -281,8 +295,8 @@ MultiXactIdCreate(TransactionId xid1, TransactionId xid2)
  * MultiXactIdExpand
  *		Add a TransactionId to a pre-existing MultiXactId.
  *
- * If the TransactionId is already a member of the passed MultiXactId,
- * just return it as-is.
+ * If the TransactionId is already a member of the passed MultiXactId with the
+ * same status, just return it as-is.
  *
  * Note that we do NOT actually modify the membership of a pre-existing
  * MultiXactId; instead we create a new one.  This is necessary to avoid
@@ -292,7 +306,7 @@ MultiXactIdCreate(TransactionId xid1, TransactionId xid2)
  * is handled by the lower-level routines.
  */
 MultiXactId
-MultiXactIdExpand(MultiXactId multi, TransactionId xid)
+MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 {
 	MultiXactId newMulti;
 	TransactionId *members;
@@ -311,6 +325,8 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid)
 
 	if (nmembers < 0)
 	{
+		MultiXactMember		member;
+
 		/*
 		 * The MultiXactId is obsolete.  This can only happen if all the
 		 * MultiXactId members stop running between the caller checking and
@@ -318,7 +334,9 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid)
 		 * caller, but it would complicate the API and it's unlikely to happen
 		 * too often, so just deal with it by creating a singleton MultiXact.
 		 */
-		newMulti = CreateMultiXactId(1, &xid);
+		member.xid = xid;
+		member.status = status;
+		newMulti = CreateMultiXactId(1, &member);
 
 		debug_elog4(DEBUG2, "Expand: %u has no members, create singleton %u",
 					multi, newMulti);
@@ -326,12 +344,13 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid)
 	}
 
 	/*
-	 * If the TransactionId is already a member of the MultiXactId, just
-	 * return the existing MultiXactId.
+	 * If the TransactionId is already a member of the MultiXactId with the
+	 * same status, just return the existing MultiXactId.
 	 */
 	for (i = 0; i < nmembers; i++)
 	{
-		if (TransactionIdEquals(members[i], xid))
+		if (TransactionIdEquals(members[i].xid, xid) &&
+			(members[i].status == status))
 		{
 			debug_elog4(DEBUG2, "Expand: %u is already a member of %u",
 						xid, multi);
@@ -346,16 +365,20 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid)
 	 * optimization, but a useful one.	Note we have the same race condition
 	 * here as above: j could be 0 at the end of the loop.)
 	 */
-	newMembers = (TransactionId *)
-		palloc(sizeof(TransactionId) * (nmembers + 1));
+	newMembers = (MultiXactMember *)
+		palloc(sizeof(MultiXactMember) * (nmembers + 1));
 
 	for (i = 0, j = 0; i < nmembers; i++)
 	{
-		if (TransactionIdIsInProgress(members[i]))
-			newMembers[j++] = members[i];
+		if (TransactionIdIsInProgress(members[i].xid))
+		{
+			newMembers[j++].xid = members[i].xid;
+			newMembers[j++].status = members[i].status;
+		}
 	}
 
-	newMembers[j++] = xid;
+	newMembers[j] = xid;
+	newMembers[j++] = status;
 	newMulti = CreateMultiXactId(j, newMembers);
 
 	pfree(members);
@@ -377,7 +400,7 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid)
 bool
 MultiXactIdIsRunning(MultiXactId multi)
 {
-	TransactionId *members;
+	MultiXactMember *members;
 	int			nmembers;
 	int			i;
 
@@ -398,7 +421,7 @@ MultiXactIdIsRunning(MultiXactId multi)
 	 */
 	for (i = 0; i < nmembers; i++)
 	{
-		if (TransactionIdIsCurrentTransactionId(members[i]))
+		if (TransactionIdIsCurrentTransactionId(members[i].xid))
 		{
 			debug_elog3(DEBUG2, "IsRunning: I (%d) am running!", i);
 			pfree(members);
@@ -413,10 +436,10 @@ MultiXactIdIsRunning(MultiXactId multi)
 	 */
 	for (i = 0; i < nmembers; i++)
 	{
-		if (TransactionIdIsInProgress(members[i]))
+		if (TransactionIdIsInProgress(members[i].xid))
 		{
 			debug_elog4(DEBUG2, "IsRunning: member %d (%u) is running",
-						i, members[i]);
+						i, members[i].xid);
 			pfree(members);
 			return true;
 		}
@@ -444,7 +467,7 @@ bool
 MultiXactIdIsCurrent(MultiXactId multi)
 {
 	bool		result = false;
-	TransactionId *members;
+	MultiXactMember *members;
 	int			nmembers;
 	int			i;
 
@@ -455,7 +478,7 @@ MultiXactIdIsCurrent(MultiXactId multi)
 
 	for (i = 0; i < nmembers; i++)
 	{
-		if (TransactionIdIsCurrentTransactionId(members[i]))
+		if (TransactionIdIsCurrentTransactionId(members[i].xid))
 		{
 			result = true;
 			break;
@@ -582,11 +605,14 @@ MultiXactIdSetOldestVisible(void)
  *
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
+ * FIXME -- this needs thought.  A MultiXactStatus should probably be passed
+ * as argument, and we only sleep on a member if its status conflict with ours.
  */
 void
 MultiXactIdWait(MultiXactId multi)
 {
-	TransactionId *members;
+	MultiXactMember *members;
 	int			nmembers;
 
 	nmembers = GetMultiXactIdMembers(multi, &members);
@@ -597,7 +623,7 @@ MultiXactIdWait(MultiXactId multi)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			TransactionId member = members[i];
+			TransactionId member = members[i].xid;
 
 			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
 						i, member);
@@ -617,7 +643,7 @@ bool
 ConditionalMultiXactIdWait(MultiXactId multi)
 {
 	bool		result = true;
-	TransactionId *members;
+	MultiXactMember *members;
 	int			nmembers;
 
 	nmembers = GetMultiXactIdMembers(multi, &members);
@@ -628,7 +654,7 @@ ConditionalMultiXactIdWait(MultiXactId multi)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			TransactionId member = members[i];
+			TransactionId member = members[i].xid;
 
 			debug_elog4(DEBUG2, "ConditionalMultiXactIdWait: trying %d (%u)",
 						i, member);
@@ -653,10 +679,12 @@ ConditionalMultiXactIdWait(MultiXactId multi)
  * Make XLOG, SLRU and cache entries for a new MultiXactId, recording the
  * given TransactionIds as members.  Returns the newly created MultiXactId.
  *
- * NB: the passed xids[] array will be sorted in-place.
+ * NB: the passed members[] array will be sorted in-place.
+ *
+ * FIXME -- this needs fixed
  */
 static MultiXactId
-CreateMultiXactId(int nxids, TransactionId *xids)
+CreateMultiXactId(int nmembers, MultiXactMember *members)
 {
 	MultiXactId multi;
 	MultiXactOffset offset;
@@ -664,7 +692,7 @@ CreateMultiXactId(int nxids, TransactionId *xids)
 	xl_multixact_create xlrec;
 
 	debug_elog3(DEBUG2, "Create: %s",
-				mxid_to_string(InvalidMultiXactId, nxids, xids));
+				mxid_to_string(InvalidMultiXactId, nmembers, members));
 
 	/*
 	 * See if the same set of XIDs already exists in our cache; if so, just
@@ -676,7 +704,7 @@ CreateMultiXactId(int nxids, TransactionId *xids)
 	 * corner cases where someone else added us to a MultiXact without our
 	 * knowledge, but it's not worth checking for.)
 	 */
-	multi = mXactCacheGetBySet(nxids, xids);
+	multi = mXactCacheGetBySet(nmembers, members);
 	if (MultiXactIdIsValid(multi))
 	{
 		debug_elog2(DEBUG2, "Create: in cache!");
@@ -688,7 +716,7 @@ CreateMultiXactId(int nxids, TransactionId *xids)
 	 * in the OFFSETs and MEMBERs files.  NB: this routine does
 	 * START_CRIT_SECTION().
 	 */
-	multi = GetNewMultiXactId(nxids, &offset);
+	multi = GetNewMultiXactId(nmembers, &offset);
 
 	/*
 	 * Make an XLOG entry describing the new MXID.
@@ -737,6 +765,8 @@ CreateMultiXactId(int nxids, TransactionId *xids)
  *		Write info about a new multixact into the offsets and members files
  *
  * This is broken out of CreateMultiXactId so that xlog replay can use it.
+ * 
+ * XXX -- needs fixed
  */
 static void
 RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
@@ -800,6 +830,8 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 
 	LWLockRelease(MultiXactMemberControlLock);
 }
+
+/* FIXME --- I've checked to here */
 
 /*
  * GetNewMultiXactId
@@ -1104,6 +1136,30 @@ retry:
 }
 
 /*
+ * mxactMemberComparator
+ *		qsort comparison function for MultiXactMember
+ *
+ * We can't use wraparound comparison for XIDs because that does not respect
+ * the triangle inequality!  Any old sort order will do.
+ */
+int
+mxactMemberComparator(const void *arg1, const void *arg2)
+{
+	MultiXactMember member1 = *(const MultiXactMember *) arg1;
+	MultiXactMember member2 = *(const MultiXactMember *) arg2;
+
+	if (member1.xid > member2.xid)
+		return 1;
+	if (member1.xid < member2.xid)
+		return -1;
+	if (member1.status > member2.status)
+		return 1;
+	if (member1.status < member2.status)
+		return -1;
+	return 0;
+}
+
+/*
  * mXactCacheGetBySet
  *		returns a MultiXactId from the cache based on the set of
  *		TransactionIds that compose it, or InvalidMultiXactId if
@@ -1117,7 +1173,7 @@ retry:
  * NB: the passed xids[] array will be sorted in-place.
  */
 static MultiXactId
-mXactCacheGetBySet(int nxids, TransactionId *xids)
+mXactCacheGetBySet(int nxids, MultiXactMember *xids)
 {
 	mXactCacheEnt *entry;
 

@@ -22,6 +22,21 @@
 #define NUM_MXACTOFFSET_BUFFERS		8
 #define NUM_MXACTMEMBER_BUFFERS		16
 
+typedef enum MultiXactStatus
+{
+	MultiXactKeyShare,
+	MultiXactShare,
+	MultiXactUpdate,
+	MultiXactKeyUpdate
+} MultiXactStatus;
+
+typedef struct MultiXactMember
+{
+	TransactionId	xid;
+	MultiXactStatus	status;
+} MultiXactMember;
+
+
 /* ----------------
  *		multixact-related XLOG entries
  * ----------------
@@ -36,20 +51,22 @@ typedef struct xl_multixact_create
 	MultiXactId mid;			/* new MultiXact's ID */
 	MultiXactOffset moff;		/* its starting offset in members file */
 	int32		nxids;			/* number of member XIDs */
-	TransactionId xids[1];		/* VARIABLE LENGTH ARRAY */
+	MultiXactMember xids[FLEXIBLE_ARRAY_MEMBER];
 } xl_multixact_create;
 
 #define MinSizeOfMultiXactCreate offsetof(xl_multixact_create, xids)
 
 
-extern MultiXactId MultiXactIdCreate(TransactionId xid1, TransactionId xid2);
-extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid);
+extern MultiXactId MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
+									 TransactionId xid2, MultiXactStatus status2);
+extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
+									 MultiXactStatus status);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
 extern void MultiXactIdWait(MultiXactId multi);
 extern bool ConditionalMultiXactIdWait(MultiXactId multi);
 extern void MultiXactIdSetOldestMember(void);
-extern int	GetMultiXactIdMembers(MultiXactId multi, TransactionId **xids);
+extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids);
 
 extern void AtEOXact_MultiXact(void);
 extern void AtPrepare_MultiXact(void);
