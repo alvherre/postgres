@@ -84,23 +84,31 @@
 #define MultiXactIdToOffsetEntry(xid) \
 	((xid) % (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
 
-
 /*
- * The situation for members is a bit more complex: we first store a bitmask
- * containing the MultiXactStatus flag of each comprising TransactionId, two
- * bits per Xid (as many full bytes as necessary to store bit pairs for all
- * Xids); then the TransactionId themselves.  This is more compact than storing
- * the flags together with each TransactionId.
- *
- * FIXME -- this is stupid (and impossible to implement anyway).  Just use
- * constant positions, and reuse flag bytes for members of different mxacts.
+ * The situation for members is a bit more complex: we need to store two
+ * additional flag bits for each TransactionId.  To do this without getting
+ * into alignment issues, we store four bytes of flags (so 16 bit pairs), and
+ * then the corresponding 16 Xids.  Each such 17-word (68-byte) set we call a
+ * "group", and are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep
+ * 120 groups per page.  This wastes 32 bytes per page, but that's OK --
+ * simplicity trumps efficiency here.
  */
-#define MULTIXACT_MEMBERS_PER_PAGE ((4 * BLCKSZ) / (4 * sizeof(TransactionId) + 1))
+#define MULTIXACT_FLAGS_PER_BYTE			4
+#define MULTIXACT_FLAGBYTES_PER_GROUP		4
 
-#define MXOffsetToMemberPage(xid) \
-	((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_PAGE)
+#define MULTIXACT_MEMBERS_PER_MEMBERGROUP	\
+	(MULTIXACT_FLAGBYTES_PER_GROUP * MULTIXACT_FLAGS_PER_BYTE)
+#define MULTIXACT_MEMBERGROUPS_PER_PAGE \
+	(BLCKSZ / (MULTIXACT_MEMBERS_PER_MEMBERGROUP * MULTIXACT_FLAGBYTES_PER_GROUP + \
+			   MULTIXACT_MEMBERS_PER_MEMBERGROUP / MULTIXACT_FLAGS_PER_BYTE))
+#define MULTIXACT_MEMBERS_PER_PAGE	(MULTIXACT_MEMBERGROUPS_PER_PAGE * MULTIXACT_MEMBERS_PER_MEMBERGROUP)
+
+#define MXOffsetToMemberPage(xid)	((xid) / MULTIXACT_MEMBERS_PER_PAGE)
+
 #define MXOffsetToMemberEntry(xid) \
-	((xid) % (TransactionId) MULTIXACT_MEMBERS_PER_PAGE)
+	(MULTIXACT_FLAGBYTES_PER_GROUP * \
+	 (1 + ((xid) / MULTIXACT_MEMBERS_PER_MEMBERGROUP) % MULTIXACT_MEMBERGROUPS_PER_PAGE) + \
+	 ((xid) % MULTIXACT_MEMBERS_PER_PAGE) * sizeof(TransactionId))
 
 
 /*
