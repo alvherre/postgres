@@ -93,22 +93,31 @@
  * 120 groups per page.  This wastes 32 bytes per page, but that's OK --
  * simplicity trumps efficiency here.
  */
+/* how many members' flag bits can we store in a byte? */
 #define MULTIXACT_FLAGS_PER_BYTE			4
+/* how many full bytes of flags are there in a group? */
 #define MULTIXACT_FLAGBYTES_PER_GROUP		4
-
 #define MULTIXACT_MEMBERS_PER_MEMBERGROUP	\
 	(MULTIXACT_FLAGBYTES_PER_GROUP * MULTIXACT_FLAGS_PER_BYTE)
-#define MULTIXACT_MEMBERGROUPS_PER_PAGE \
-	(BLCKSZ / (MULTIXACT_MEMBERS_PER_MEMBERGROUP * MULTIXACT_FLAGBYTES_PER_GROUP + \
-			   MULTIXACT_MEMBERS_PER_MEMBERGROUP / MULTIXACT_FLAGS_PER_BYTE))
-#define MULTIXACT_MEMBERS_PER_PAGE	(MULTIXACT_MEMBERGROUPS_PER_PAGE * MULTIXACT_MEMBERS_PER_MEMBERGROUP)
+#define MULTIXACT_MEMBERGROUP_SIZE \
+	(sizeof(TransactionId) * MULTIXACT_MEMBERS_PER_MEMBERGROUP + MULTIXACT_FLAGBYTES_PER_GROUP)
+#define MULTIXACT_MEMBERGROUPS_PER_PAGE (BLCKSZ / MULTIXACT_MEMBERGROUP_SIZE)
+#define MULTIXACT_MEMBERS_PER_PAGE	\
+	(MULTIXACT_MEMBERGROUPS_PER_PAGE * MULTIXACT_MEMBERS_PER_MEMBERGROUP)
 
-#define MXOffsetToMemberPage(xid)	((xid) / MULTIXACT_MEMBERS_PER_PAGE)
+/* page in which a member is to be found */
+#define MXOffsetToMemberPage(xid) \
+    ((xid) / MULTIXACT_MEMBERS_PER_PAGE)
 
+/* Location (offset within page) of flag word for a given member */
+#define MXOffsetGetFlagsOffset(xid) \
+	((((xid) / MULTIXACT_MEMBERS_PER_MEMBERGROUP) % MULTIXACT_MEMBERGROUPS_PER_PAGE) * \
+	 MULTIXACT_MEMBERGROUP_SIZE)
+
+/* Location (offset within page) of TransactionId of given member */
 #define MXOffsetToMemberEntry(xid) \
-	(MULTIXACT_FLAGBYTES_PER_GROUP * \
-	 (1 + ((xid) / MULTIXACT_MEMBERS_PER_MEMBERGROUP) % MULTIXACT_MEMBERGROUPS_PER_PAGE) + \
-	 ((xid) % MULTIXACT_MEMBERS_PER_PAGE) * sizeof(TransactionId))
+	(MXOffsetGetFlagsOffset(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
+	 ((xid) % MULTIXACT_MEMBERS_PER_MEMBERGROUP) * sizeof(TransactionId))
 
 
 /*
@@ -817,6 +826,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 	for (i = 0; i < nxids; i++, offset++)
 	{
 		TransactionId *memberptr;
+		uint32		*flagsptr;
 
 		pageno = MXOffsetToMemberPage(offset);
 		entryno = MXOffsetToMemberEntry(offset);
