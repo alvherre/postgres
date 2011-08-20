@@ -114,6 +114,10 @@
 	((((xid) / MULTIXACT_MEMBERS_PER_MEMBERGROUP) % MULTIXACT_MEMBERGROUPS_PER_PAGE) * \
 	 MULTIXACT_MEMBERGROUP_SIZE)
 
+/* Bitmask to AND with flag word to obtain flag bits for a given member */
+#define MXOffsetGetFlagBits(xid) \
+	(0x3 << ((xid) % MULTIXACT_MEMBERS_PER_MEMBERGROUP) * (8 / MULTIXACT_FLAGS_PER_BYTE))
+
 /* Location (offset within page) of TransactionId of given member */
 #define MXOffsetToMemberEntry(xid) \
 	(MXOffsetGetFlagsOffset(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
