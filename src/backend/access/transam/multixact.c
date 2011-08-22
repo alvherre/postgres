@@ -799,7 +799,7 @@ CreateMultiXactId(int nmembers, MultiXactMember *members)
  *
  * This is broken out of CreateMultiXactId so that xlog replay can use it.
  * 
- * XXX -- needs fixed
+ * FIXME -- needs fixed
  */
 static void
 RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
