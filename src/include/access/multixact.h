@@ -50,11 +50,11 @@ typedef struct xl_multixact_create
 {
 	MultiXactId mid;			/* new MultiXact's ID */
 	MultiXactOffset moff;		/* its starting offset in members file */
-	int32		nxids;			/* number of member XIDs */
-	MultiXactMember xids[FLEXIBLE_ARRAY_MEMBER];
+	int32		nmembers;		/* number of member XIDs */
+	MultiXactMember members[FLEXIBLE_ARRAY_MEMBER];
 } xl_multixact_create;
 
-#define MinSizeOfMultiXactCreate offsetof(xl_multixact_create, xids)
+#define MinSizeOfMultiXactCreate offsetof(xl_multixact_create, members)
 
 
 extern MultiXactId MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
