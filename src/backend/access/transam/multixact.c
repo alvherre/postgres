@@ -91,14 +91,18 @@
  * then the corresponding 16 Xids.  Each such 17-word (68-byte) set we call a
  * "group", and are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep
  * 120 groups per page.  This wastes 32 bytes per page, but that's OK --
- * simplicity trumps efficiency here.
+ * simplicity (and performance) trumps space efficiency here.
  */
-/* how many members' flag bits can we store in a byte? */
-#define MULTIXACT_FLAGS_PER_BYTE			4
+/* We need two bits per xact, so four xacts fit in a byte */
+#define MXACT_MEMBER_BITS_PER_XACT			2
+#define MXACT_MEMBER_FLAGS_PER_BYTE			4
+#define MXACT_MEMBER_XACT_BITMASK	((1 << MXACT_MEMBER_BITS_PER_XACT) - 1)
+
 /* how many full bytes of flags are there in a group? */
 #define MULTIXACT_FLAGBYTES_PER_GROUP		4
 #define MULTIXACT_MEMBERS_PER_MEMBERGROUP	\
-	(MULTIXACT_FLAGBYTES_PER_GROUP * MULTIXACT_FLAGS_PER_BYTE)
+	(MULTIXACT_FLAGBYTES_PER_GROUP * MXACT_MEMBER_FLAGS_PER_BYTE)
+/* size in bytes of a complete group */
 #define MULTIXACT_MEMBERGROUP_SIZE \
 	(sizeof(TransactionId) * MULTIXACT_MEMBERS_PER_MEMBERGROUP + MULTIXACT_FLAGBYTES_PER_GROUP)
 #define MULTIXACT_MEMBERGROUPS_PER_PAGE (BLCKSZ / MULTIXACT_MEMBERGROUP_SIZE)
@@ -106,21 +110,20 @@
 	(MULTIXACT_MEMBERGROUPS_PER_PAGE * MULTIXACT_MEMBERS_PER_MEMBERGROUP)
 
 /* page in which a member is to be found */
-#define MXOffsetToMemberPage(xid) \
-    ((xid) / MULTIXACT_MEMBERS_PER_PAGE)
+#define MXOffsetToMemberPage(xid) ((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_PAGE)
 
 /* Location (offset within page) of flag word for a given member */
-#define MXOffsetGetFlagsOffset(xid) \
-	((((xid) / MULTIXACT_MEMBERS_PER_MEMBERGROUP) % MULTIXACT_MEMBERGROUPS_PER_PAGE) * \
-	 MULTIXACT_MEMBERGROUP_SIZE)
+#define MXOffsetToFlagsPgIndex(xid) \
+	((((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP) % \
+	  (TransactionId) MULTIXACT_MEMBERGROUPS_PER_PAGE) * \
+	 (TransactionId) MULTIXACT_MEMBERGROUP_SIZE)
+#define MXOffsetToFlagsWordOffset(xid) \
+	((xid) % (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP)
 
-/* Bitmask to AND with flag word to obtain flag bits for a given member */
-#define MXOffsetGetFlagBits(xid) \
-	(0x3 << ((xid) % MULTIXACT_MEMBERS_PER_MEMBERGROUP) * (8 / MULTIXACT_FLAGS_PER_BYTE))
 
 /* Location (offset within page) of TransactionId of given member */
 #define MXOffsetToMemberEntry(xid) \
-	(MXOffsetGetFlagsOffset(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
+	(MXOffsetToFlagsPgIndex(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
 	 ((xid) % MULTIXACT_MEMBERS_PER_MEMBERGROUP) * sizeof(TransactionId))
 
 
@@ -310,7 +313,7 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
 
 	newMulti = CreateMultiXactId(2, members);
 
-	/* FIXME -- need better debug? */
+	/* XXX -- need better debug? */
 	debug_elog5(DEBUG2, "Create: returning %u for %u, %u",
 				newMulti, xid1, xid2);
 
@@ -708,8 +711,6 @@ ConditionalMultiXactIdWait(MultiXactId multi)
  * given TransactionIds as members.  Returns the newly created MultiXactId.
  *
  * NB: the passed members[] array will be sorted in-place.
- *
- * FIXME -- this needs fixed
  */
 static MultiXactId
 CreateMultiXactId(int nmembers, MultiXactMember *members)
@@ -798,8 +799,6 @@ CreateMultiXactId(int nmembers, MultiXactMember *members)
  *		Write info about a new multixact into the offsets and members files
  *
  * This is broken out of CreateMultiXactId so that xlog replay can use it.
- * 
- * FIXME -- needs fixed
  */
 static void
 RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
@@ -842,10 +841,15 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 	for (i = 0; i < nmembers; i++, offset++)
 	{
 		TransactionId *memberptr;
-		uint32		*flagsptr;
+		uint32	   *flagsptr;
+		uint32		flagsval;
+		int			bshift;
+		int			flagsoff;
 
 		pageno = MXOffsetToMemberPage(offset);
 		entryno = MXOffsetToMemberEntry(offset);
+		flagsoff = MXOffsetToFlagsPgIndex(offset);
+		bshift = MXOffsetToFlagsWordOffset(offset);
 
 		if (pageno != prev_pageno)
 		{
@@ -858,8 +862,16 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		memberptr += entryno;
 
 		*memberptr = members[i].xid;
-		/* FIXME -- update the status as well */
 
+		flagsptr = (uint32 *)
+			MultiXactMemberCtl->shared->page_buffer[slotno];
+		flagsptr += flagsoff;
+
+		flagsval = *flagsptr;
+		flagsval &= ~(((1 << MXACT_MEMBER_BITS_PER_XACT) - 1) << bshift);
+		flagsval |= (members[i].status << bshift);
+		*flagsptr = flagsval;
+		
 		MultiXactMemberCtl->shared->page_dirty[slotno] = true;
 	}
 
@@ -942,7 +954,6 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 */
 	(MultiXactState->nextMXact)++;
 
-	/* FIXME -- need to skip this many xids ... need to coordinate with next reader */
 	MultiXactState->nextOffset += nmembers;
 
 	LWLockRelease(MultiXactGenLock);
@@ -1133,6 +1144,9 @@ retry:
 	for (i = 0; i < length; i++, offset++)
 	{
 		TransactionId *xactptr;
+		uint32	   *flagsptr;
+		int			flagsoff;
+		int			bshift;
 
 		pageno = MXOffsetToMemberPage(offset);
 		entryno = MXOffsetToMemberEntry(offset);
@@ -1154,8 +1168,13 @@ retry:
 			continue;
 		}
 
+		flagsoff = MXOffsetToFlagsPgIndex(offset);
+		bshift = MXOffsetToFlagsWordOffset(offset);
+		flagsptr = (uint32 *) MultiXactMemberCtl->shared->page_buffer[slotno];
+		flagsptr += flagsoff;
+
 		ptr[truelength].xid = *xactptr;
-		ptr[truelength].status = 0;		/* FIXME */
+		ptr[truelength].status = (*flagsptr >> bshift) & MXACT_MEMBER_XACT_BITMASK;
 		truelength++;
 	}
 
