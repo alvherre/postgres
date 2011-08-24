@@ -2182,7 +2182,7 @@ l1:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait);
+			MultiXactIdWait((MultiXactId) xwait, MultiXactKeyUpdate);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2557,7 +2557,7 @@ l2:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait);
+			MultiXactIdWait((MultiXactId) xwait, MultiXactKeyUpdate);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -3290,17 +3290,21 @@ l3:
 		}
 		else if (infomask & HEAP_XMAX_IS_MULTI)
 		{
+			MultiXactStatus status = mode == LockTupleShared ? MultiXactShare :
+				mode == LockTupleExclusive ? MultiXactKeyUpdate :
+				MultiXactInvalidStatus;
+
 			/* wait for multixact to end */
 			if (nowait)
 			{
-				if (!ConditionalMultiXactIdWait((MultiXactId) xwait))
+				if (!ConditionalMultiXactIdWait((MultiXactId) xwait, status))
 					ereport(ERROR,
 							(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 					errmsg("could not obtain lock on row in relation \"%s\"",
 						   RelationGetRelationName(relation))));
 			}
 			else
-				MultiXactIdWait((MultiXactId) xwait);
+				MultiXactIdWait((MultiXactId) xwait, status);
 
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -3457,7 +3461,7 @@ l3:
 				 * If the XMAX is already a MultiXactId, then we need to
 				 * expand it to include our own TransactionId.
 				 */
-				xid = MultiXactIdExpand((MultiXactId) xmax, xid);
+				xid = MultiXactIdExpand((MultiXactId) xmax, xid, MultiXactShare);
 				new_infomask |= HEAP_XMAX_IS_MULTI;
 			}
 			else if (TransactionIdIsInProgress(xmax))
@@ -3467,7 +3471,11 @@ l3:
 				 * create a new MultiXactId that includes both the old locker
 				 * and our own TransactionId.
 				 */
-				xid = MultiXactIdCreate(xmax, xid);
+				xid = MultiXactIdCreate(xmax,
+										HEAP_XMAX_EXCL_LOCK ? MultiXactKeyUpdate :
+										HEAP_XMAX_SHARED_LOCK ? MultiXactShare :
+										MultiXactInvalidStatus,
+										xid, MultiXactShare);
 				new_infomask |= HEAP_XMAX_IS_MULTI;
 			}
 			else

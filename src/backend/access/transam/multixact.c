@@ -235,7 +235,20 @@ typedef struct mXactCacheEnt
 static mXactCacheEnt *MXactCache = NULL;
 static MemoryContext MXactContext = NULL;
 
+typedef int MXACT_LOCK_MASK;
+static const MXACT_LOCK_MASK MultiXactConflicts[] =
+{
+	0,
+	/* MultiXactShare */
+	(1 << MultiXactKeyUpdate),
+	/* MultiXactKeyUpdate */
+	(1 << MultiXactShare) | (1 << MultiXactKeyUpdate)
+};
 
+#define MXACT_STATUSBIT(status) (1 << (status))
+
+
+#define MULTIXACT_DEBUG
 #ifdef MULTIXACT_DEBUG
 #define debug_elog2(a,b) elog(a,b)
 #define debug_elog3(a,b,c) elog(a,b,c)
@@ -254,6 +267,8 @@ static MultiXactId CreateMultiXactId(int nmembers, MultiXactMember *members);
 static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 				   int nmembers, MultiXactMember *members);
 static MultiXactId GetNewMultiXactId(int nmembers, MultiXactOffset *offset);
+static bool MultiXactStatusConflict(MultiXactStatus status1,
+						MultiXactStatus status2);
 
 /* MultiXact cache management */
 static int mxactMemberComparator(const void *arg1, const void *arg2);
@@ -297,6 +312,8 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
 
 	AssertArg(TransactionIdIsValid(xid1));
 	AssertArg(TransactionIdIsValid(xid2));
+	AssertArg(status1 != MultiXactInvalidStatus);
+	AssertArg(status2 != MultiXactInvalidStatus);
 
 	Assert(!TransactionIdEquals(xid1, xid2));
 
@@ -620,6 +637,15 @@ MultiXactIdSetOldestVisible(void)
 	}
 }
 
+
+static bool
+MultiXactStatusConflict(MultiXactStatus status1, MultiXactStatus status2)
+{
+	if (MultiXactConflicts[status1] & MXACT_STATUSBIT(status2))
+		return true;
+	return false;
+}
+
 /*
  * MultiXactIdWait
  *		Sleep on a MultiXactId.
@@ -629,17 +655,15 @@ MultiXactIdSetOldestVisible(void)
  * this would not merely be useless but would lead to Assert failure inside
  * XactLockTableWait.  By the time this returns, it is certain that all
  * transactions *of other backends* that were members of the MultiXactId
- * are dead (and no new ones can have been added, since it is not legal
- * to add members to an existing MultiXactId).
+ * that conflict with the requested status are dead (and no new ones can have
+ * been added, since it is not legal to add members to an existing
+ * MultiXactId).
  *
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
- *
- * FIXME -- this needs thought.  A MultiXactStatus should probably be passed
- * as argument, and we only sleep on a member if its status conflict with ours.
  */
 void
-MultiXactIdWait(MultiXactId multi)
+MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 {
 	MultiXactMember *members;
 	int			nmembers;
@@ -656,8 +680,12 @@ MultiXactIdWait(MultiXactId multi)
 
 			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
 						i, member);
-			if (!TransactionIdIsCurrentTransactionId(member))
-				XactLockTableWait(member);
+			if (TransactionIdIsCurrentTransactionId(member))
+				continue;
+			if (!MultiXactStatusConflict(members[i].status, status))
+				continue;
+
+			XactLockTableWait(member);
 		}
 
 		pfree(members);
@@ -671,7 +699,7 @@ MultiXactIdWait(MultiXactId multi)
  * FIXME -- as above
  */
 bool
-ConditionalMultiXactIdWait(MultiXactId multi)
+ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 {
 	bool		result = true;
 	MultiXactMember *members;
@@ -689,12 +717,13 @@ ConditionalMultiXactIdWait(MultiXactId multi)
 
 			debug_elog4(DEBUG2, "ConditionalMultiXactIdWait: trying %d (%u)",
 						i, member);
-			if (!TransactionIdIsCurrentTransactionId(member))
-			{
-				result = ConditionalXactLockTableWait(member);
-				if (!result)
-					break;
-			}
+			if (TransactionIdIsCurrentTransactionId(member))
+				continue;
+			if (!MultiXactStatusConflict(members[i].status, status))
+				continue;
+			result = ConditionalXactLockTableWait(member);
+			if (!result)
+				break;
 		}
 
 		pfree(members);
@@ -1335,15 +1364,32 @@ mXactCachePut(MultiXactId multi, int nmembers, MultiXactMember *members)
 
 #ifdef MULTIXACT_DEBUG
 static char *
+mxstatus_to_string(MultiXactStatus status)
+{
+	switch (status)
+	{
+		case MultiXactShare:
+			return "sh";
+		case MultiXactKeyUpdate:
+			return "keyup";
+		default:
+			elog(ERROR, "unrecognized multixact status %d", status);
+			return "";
+	}
+}
+
+static char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
 	char	   *str = palloc(15 * (nmembers + 1) + 4);
 	int			i;
 
-	snprintf(str, 47, "%u %d[%u", multi, nmembers, members[0]);
+	snprintf(str, 47, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
+			 mxstatus_to_string(members[0].status));
 
 	for (i = 1; i < nmembers; i++)
-		snprintf(str + strlen(str), 17, ", %u", members[i]);
+		snprintf(str + strlen(str), 17, ", %u (%s)", members[i].xid,
+				 mxstatus_to_string(members[i].status));
 
 	strcat(str, "]");
 	return str;

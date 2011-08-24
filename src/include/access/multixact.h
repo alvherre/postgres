@@ -24,9 +24,8 @@
 
 typedef enum MultiXactStatus
 {
-	MultiXactKeyShare,
+	MultiXactInvalidStatus = 0,
 	MultiXactShare,
-	MultiXactUpdate,
 	MultiXactKeyUpdate
 } MultiXactStatus;
 
@@ -63,8 +62,8 @@ extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
 									 MultiXactStatus status);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
-extern void MultiXactIdWait(MultiXactId multi);
-extern bool ConditionalMultiXactIdWait(MultiXactId multi);
+extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status);
+extern bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status);
 extern void MultiXactIdSetOldestMember(void);
 extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids);
 
