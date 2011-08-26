@@ -120,8 +120,9 @@
 	((((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP) % \
 	  (TransactionId) MULTIXACT_MEMBERGROUPS_PER_PAGE) * \
 	 (TransactionId) MULTIXACT_MEMBERGROUP_SIZE)
-#define MXOffsetToFlagsByteIndex(xid) \
-	((xid) % (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP)
+#define MXOffsetToFlagsBitShift(xid) \
+	(((xid) % (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP) * \
+	 MXACT_MEMBER_BITS_PER_XACT)
 
 /* Location (byte offset within page) of TransactionId of given member */
 #define MXOffsetToMemberOffset(xid) \
@@ -879,7 +880,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		pageno = MXOffsetToMemberPage(offset);
 		memberoff = MXOffsetToMemberOffset(offset);
 		flagsoff = MXOffsetToFlagsOffset(offset);
-		bshift = MXOffsetToFlagsByteIndex(offset);
+		bshift = MXOffsetToFlagsBitShift(offset);
 
 		if (pageno != prev_pageno)
 		{
@@ -1197,7 +1198,7 @@ retry:
 		}
 
 		flagsoff = MXOffsetToFlagsOffset(offset);
-		bshift = MXOffsetToFlagsByteIndex(offset);
+		bshift = MXOffsetToFlagsBitShift(offset);
 		flagsptr = (uint32 *) (MultiXactMemberCtl->shared->page_buffer[slotno] + flagsoff);
 
 		ptr[truelength].xid = *xactptr;
