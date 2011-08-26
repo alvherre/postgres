@@ -92,6 +92,9 @@
  * "group", and are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep
  * 120 groups per page.  This wastes 32 bytes per page, but that's OK --
  * simplicity (and performance) trumps space efficiency here.
+ *
+ * Note that the "offset" macros work with byte offset, not array indexes, so
+ * arithmetic must be done using "char *" pointers.
  */
 /* We need two bits per xact, so four xacts fit in a byte */
 #define MXACT_MEMBER_BITS_PER_XACT			2
@@ -112,18 +115,17 @@
 /* page in which a member is to be found */
 #define MXOffsetToMemberPage(xid) ((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_PAGE)
 
-/* Location (offset within page) of flag word for a given member */
-#define MXOffsetToFlagsPgIndex(xid) \
+/* Location (byte offset within page) of flag word for a given member */
+#define MXOffsetToFlagsOffset(xid) \
 	((((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP) % \
 	  (TransactionId) MULTIXACT_MEMBERGROUPS_PER_PAGE) * \
 	 (TransactionId) MULTIXACT_MEMBERGROUP_SIZE)
-#define MXOffsetToFlagsWordOffset(xid) \
+#define MXOffsetToFlagsByteIndex(xid) \
 	((xid) % (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP)
 
-
-/* Location (offset within page) of TransactionId of given member */
+/* Location (byte offset within page) of TransactionId of given member */
 #define MXOffsetToMemberEntry(xid) \
-	(MXOffsetToFlagsPgIndex(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
+	(MXOffsetToFlagsOffset(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
 	 ((xid) % MULTIXACT_MEMBERS_PER_MEMBERGROUP) * sizeof(TransactionId))
 
 
@@ -221,8 +223,6 @@ static MultiXactId *OldestVisibleMXactId;
  *
  * We allocate the cache entries in a memory context that is deleted at
  * transaction end, so we don't need to do retail freeing of entries.
- *
- * XXX we could find a more compact way to store this.
  */
 typedef struct mXactCacheEnt
 {
@@ -877,8 +877,8 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 
 		pageno = MXOffsetToMemberPage(offset);
 		entryno = MXOffsetToMemberEntry(offset);
-		flagsoff = MXOffsetToFlagsPgIndex(offset);
-		bshift = MXOffsetToFlagsWordOffset(offset);
+		flagsoff = MXOffsetToFlagsOffset(offset);
+		bshift = MXOffsetToFlagsByteIndex(offset);
 
 		if (pageno != prev_pageno)
 		{
@@ -887,14 +887,12 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		}
 
 		memberptr = (TransactionId *)
-			MultiXactMemberCtl->shared->page_buffer[slotno];
-		memberptr += entryno;
+			(MultiXactMemberCtl->shared->page_buffer[slotno] + entryno);
 
 		*memberptr = members[i].xid;
 
 		flagsptr = (uint32 *)
-			MultiXactMemberCtl->shared->page_buffer[slotno];
-		flagsptr += flagsoff;
+			(MultiXactMemberCtl->shared->page_buffer[slotno] + flagsoff);
 
 		flagsval = *flagsptr;
 		flagsval &= ~(((1 << MXACT_MEMBER_BITS_PER_XACT) - 1) << bshift);
@@ -1187,8 +1185,7 @@ retry:
 		}
 
 		xactptr = (TransactionId *)
-			MultiXactMemberCtl->shared->page_buffer[slotno];
-		xactptr += entryno;
+			(MultiXactMemberCtl->shared->page_buffer[slotno] + entryno);
 
 		if (!TransactionIdIsValid(*xactptr))
 		{
@@ -1197,10 +1194,9 @@ retry:
 			continue;
 		}
 
-		flagsoff = MXOffsetToFlagsPgIndex(offset);
-		bshift = MXOffsetToFlagsWordOffset(offset);
-		flagsptr = (uint32 *) MultiXactMemberCtl->shared->page_buffer[slotno];
-		flagsptr += flagsoff;
+		flagsoff = MXOffsetToFlagsOffset(offset);
+		bshift = MXOffsetToFlagsByteIndex(offset);
+		flagsptr = (uint32 *) (MultiXactMemberCtl->shared->page_buffer[slotno] + flagsoff);
 
 		ptr[truelength].xid = *xactptr;
 		ptr[truelength].status = (*flagsptr >> bshift) & MXACT_MEMBER_XACT_BITMASK;
@@ -1738,9 +1734,9 @@ StartupMultiXact(void)
 		int			slotno;
 		TransactionId *xidptr;
 
+		/* FIXME -- this needs fixed .. */
 		slotno = SimpleLruReadPage(MultiXactMemberCtl, pageno, true, offset);
-		xidptr = (TransactionId *) MultiXactMemberCtl->shared->page_buffer[slotno];
-		xidptr += entryno;
+		xidptr = (TransactionId *) (MultiXactMemberCtl->shared->page_buffer[slotno] + entryno);
 
 		MemSet(xidptr, 0, BLCKSZ - (entryno * sizeof(TransactionId)));
 
@@ -1910,6 +1906,7 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 		/*
 		 * Only zero when at first entry of a page.
 		 */
+		/* FIXME -- needs fixed */
 		entryno = MXOffsetToMemberEntry(offset);
 		if (entryno == 0)
 		{
