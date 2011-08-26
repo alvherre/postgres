@@ -22,12 +22,13 @@
 #define NUM_MXACTOFFSET_BUFFERS		8
 #define NUM_MXACTMEMBER_BUFFERS		16
 
-typedef enum MultiXactStatus
-{
-	MultiXactInvalidStatus = 0,
-	MultiXactShare,
-	MultiXactKeyUpdate
-} MultiXactStatus;
+/* Possible multixact lock modes ("status") */
+typedef int MultiXactStatus;
+
+#define MULTIXACT_STATUS_KEY_SHARE		0x00
+#define MULTIXACT_STATUS_SHARE			0x01
+#define MULTIXACT_STATUS_UPDATE			0x02
+#define MULTIXACT_STATUS_KEY_UPDATE		0x03
 
 typedef struct MultiXactMember
 {

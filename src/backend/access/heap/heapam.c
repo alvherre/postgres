@@ -2182,7 +2182,7 @@ l1:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, MultiXactKeyUpdate);
+			MultiXactIdWait((MultiXactId) xwait, MULTIXACT_STATUS_KEY_UPDATE);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2557,7 +2557,7 @@ l2:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, MultiXactKeyUpdate);
+			MultiXactIdWait((MultiXactId) xwait, MULTIXACT_STATUS_KEY_UPDATE);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -3290,9 +3290,21 @@ l3:
 		}
 		else if (infomask & HEAP_XMAX_IS_MULTI)
 		{
-			MultiXactStatus status = mode == LockTupleShared ? MultiXactShare :
-				mode == LockTupleExclusive ? MultiXactKeyUpdate :
-				MultiXactInvalidStatus;
+			MultiXactStatus status;
+		   
+			switch (mode)
+			{
+				case LockTupleShared:
+					status = MULTIXACT_STATUS_SHARE;
+					break;
+				case LockTupleExclusive:
+					status = MULTIXACT_STATUS_KEY_UPDATE;
+					break;
+				default:
+					status = 0;		/* keep compiler quiet */
+					elog(ERROR, "unrecognized lock mode %d", mode);
+					break;
+			}
 
 			/* wait for multixact to end */
 			if (nowait)
@@ -3461,7 +3473,7 @@ l3:
 				 * If the XMAX is already a MultiXactId, then we need to
 				 * expand it to include our own TransactionId.
 				 */
-				xid = MultiXactIdExpand((MultiXactId) xmax, xid, MultiXactShare);
+				xid = MultiXactIdExpand((MultiXactId) xmax, xid, MULTIXACT_STATUS_SHARE);
 				new_infomask |= HEAP_XMAX_IS_MULTI;
 			}
 			else if (TransactionIdIsInProgress(xmax))
@@ -3471,11 +3483,19 @@ l3:
 				 * create a new MultiXactId that includes both the old locker
 				 * and our own TransactionId.
 				 */
-				xid = MultiXactIdCreate(xmax,
-										HEAP_XMAX_EXCL_LOCK ? MultiXactKeyUpdate :
-										HEAP_XMAX_SHARED_LOCK ? MultiXactShare :
-										MultiXactInvalidStatus,
-										xid, MultiXactShare);
+				MultiXactStatus status;
+
+				if (old_infomask & HEAP_XMAX_EXCL_LOCK)
+					status = MULTIXACT_STATUS_KEY_UPDATE;
+				else if (old_infomask & HEAP_XMAX_SHARED_LOCK)
+					status = MULTIXACT_STATUS_SHARE;
+				else
+				{
+					status = 0;		/* keep compiler quiet */
+					elog(ERROR, "no lock bit found on old infomask %u", old_infomask);
+				}
+
+				xid = MultiXactIdCreate(xmax, status, xid, MULTIXACT_STATUS_SHARE);
 				new_infomask |= HEAP_XMAX_IS_MULTI;
 			}
 			else

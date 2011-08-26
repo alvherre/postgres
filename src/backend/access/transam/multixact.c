@@ -235,18 +235,22 @@ typedef struct mXactCacheEnt
 static mXactCacheEnt *MXactCache = NULL;
 static MemoryContext MXactContext = NULL;
 
-typedef int MXACT_LOCK_MASK;
-static const MXACT_LOCK_MASK MultiXactConflicts[] =
+/* status conflict table */
+static const int MultiXactConflicts[4][4] =
 {
-	0,
-	/* MultiXactShare */
-	(1 << MultiXactKeyUpdate),
-	/* MultiXactKeyUpdate */
-	(1 << MultiXactShare) | (1 << MultiXactKeyUpdate)
+	{	/* KEY_SHARE */
+		0, 0, 0, 1
+	},
+	{	/* SHARE */
+		0, 0, 1, 1
+	},
+	{	/* UPDATE */
+		0, 1, 1, 1
+	},
+	{	/* KEY_UPDATE */
+		1, 1, 1, 1
+	}
 };
-
-#define MXACT_STATUSBIT(status) (1 << (status))
-
 
 #define MULTIXACT_DEBUG
 #ifdef MULTIXACT_DEBUG
@@ -312,8 +316,6 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
 
 	AssertArg(TransactionIdIsValid(xid1));
 	AssertArg(TransactionIdIsValid(xid2));
-	AssertArg(status1 != MultiXactInvalidStatus);
-	AssertArg(status2 != MultiXactInvalidStatus);
 
 	Assert(!TransactionIdEquals(xid1, xid2));
 
@@ -641,9 +643,7 @@ MultiXactIdSetOldestVisible(void)
 static bool
 MultiXactStatusConflict(MultiXactStatus status1, MultiXactStatus status2)
 {
-	if (MultiXactConflicts[status1] & MXACT_STATUSBIT(status2))
-		return true;
-	return false;
+	return MultiXactConflicts[status1][status2];
 }
 
 /*
@@ -1368,9 +1368,13 @@ mxstatus_to_string(MultiXactStatus status)
 {
 	switch (status)
 	{
-		case MultiXactShare:
+		case MULTIXACT_STATUS_KEY_SHARE:
+			return "keysh";
+		case MULTIXACT_STATUS_SHARE:
 			return "sh";
-		case MultiXactKeyUpdate:
+		case MULTIXACT_STATUS_UPDATE:
+			return "upd";
+		case MULTIXACT_STATUS_KEY_UPDATE:
 			return "keyup";
 		default:
 			elog(ERROR, "unrecognized multixact status %d", status);
