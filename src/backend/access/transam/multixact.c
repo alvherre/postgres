@@ -696,8 +696,6 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 /*
  * ConditionalMultiXactIdWait
  *		As above, but only lock if we can get the lock without blocking.
- *
- * FIXME -- as above
  */
 bool
 ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status)
@@ -1731,17 +1729,25 @@ StartupMultiXact(void)
 	 * Zero out the remainder of the current members page.	See notes in
 	 * StartupCLOG() for motivation.
 	 */
-	entryno = MXOffsetToMemberOffset(offset);
-	if (entryno != 0)
+	flagsoff = MXOffsetToFlagsOffset(offset);
+	if (flagsoff != 0)
 	{
 		int			slotno;
 		TransactionId *xidptr;
+		int			memberoff;
 
-		/* FIXME -- this needs fixed .. */
+		memberoff = MXOffsetToMemberOffset(offset);
 		slotno = SimpleLruReadPage(MultiXactMemberCtl, pageno, true, offset);
-		xidptr = (TransactionId *) (MultiXactMemberCtl->shared->page_buffer[slotno] + entryno);
+		xidptr = (TransactionId *)
+			(MultiXactMemberCtl->shared->page_buffer[slotno] + memberoff);
 
-		MemSet(xidptr, 0, BLCKSZ - (entryno * sizeof(TransactionId)));
+		MemSet(xidptr, 0, BLCKSZ - memberoff);
+
+		/*
+		 * Note: we don't need to zero zero out the flag bits in the remaining
+		 * members of the current group, because they are always reset before
+		 * writing.
+		 */
 
 		MultiXactMemberCtl->shared->page_dirty[slotno] = true;
 	}
@@ -1904,14 +1910,15 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 	 */
 	while (nmembers > 0)
 	{
-		int			entryno;
+		int			flagsoff;
+		int			flagsbit;
 
 		/*
 		 * Only zero when at first entry of a page.
 		 */
-		/* FIXME -- needs fixed */
-		entryno = MXOffsetToMemberOffset(offset);
-		if (entryno == 0)
+		flagsoff = MXOffsetToFlagsOffset(offset);
+		flagsbit = MXOffsetToFlagsBitShift(offset);
+		if (flagsoff == 0 && flagsbit == 0)
 		{
 			int			pageno;
 
