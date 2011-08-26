@@ -124,7 +124,7 @@
 	((xid) % (TransactionId) MULTIXACT_MEMBERS_PER_MEMBERGROUP)
 
 /* Location (byte offset within page) of TransactionId of given member */
-#define MXOffsetToMemberEntry(xid) \
+#define MXOffsetToMemberOffset(xid) \
 	(MXOffsetToFlagsOffset(xid) + MULTIXACT_FLAGBYTES_PER_GROUP + \
 	 ((xid) % MULTIXACT_MEMBERS_PER_MEMBERGROUP) * sizeof(TransactionId))
 
@@ -874,9 +874,10 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		uint32		flagsval;
 		int			bshift;
 		int			flagsoff;
+		int			memberoff;
 
 		pageno = MXOffsetToMemberPage(offset);
-		entryno = MXOffsetToMemberEntry(offset);
+		memberoff = MXOffsetToMemberOffset(offset);
 		flagsoff = MXOffsetToFlagsOffset(offset);
 		bshift = MXOffsetToFlagsByteIndex(offset);
 
@@ -887,7 +888,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		}
 
 		memberptr = (TransactionId *)
-			(MultiXactMemberCtl->shared->page_buffer[slotno] + entryno);
+			(MultiXactMemberCtl->shared->page_buffer[slotno] + memberoff);
 
 		*memberptr = members[i].xid;
 
@@ -1174,9 +1175,10 @@ retry:
 		uint32	   *flagsptr;
 		int			flagsoff;
 		int			bshift;
+		int			memberoff;
 
 		pageno = MXOffsetToMemberPage(offset);
-		entryno = MXOffsetToMemberEntry(offset);
+		memberoff = MXOffsetToMemberOffset(offset);
 
 		if (pageno != prev_pageno)
 		{
@@ -1185,7 +1187,7 @@ retry:
 		}
 
 		xactptr = (TransactionId *)
-			(MultiXactMemberCtl->shared->page_buffer[slotno] + entryno);
+			(MultiXactMemberCtl->shared->page_buffer[slotno] + memberoff);
 
 		if (!TransactionIdIsValid(*xactptr))
 		{
@@ -1728,7 +1730,7 @@ StartupMultiXact(void)
 	 * Zero out the remainder of the current members page.	See notes in
 	 * StartupCLOG() for motivation.
 	 */
-	entryno = MXOffsetToMemberEntry(offset);
+	entryno = MXOffsetToMemberOffset(offset);
 	if (entryno != 0)
 	{
 		int			slotno;
@@ -1907,7 +1909,7 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 		 * Only zero when at first entry of a page.
 		 */
 		/* FIXME -- needs fixed */
-		entryno = MXOffsetToMemberEntry(offset);
+		entryno = MXOffsetToMemberOffset(offset);
 		if (entryno == 0)
 		{
 			int			pageno;
