@@ -1837,7 +1837,7 @@ preprocess_rowmarks(PlannerInfo *root)
 	if (parse->rowMarks)
 	{
 		/*
-		 * We've got trouble if FOR UPDATE/SHARE appears inside grouping,
+		 * We've got trouble if FOR UPDATE/SHARE/KEY LOCK appears inside grouping,
 		 * since grouping renders a reference to individual tuple CTIDs
 		 * invalid.  This is also checked at parse time, but that's
 		 * insufficient because of rule substitution, query pullup, etc.
@@ -1847,7 +1847,7 @@ preprocess_rowmarks(PlannerInfo *root)
 	else
 	{
 		/*
-		 * We only need rowmarks for UPDATE, DELETE, or FOR UPDATE/SHARE.
+		 * We only need rowmarks for UPDATE, DELETE, or FOR UPDATE/SHARE/KEY LOCK.
 		 */
 		if (parse->commandType != CMD_UPDATE &&
 			parse->commandType != CMD_DELETE)
@@ -1857,7 +1857,7 @@ preprocess_rowmarks(PlannerInfo *root)
 	/*
 	 * We need to have rowmarks for all base relations except the target. We
 	 * make a bitmapset of all base rels and then remove the items we don't
-	 * need or have FOR UPDATE/SHARE marks for.
+	 * need or have FOR UPDATE/SHARE/KEY LOCK marks for.
 	 */
 	rels = get_base_rel_indexes((Node *) parse->jointree);
 	if (parse->resultRelation)
@@ -1894,10 +1894,20 @@ preprocess_rowmarks(PlannerInfo *root)
 		newrc = makeNode(PlanRowMark);
 		newrc->rti = newrc->prti = rc->rti;
 		newrc->rowmarkId = ++(root->glob->lastRowMarkId);
-		if (rc->forUpdate)
-			newrc->markType = ROW_MARK_EXCLUSIVE;
-		else
-			newrc->markType = ROW_MARK_SHARE;
+		switch (rc->strength)
+		{
+			case LCS_FORUPDATE:
+				newrc->markType = ROW_MARK_EXCLUSIVE;
+				break;
+			case LCS_FORSHARE:
+				newrc->markType = ROW_MARK_SHARE;
+				break;
+			case LCS_FORKEYLOCK:
+				newrc->markType = ROW_MARK_KEYLOCK;
+				break;
+			default:
+				elog(ERROR, "unsupported rowmark type %d", rc->strength);
+		}
 		newrc->noWait = rc->noWait;
 		newrc->isParent = false;
 

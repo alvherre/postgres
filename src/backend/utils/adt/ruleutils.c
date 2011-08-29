@@ -2857,12 +2857,24 @@ get_select_query_def(Query *query, deparse_context *context,
 			if (rc->pushedDown)
 				continue;
 
-			if (rc->forUpdate)
-				appendContextKeyword(context, " FOR UPDATE",
-									 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
-			else
-				appendContextKeyword(context, " FOR SHARE",
-									 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+			switch (rc->strength)
+			{
+				case LCS_FORKEYLOCK:
+					appendContextKeyword(context, " FOR KEY LOCK",
+										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+					break;
+				case LCS_FORSHARE:
+					appendContextKeyword(context, " FOR SHARE",
+										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+					break;
+				case LCS_FORUPDATE:
+					appendContextKeyword(context, " FOR UPDATE",
+										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+					break;
+				default:
+					elog(ERROR, "unrecognized row locking clause %d", rc->strength);
+			}
+
 			appendStringInfo(buf, " OF %s",
 							 quote_identifier(rte->eref->aliasname));
 			if (rc->noWait)

@@ -56,7 +56,7 @@ static void rewriteValuesRTE(RangeTblEntry *rte, Relation target_relation,
 static void rewriteTargetListUD(Query *parsetree, RangeTblEntry *target_rte,
 					Relation target_relation);
 static void markQueryForLocking(Query *qry, Node *jtnode,
-					bool forUpdate, bool noWait, bool pushedDown);
+					LockClauseStrength strength, bool noWait, bool pushedDown);
 static List *matchLocks(CmdType event, RuleLock *rulelocks,
 		   int varno, Query *parsetree);
 static Query *fireRIRrules(Query *parsetree, List *activeRIRs,
@@ -1402,8 +1402,8 @@ ApplyRetrieveRule(Query *parsetree,
 	rte->modifiedCols = NULL;
 
 	/*
-	 * If FOR UPDATE/SHARE of view, mark all the contained tables as implicit
-	 * FOR UPDATE/SHARE, the same as the parser would have done if the view's
+	 * If FOR UPDATE/SHARE/KEY LOCK of view, mark all the contained tables as implicit
+	 * FOR UPDATE/SHARE/KEY LOCK, the same as the parser would have done if the view's
 	 * subquery had been written out explicitly.
 	 *
 	 * Note: we don't consider forUpdatePushedDown here; such marks will be
@@ -1411,13 +1411,13 @@ ApplyRetrieveRule(Query *parsetree,
 	 */
 	if (rc != NULL)
 		markQueryForLocking(rule_action, (Node *) rule_action->jointree,
-							rc->forUpdate, rc->noWait, true);
+							rc->strength, rc->noWait, true);
 
 	return parsetree;
 }
 
 /*
- * Recursively mark all relations used by a view as FOR UPDATE/SHARE.
+ * Recursively mark all relations used by a view as FOR UPDATE/SHARE/KEY LOCK.
  *
  * This may generate an invalid query, eg if some sub-query uses an
  * aggregate.  We leave it to the planner to detect that.
@@ -1429,7 +1429,7 @@ ApplyRetrieveRule(Query *parsetree,
  */
 static void
 markQueryForLocking(Query *qry, Node *jtnode,
-					bool forUpdate, bool noWait, bool pushedDown)
+					LockClauseStrength strength, bool noWait, bool pushedDown)
 {
 	if (jtnode == NULL)
 		return;
@@ -1443,16 +1443,16 @@ markQueryForLocking(Query *qry, Node *jtnode,
 			/* ignore foreign tables */
 			if (rte->relkind != RELKIND_FOREIGN_TABLE)
 			{
-				applyLockingClause(qry, rti, forUpdate, noWait, pushedDown);
+				applyLockingClause(qry, rti, strength, noWait, pushedDown);
 				rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
 			}
 		}
 		else if (rte->rtekind == RTE_SUBQUERY)
 		{
-			applyLockingClause(qry, rti, forUpdate, noWait, pushedDown);
-			/* FOR UPDATE/SHARE of subquery is propagated to subquery's rels */
+			applyLockingClause(qry, rti, strength, noWait, pushedDown);
+			/* FOR UPDATE/SHARE/KEY LOCK of subquery is propagated to subquery's rels */
 			markQueryForLocking(rte->subquery, (Node *) rte->subquery->jointree,
-								forUpdate, noWait, true);
+								strength, noWait, true);
 		}
 		/* other RTE types are unaffected by FOR UPDATE */
 	}
@@ -1462,14 +1462,14 @@ markQueryForLocking(Query *qry, Node *jtnode,
 		ListCell   *l;
 
 		foreach(l, f->fromlist)
-			markQueryForLocking(qry, lfirst(l), forUpdate, noWait, pushedDown);
+			markQueryForLocking(qry, lfirst(l), strength, noWait, pushedDown);
 	}
 	else if (IsA(jtnode, JoinExpr))
 	{
 		JoinExpr   *j = (JoinExpr *) jtnode;
 
-		markQueryForLocking(qry, j->larg, forUpdate, noWait, pushedDown);
-		markQueryForLocking(qry, j->rarg, forUpdate, noWait, pushedDown);
+		markQueryForLocking(qry, j->larg, strength, noWait, pushedDown);
+		markQueryForLocking(qry, j->rarg, strength, noWait, pushedDown);
 	}
 	else
 		elog(ERROR, "unrecognized node type: %d",

@@ -2310,7 +2310,7 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 	/* make a clause we can pass down to subqueries to select all rels */
 	allrels = makeNode(LockingClause);
 	allrels->lockedRels = NIL;	/* indicates all rels */
-	allrels->forUpdate = lc->forUpdate;
+	allrels->strength = lc->strength;
 	allrels->noWait = lc->noWait;
 
 	if (lockedRels == NIL)
@@ -2329,12 +2329,12 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 					if (rte->relkind == RELKIND_FOREIGN_TABLE)
 						break;
 					applyLockingClause(qry, i,
-									   lc->forUpdate, lc->noWait, pushedDown);
+									   lc->strength, lc->noWait, pushedDown);
 					rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
 					break;
 				case RTE_SUBQUERY:
 					applyLockingClause(qry, i,
-									   lc->forUpdate, lc->noWait, pushedDown);
+									   lc->strength, lc->noWait, pushedDown);
 
 					/*
 					 * FOR UPDATE/SHARE of subquery is propagated to all of
@@ -2384,13 +2384,13 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
 											 rte->eref->aliasname),
 									  parser_errposition(pstate, thisrel->location)));
 							applyLockingClause(qry, i,
-											   lc->forUpdate, lc->noWait,
+											   lc->strength, lc->noWait,
 											   pushedDown);
 							rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
 							break;
 						case RTE_SUBQUERY:
 							applyLockingClause(qry, i,
-											   lc->forUpdate, lc->noWait,
+											   lc->strength, lc->noWait,
 											   pushedDown);
 							/* see comment above */
 							transformLockingClause(pstate, rte->subquery,
@@ -2443,7 +2443,7 @@ transformLockingClause(ParseState *pstate, Query *qry, LockingClause *lc,
  */
 void
 applyLockingClause(Query *qry, Index rtindex,
-				   bool forUpdate, bool noWait, bool pushedDown)
+				   LockClauseStrength strength, bool noWait, bool pushedDown)
 {
 	RowMarkClause *rc;
 
@@ -2455,10 +2455,10 @@ applyLockingClause(Query *qry, Index rtindex,
 	if ((rc = get_parse_rowmark(qry, rtindex)) != NULL)
 	{
 		/*
-		 * If the same RTE is specified both FOR UPDATE and FOR SHARE, treat
-		 * it as FOR UPDATE.  (Reasonable, since you can't take both a shared
-		 * and exclusive lock at the same time; it'll end up being exclusive
-		 * anyway.)
+		 * If the same RTE is specified for more than one locking strength,
+		 * treat is as the strongest.  (Reasonable, since you can't take both a
+		 * shared and exclusive lock at the same time; it'll end up being
+		 * exclusive anyway.)
 		 *
 		 * We also consider that NOWAIT wins if it's specified both ways. This
 		 * is a bit more debatable but raising an error doesn't seem helpful.
@@ -2467,7 +2467,7 @@ applyLockingClause(Query *qry, Index rtindex,
 		 *
 		 * And of course pushedDown becomes false if any clause is explicit.
 		 */
-		rc->forUpdate |= forUpdate;
+		rc->strength = Max(rc->strength, strength);
 		rc->noWait |= noWait;
 		rc->pushedDown &= pushedDown;
 		return;
@@ -2476,7 +2476,7 @@ applyLockingClause(Query *qry, Index rtindex,
 	/* Make a new RowMarkClause */
 	rc = makeNode(RowMarkClause);
 	rc->rti = rtindex;
-	rc->forUpdate = forUpdate;
+	rc->strength = strength;
 	rc->noWait = noWait;
 	rc->pushedDown = pushedDown;
 	qry->rowMarks = lappend(qry->rowMarks, rc);

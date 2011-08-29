@@ -2068,7 +2068,7 @@ _outLockingClause(StringInfo str, LockingClause *node)
 	WRITE_NODE_TYPE("LOCKINGCLAUSE");
 
 	WRITE_NODE_FIELD(lockedRels);
-	WRITE_BOOL_FIELD(forUpdate);
+	WRITE_ENUM_FIELD(strength, LockClauseStrength);
 	WRITE_BOOL_FIELD(noWait);
 }
 
@@ -2246,7 +2246,7 @@ _outRowMarkClause(StringInfo str, RowMarkClause *node)
 	WRITE_NODE_TYPE("ROWMARKCLAUSE");
 
 	WRITE_UINT_FIELD(rti);
-	WRITE_BOOL_FIELD(forUpdate);
+	WRITE_ENUM_FIELD(strength, LockClauseStrength);
 	WRITE_BOOL_FIELD(noWait);
 	WRITE_BOOL_FIELD(pushedDown);
 }

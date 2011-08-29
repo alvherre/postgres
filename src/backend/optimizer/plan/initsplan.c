@@ -570,11 +570,11 @@ make_outerjoininfo(PlannerInfo *root,
 	Assert(jointype != JOIN_RIGHT);
 
 	/*
-	 * Presently the executor cannot support FOR UPDATE/SHARE marking of rels
+	 * Presently the executor cannot support FOR UPDATE/SHARE/KEY LOCK marking of rels
 	 * appearing on the nullable side of an outer join. (It's somewhat unclear
 	 * what that would mean, anyway: what should we mark when a result row is
 	 * generated from no element of the nullable relation?)  So, complain if
-	 * any nullable rel is FOR UPDATE/SHARE.
+	 * any nullable rel is FOR UPDATE/SHARE/KEY LOCK.
 	 *
 	 * You might be wondering why this test isn't made far upstream in the
 	 * parser.	It's because the parser hasn't got enough info --- consider
@@ -592,7 +592,7 @@ make_outerjoininfo(PlannerInfo *root,
 			(jointype == JOIN_FULL && bms_is_member(rc->rti, left_rels)))
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("SELECT FOR UPDATE/SHARE cannot be applied to the nullable side of an outer join")));
+					 errmsg("SELECT FOR UPDATE/SHARE/KEY LOCK cannot be applied to the nullable side of an outer join")));
 	}
 
 	sjinfo->syn_lefthand = left_rels;
