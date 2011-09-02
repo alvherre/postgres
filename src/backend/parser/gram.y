@@ -8786,7 +8786,7 @@ for_locking_item:
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $4;
-					n->strength = LCS_FORKEYLOCK;
+					n->strength = LCS_FORKEYSHARE;
 					n->noWait = $5;
 					$$ = (Node *) n;
 				}

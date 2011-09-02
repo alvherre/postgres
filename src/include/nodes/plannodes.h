@@ -721,7 +721,7 @@ typedef struct Limit
  * RowMarkType -
  *	  enums for types of row-marking operations
  *
- * When doing UPDATE, DELETE, or SELECT FOR UPDATE/SHARE/KEY LOCK, we have to uniquely
+ * When doing UPDATE, DELETE, or SELECT FOR UPDATE/SHARE/KEY SHARE, we have to uniquely
  * identify all the source rows, not only those from the target relations, so
  * that we can perform EvalPlanQual rechecking at need.  For plain tables we
  * can just fetch the TID, the same as for a target relation.  Otherwise (for
@@ -733,12 +733,12 @@ typedef enum RowMarkType
 {
 	ROW_MARK_EXCLUSIVE,			/* obtain exclusive tuple lock */
 	ROW_MARK_SHARE,				/* obtain shared tuple lock */
-	ROW_MARK_KEYLOCK,			/* obtain keylock tuple lock */
+	ROW_MARK_KEYSHARE,			/* obtain keyshare tuple lock */
 	ROW_MARK_REFERENCE,			/* just fetch the TID */
 	ROW_MARK_COPY				/* physically copy the row value */
 } RowMarkType;
 
-#define RowMarkRequiresRowShareLock(marktype)  ((marktype) <= ROW_MARK_KEYLOCK)
+#define RowMarkRequiresRowShareLock(marktype)  ((marktype) <= ROW_MARK_KEYSHARE)
 
 /*
  * PlanRowMark -

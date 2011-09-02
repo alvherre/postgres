@@ -114,13 +114,13 @@ lnext:
 		switch (erm->markType)
 		{
 			case ROW_MARK_EXCLUSIVE:
-				lockmode = LockTupleExclusive;
+				lockmode = LockTupleUpdate;
 				break;
 			case ROW_MARK_SHARE:
-				lockmode = LockTupleShared;
+				lockmode = LockTupleShare;
 				break;
-			case ROW_MARK_KEYLOCK:
-				lockmode = LockTupleKeylock;
+			case ROW_MARK_KEYSHARE:
+				lockmode = LockTupleKeyShare;
 				break;
 			default:
 				elog(ERROR, "unsupported rowmark type");

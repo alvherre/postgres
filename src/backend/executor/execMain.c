@@ -801,7 +801,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 	}
 
 	/*
-	 * Similarly, we have to lock relations selected FOR UPDATE/FOR SHARE/KEY LOCK
+	 * Similarly, we have to lock relations selected FOR UPDATE/SHARE/KEY SHARE
 	 * before we initialize the plan tree, else we'd be risking lock upgrades.
 	 * While we are at it, build the ExecRowMark list.
 	 */
@@ -821,7 +821,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 		{
 			case ROW_MARK_EXCLUSIVE:
 			case ROW_MARK_SHARE:
-			case ROW_MARK_KEYLOCK:
+			case ROW_MARK_KEYSHARE:
 				relid = getrelid(rc->rti, rangeTable);
 				relation = heap_open(relid, RowShareLock);
 				break;
