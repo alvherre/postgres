@@ -74,6 +74,7 @@
 bool		synchronize_seqscans = true;
 
 
+static LOCKMODE get_lockmode_for_tuplelock(LockTupleMode mode);
 static HeapScanDesc heap_beginscan_internal(Relation relation,
 						Snapshot snapshot,
 						int nkeys, ScanKey key,
@@ -2456,6 +2457,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	HeapTuple	heaptup;
 	Page		page;
 	BlockNumber	block;
+	LockTupleMode tuplock;
 	Buffer		buffer,
 				newbuf,
 				vmbuffer = InvalidBuffer,
@@ -2714,6 +2716,8 @@ l2:
 	newtup->t_tableOid = RelationGetRelid(relation);
 	if (setxmax != InvalidTransactionId)
 	{
+		TransactionId	newxmax;
+
 		/* note that setxmax is necessarily a MultiXactId */
 		newxmax = MultiXactIdExpand(setxmax, xid, tuplock);
 		HeapTupleHeaderSetXmax(newtup->t_data,
@@ -3327,6 +3331,8 @@ l3:
 		 */
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
+			bool	tryit = false;	/* FIXME -- */
+
 			if ((mode == LockTupleShare) && (infomask & HEAP_XMAX_SHARED_LOCK))
 				tryit = true;
 			if ((mode == LockTupleKeyShare) && (infomask & HEAP_XMAX_KEY_LOCK))
@@ -3334,7 +3340,7 @@ l3:
 			if ((mode == LockTupleUpdate) && (infomask & HEAP_XMAX_EXCL_LOCK))
 				tryit = true;
 
-			if (tryit && MultiXactIdIsCurrent(MultiXactId) xwait)
+			if (tryit && MultiXactIdIsCurrent((MultiXactId) xwait))
 			{
 				/* Probably can't hold tuple lock here, but may as well check */
 				if (have_tuple_lock)
@@ -3383,7 +3389,7 @@ l3:
 			if (!(tuple->t_data->t_infomask & HEAP_XMAX_SHARED_LOCK))
 				goto l3;
 		}
-		else if (mode == LockTupleKeylock &&
+		else if (mode == LockTupleKeyShare &&
 				 (infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)))
 		{
 			/*
@@ -3407,7 +3413,7 @@ l3:
 				case LockTupleShare:
 					status = MULTIXACT_STATUS_SHARE;
 					break;
-				case LockTupleExclusive:
+				case LockTupleUpdate:
 					status = MULTIXACT_STATUS_KEY_UPDATE;
 					break;
 				default:
@@ -3521,7 +3527,7 @@ l3:
 	if (!(old_infomask & (HEAP_XMAX_INVALID |
 						  HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_IS_MULTI)) &&
-		(mode == LockTupleKeylock ?
+		(mode == LockTupleKeyShare ?
 		 (old_infomask & HEAP_IS_LOCKED) :
 		 mode == LockTupleShare ?
 		 (old_infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_EXCL_LOCK)) :
@@ -3548,7 +3554,7 @@ l3:
 									HEAP_IS_LOCKED |
 									HEAP_MOVED);
 
-	if (mode == LockTupleShare || mode == LockTupleKeylock)
+	if (mode == LockTupleShare || mode == LockTupleKeyShare)
 	{
 		/*
 		 * If this is the first acquisition of a keylock or shared lock in the current
@@ -5130,11 +5136,11 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 		htup->t_infomask |= HEAP_XMAX_IS_MULTI;
 	if (xlrec->lock_strength == LockTupleShare)
 		htup->t_infomask |= HEAP_XMAX_SHARED_LOCK;
-	else if (xlrec->lock_strength == LockTupleKeylock)
+	else if (xlrec->lock_strength == LockTupleKeyShare)
 		htup->t_infomask |= HEAP_XMAX_KEY_LOCK;
 	else
 	{
-		Assert(xlrec->lock_strength == LockTupleExclusive);
+		Assert(xlrec->lock_strength == LockTupleUpdate);
 		htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
 	}
 	HeapTupleHeaderClearHotUpdated(htup);
@@ -5342,9 +5348,9 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 
 		if (xlrec->lock_strength == LockTupleShare)
 			appendStringInfo(buf, "shared_lock: ");
-		else if (xlrec->lock_strength == LockTupleKeylock)
+		else if (xlrec->lock_strength == LockTupleKeyShare)
 			appendStringInfo(buf, "key_lock: ");
-		else if (xlrec->lock_strength == LockTupleExclusive)
+		else if (xlrec->lock_strength == LockTupleUpdate)
 			appendStringInfo(buf, "exclusive_lock: ");
 		else
 			appendStringInfo(buf, "unknown_type_lock: ");

@@ -124,7 +124,7 @@ lnext:
 				break;
 			default:
 				elog(ERROR, "unsupported rowmark type");
-				lockmode = LockTupleExclusive;	/* keep compiler quiet */
+				lockmode = LockTupleUpdate;	/* keep compiler quiet */
 				break;
 		}
 

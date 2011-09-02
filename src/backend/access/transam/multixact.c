@@ -1685,6 +1685,7 @@ StartupMultiXact(void)
 	MultiXactOffset offset = MultiXactState->nextOffset;
 	int			pageno;
 	int			entryno;
+	int			flagsoff;
 
 	/* Clean up offsets state */
 	LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
@@ -1912,6 +1913,7 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 	{
 		int			flagsoff;
 		int			flagsbit;
+		int			difference;
 
 		/*
 		 * Only zero when at first entry of a page.
@@ -1933,8 +1935,9 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 		}
 
 		/* Advance to next page (OK if nmembers goes negative) */
-		offset += (MULTIXACT_MEMBERS_PER_PAGE - entryno);
-		nmembers -= (MULTIXACT_MEMBERS_PER_PAGE - entryno);
+		difference = MULTIXACT_MEMBERS_PER_PAGE - offset % MULTIXACT_MEMBERS_PER_PAGE;
+		offset += difference;
+		nmembers -= difference;
 	}
 }
 

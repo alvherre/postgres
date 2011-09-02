@@ -1693,7 +1693,7 @@ EvalPlanQual(EState *estate, EPQState *epqstate,
 	/*
 	 * Get and lock the updated version of the row; if fail, return NULL.
 	 */
-	copyTuple = EvalPlanQualFetch(estate, relation, LockTupleExclusive,
+	copyTuple = EvalPlanQualFetch(estate, relation, LockTupleUpdate,
 								  tid, priorXmax);
 
 	if (copyTuple == NULL)
