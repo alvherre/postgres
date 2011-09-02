@@ -16,18 +16,17 @@
 
 #include <math.h>
 
-#include "access/heapam.h"
 #include "access/transam.h"
 #include "access/tupconvert.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
-#include "catalog/namespace.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_inherits_fn.h"
 #include "catalog/pg_namespace.h"
 #include "commands/dbcommands.h"
+#include "commands/tablecmds.h"
 #include "commands/vacuum.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
@@ -38,12 +37,10 @@
 #include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
-#include "storage/proc.h"
 #include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/attoptcache.h"
 #include "utils/datum.h"
-#include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/pg_rusage.h"
@@ -1412,14 +1409,15 @@ acquire_inherited_sample_rows(Relation onerel, HeapTuple *rows, int targrows,
 	/*
 	 * Check that there's at least one descendant, else fail.  This could
 	 * happen despite analyze_rel's relhassubclass check, if table once had a
-	 * child but no longer does.
+	 * child but no longer does.  In that case, we can clear the
+	 * relhassubclass field so as not to make the same mistake again later.
+	 * (This is safe because we hold ShareUpdateExclusiveLock.)
 	 */
 	if (list_length(tableOIDs) < 2)
 	{
-		/*
-		 * XXX It would be desirable to clear relhassubclass here, but we
-		 * don't have adequate lock to do that safely.
-		 */
+		/* CCI because we already updated the pg_class row in this command */
+		CommandCounterIncrement();
+		SetRelationHasSubclass(RelationGetRelid(onerel), false);
 		return 0;
 	}
 

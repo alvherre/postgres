@@ -37,11 +37,9 @@
 #include "postmaster/autovacuum.h"
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
-#include "storage/proc.h"
 #include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/fmgroids.h"
-#include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -493,7 +491,9 @@ vac_estimate_reltuples(Relation relation, bool is_analyze,
 
 	/*
 	 * If scanned_pages is zero but total_pages isn't, keep the existing value
-	 * of reltuples.
+	 * of reltuples.  (Note: callers should avoid updating the pg_class
+	 * statistics in this situation, since no new information has been
+	 * provided.)
 	 */
 	if (scanned_pages == 0)
 		return old_rel_tuples;
