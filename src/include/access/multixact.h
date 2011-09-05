@@ -25,10 +25,10 @@
 /* Possible multixact lock modes ("status") */
 typedef enum
 {
-	MULTIXACT_STATUS_KEY_SHARE = 0x00,
-	MULTIXACT_STATUS_SHARE = 0x01,
-	MULTIXACT_STATUS_UPDATE = 0x02,
-	MULTIXACT_STATUS_KEY_UPDATE	= 0x03
+	MultiXactStatusKeyShare = 0x00,
+	MultiXactStatusShare = 0x01,
+	MultiXactStatusUpdate = 0x02,
+	MultiXactStatusKeyUpdate = 0x03
 } MultiXactStatus;
 
 typedef struct MultiXactMember

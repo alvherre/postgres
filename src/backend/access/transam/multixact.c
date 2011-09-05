@@ -1364,13 +1364,13 @@ mxstatus_to_string(MultiXactStatus status)
 {
 	switch (status)
 	{
-		case MULTIXACT_STATUS_KEY_SHARE:
+		case MultiXactStatusKeyShare:
 			return "keysh";
-		case MULTIXACT_STATUS_SHARE:
+		case MultiXactStatusShare:
 			return "sh";
-		case MULTIXACT_STATUS_UPDATE:
+		case MultiXactStatusUpdate:
 			return "upd";
-		case MULTIXACT_STATUS_KEY_UPDATE:
+		case MultiXactStatusKeyUpdate:
 			return "keyup";
 		default:
 			elog(ERROR, "unrecognized multixact status %d", status);
