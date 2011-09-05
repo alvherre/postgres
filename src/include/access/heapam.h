@@ -30,10 +30,8 @@
 typedef struct BulkInsertStateData *BulkInsertState;
 
 /*
- * FIXME -- this comment is a lie
- * This enum mirrors LockClauseStrength precisely, but we define it separately
- * to reduce having to share otherwise unrelated headers.  To go from one to
- * the other, we wade through the planner using a third enum, RowMarkType.
+ * Possible lock modes for a tuple.  Note that this parallels MultiXactStatus,
+ * but since these are rather separate modules, we define them separately.
  */
 typedef enum
 {
