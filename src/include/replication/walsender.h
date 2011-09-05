@@ -15,7 +15,6 @@
 #include "access/xlog.h"
 #include "nodes/nodes.h"
 #include "storage/latch.h"
-#include "replication/syncrep.h"
 #include "storage/shmem.h"
 #include "storage/spin.h"
 

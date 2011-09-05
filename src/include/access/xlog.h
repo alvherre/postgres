@@ -14,7 +14,6 @@
 #include "access/rmgr.h"
 #include "access/xlogdefs.h"
 #include "lib/stringinfo.h"
-#include "replication/walsender.h"
 #include "storage/buf.h"
 #include "utils/pg_crc.h"
 #include "utils/timestamp.h"
@@ -220,9 +219,6 @@ extern int	wal_level;
 
 /* Do we need to WAL-log information required only for Hot Standby? */
 #define XLogStandbyInfoActive() (wal_level >= WAL_LEVEL_HOT_STANDBY)
-
-/* Can we allow the standby to accept replication connection from another standby? */
-#define AllowCascadeReplication() (EnableHotStandby && max_wal_senders > 0)
 
 #ifdef WAL_DEBUG
 extern bool XLOG_DEBUG;
