@@ -164,15 +164,17 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_HASVARWIDTH		0x0002	/* has variable-width attribute(s) */
 #define HEAP_HASEXTERNAL		0x0004	/* has external stored attribute(s) */
 #define HEAP_HASOID				0x0008	/* has an object-id field */
-#define HEAP_XMAX_KEY_LOCK		0x0010	/* xmax is a "key" locker */
+#define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
-#define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
+#define HEAP_XMAX_KEYEXCL_LOCK	0x0040	/* xmax is exclusive locker */
 #define HEAP_XMAX_SHARED_LOCK	0x0080	/* xmax is shared locker */
-/* if either SHARE or KEY lock bit is set, this is a "shared" lock */
-#define HEAP_IS_SHARE_LOCKED (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEY_LOCK)
-/* if any LOCK bit is set, xmax hasn't deleted the tuple, only locked it */
+/*
+ * if any LOCK bit is set, xmax hasn't deleted the tuple, only locked it.
+ * Note that if XMAX_IS_MULTI is set, the multixact needs to be resolved
+ * because it might also be just a lock.
+ */
 #define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK | \
-						 HEAP_XMAX_KEY_LOCK)
+						 HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */
 #define HEAP_XMAX_COMMITTED		0x0400	/* t_xmax committed */
@@ -193,7 +195,8 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
  * information stored in t_infomask2:
  */
 #define HEAP_NATTS_MASK			0x07FF	/* 11 bits for number of attributes */
-/* bits 0x3800 are available */
+/* bits 0x1800 are available */
+#define HEAP_UPDATE_KEY_INTACT	0x2000	/* tuple updated, key cols untouched */
 #define HEAP_HOT_UPDATED		0x4000	/* tuple was HOT-updated */
 #define HEAP_ONLY_TUPLE			0x8000	/* this is heap-only tuple */
 
