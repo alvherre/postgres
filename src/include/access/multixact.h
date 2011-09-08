@@ -58,14 +58,17 @@ typedef struct xl_multixact_create
 #define MinSizeOfMultiXactCreate offsetof(xl_multixact_create, members)
 
 
-extern MultiXactId MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
-									 TransactionId xid2, MultiXactStatus status2);
+extern MultiXactId MultiXactIdCreate(TransactionId xid1,
+				  MultiXactStatus status1, TransactionId xid2,
+				  MultiXactStatus status2);
 extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
-									 MultiXactStatus status);
+				  MultiXactStatus status);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
-extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status);
-extern bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status);
+extern int MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+				MultiXactMember **mxmembers);
+extern bool ConditionalMultiXactIdWait(MultiXactId multi,
+						   MultiXactStatus status);
 extern void MultiXactIdSetOldestMember(void);
 extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids);
 

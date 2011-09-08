@@ -661,9 +661,13 @@ MultiXactStatusConflict(MultiXactStatus status1, MultiXactStatus status2)
  *
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
+ * If mxmembers is not NULL, the array of members is returned in mxmembers, and
+ * the caller is responsible for freeing it; the size of the array is returned.
+ * Otherwise, zero is returned.
  */
-void
-MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
+int
+MultiXactIdWait(MultiXactId multi, MultiXactStatus status, MultiXactMember **mxmembers)
 {
 	MultiXactMember *members;
 	int			nmembers;
@@ -688,8 +692,16 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 			XactLockTableWait(member);
 		}
 
-		pfree(members);
+		if (mxmembers != NULL)
+		{
+			*mxmembers = members;
+			return nmembers;
+		}
+		else
+			pfree(members);
 	}
+
+	return 0;
 }
 
 /*
