@@ -66,13 +66,13 @@
  * Defines for MultiXactOffset page sizes.	A page is the same BLCKSZ as is
  * used everywhere else in Postgres.
  *
- * Note: because MultiXactOffsets are 32 bits and wrap around at 0xFFFFFFFF,
- * MultiXact page numbering also wraps around at
- * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE, and segment numbering at
- * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need
- * take no explicit notice of that fact in this module, except when comparing
- * segment and page numbers in TruncateMultiXact (see
- * MultiXactOffsetPagePrecedes).
+ * Note: because both MultiXactOffsets and TransactionIds are 32 bits and
+ * wrap around at 0xFFFFFFFF, MultiXact page numbering also wraps around at
+ * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE, and segment numbering at
+ * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need take no
+ * explicit notice of that fact in this module, except when comparing segment
+ * and page numbers in TruncateMultiXact
+ * (see MultiXact{Offset,Member}PagePrecedes).
  */
 
 /* We need four bytes per offset */
