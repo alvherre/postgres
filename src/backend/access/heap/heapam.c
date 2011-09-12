@@ -2183,7 +2183,7 @@ l1:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate, NULL);
+			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2585,12 +2585,10 @@ l2:
 		 */
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
-			MultiXactMember *members = NULL;
-			int				nmembers;
 			TransactionId	update_xact;
 
 			/* wait for multixact */
-			nmembers = MultiXactIdWait((MultiXactId) xwait, tuplock, &members);
+			MultiXactIdWait((MultiXactId) xwait, tuplock);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2615,27 +2613,37 @@ l2:
 			 * is the case, we have to be careful to mark the updated tuple
 			 * with the surviving members in Xmax.
 			 *
-			 * We need to walk the surviving members; if any of them was an
-			 * update, we need to check its commit status. If it aborted, then
-			 * we can use HeapTupleMayBeUpdated here; otherwise we know it's just
-			 * updated.
+			 * Note that there could have been another update in the MultiXact.
+			 * In that case, we need to check whether it committed or aborted,
+			 * and make sure we fix up the return value appropriately.
 			 */
 			update_xact = InvalidTransactionId;
-			if (nmembers > 0)
+			if (!(oldtup.t_data->t_infomask & HEAP_IS_LOCKED))
 			{
-				int		i;
+				MultiXactMember	*members;
 
-				for (i = 0; i < nmembers; i++)
+				nmembers = GetMultiXactIdMembers(xwait, &members);
+
+				if (nmembers > 0)
 				{
-					/* KEY SHARE lockers are okay */
-					if (members[i].status == MultiXactStatusKeyShare)
-						continue;
-					/* there should be at most one updater */
-					Assert(update_xact == InvalidTransactionId);
-					/* not interested in our own xact ... XXX is this right? */
-					if (TransactionIdIsCurrentTransactionId(members[i].xid))
-						continue;
-					update_xact = members[i].xid;
+					int		i;
+
+					for (i = 0; i < nmembers; i++)
+					{
+						/* KEY SHARE lockers are okay */
+						if (members[i].status == MultiXactStatusKeyShare)
+							continue;
+						/* there should be at most one updater */
+						Assert(update_xact == InvalidTransactionId);
+						/*
+						 * not interested in our own xact ... FIXME I think this
+						 * is not right: HeapTupleSatisfiesUpdate should
+						 * have returned SelfUpdate in this case.
+						 */
+						if (TransactionIdIsCurrentTransactionId(members[i].xid))
+							continue;
+						update_xact = members[i].xid;
+					}
 				}
 			}
 			/* there was no UPDATE in the MultiXact; or it aborted. */
@@ -3486,7 +3494,7 @@ l3:
 						   RelationGetRelationName(relation))));
 			}
 			else
-				MultiXactIdWait((MultiXactId) xwait, status, NULL);
+				MultiXactIdWait((MultiXactId) xwait, status);
 
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 

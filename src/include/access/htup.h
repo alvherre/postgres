@@ -167,13 +167,13 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
-#define HEAP_XMAX_SHARED_LOCK	0x0080	/* xmax is shared locker */
+#define HEAP_XMAX_IS_NOT_UPDATE	0x0080	/* xmax, if valid, is only a locker.
+										   Note this might be unset if
+										   XMAX_IS_MULTI is not also set. */
 /*
- * if any LOCK bit is set, xmax hasn't deleted the tuple, only locked it.
- * Note that if XMAX_IS_MULTI is set, the multixact needs to be resolved
- * because it might also be just a lock.
+ * if any of these bits is set, xmax hasn't deleted the tuple, only locked it.
  */
-#define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK | \
+#define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_IS_NOT_UPDATE | \
 						 HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */

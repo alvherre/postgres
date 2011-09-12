@@ -134,6 +134,41 @@ HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 	SetHintBits(tuple, buffer, infomask, xid);
 }
 
+/*
+ * FIXME -- fix function name and complete this comment
+ *
+ * For a tuple marked XMAX_IS_MULTI and not XMAX_IS_NOT_UPDATED,
+ * returns the update Xid.
+ */
+TransactionId
+HeapTupleGetUpdateXid(HeapTupleHeader tuple)
+{
+	TransactionId	update_xact;
+
+	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE));
+	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
+
+	MultiXactMember	*members;
+
+	nmembers = GetMultiXactIdMembers(xwait, &members);
+
+	if (nmembers > 0)
+	{
+		int		i;
+
+		for (i = 0; i < nmembers; i++)
+		{
+			/* KEY SHARE lockers are okay -- ignore it */
+			if (members[i].status == MultiXactStatusKeyShare)
+				continue;
+			/* there should be at most one updater */
+			Assert(update_xact == InvalidTransactionId);
+			update_xact = members[i].xid;
+		}
+	}
+
+	return update_xact;
+}
 
 /*
  * HeapTupleSatisfiesSelf

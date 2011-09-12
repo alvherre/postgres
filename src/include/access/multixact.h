@@ -65,8 +65,7 @@ extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
 				  MultiXactStatus status);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
-extern int MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-				MultiXactMember **mxmembers);
+extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status);
 extern bool ConditionalMultiXactIdWait(MultiXactId multi,
 						   MultiXactStatus status);
 extern void MultiXactIdSetOldestMember(void);
