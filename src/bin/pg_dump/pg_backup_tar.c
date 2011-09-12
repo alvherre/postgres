@@ -112,7 +112,7 @@ static void tarClose(ArchiveHandle *AH, TAR_MEMBER *TH);
 #ifdef __NOT_USED__
 static char *tarGets(char *buf, size_t len, TAR_MEMBER *th);
 #endif
-static int	tarPrintf(ArchiveHandle *AH, TAR_MEMBER *th, const char *fmt,...);
+static int	tarPrintf(ArchiveHandle *AH, TAR_MEMBER *th, const char *fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
 
 static void _tarAddFile(ArchiveHandle *AH, TAR_MEMBER *th);
 static int	_tarChecksum(char *th);
@@ -581,7 +581,7 @@ tarWrite(const void *buf, size_t len, TAR_MEMBER *th)
 	size_t		res;
 
 	if (th->zFH != NULL)
-		res = GZWRITE((void *) buf, 1, len, th->zFH);
+		res = GZWRITE(buf, 1, len, th->zFH);
 	else
 		res = fwrite(buf, 1, len, th->nFH);
 
@@ -598,7 +598,7 @@ _WriteData(ArchiveHandle *AH, const void *data, size_t dLen)
 {
 	lclTocEntry *tctx = (lclTocEntry *) AH->currToc->formatData;
 
-	dLen = tarWrite((void *) data, dLen, tctx->TH);
+	dLen = tarWrite(data, dLen, tctx->TH);
 
 	return dLen;
 }
@@ -797,7 +797,7 @@ _WriteBuf(ArchiveHandle *AH, const void *buf, size_t len)
 	lclContext *ctx = (lclContext *) AH->formatData;
 	size_t		res;
 
-	res = tarWrite((void *) buf, len, ctx->FH);
+	res = tarWrite(buf, len, ctx->FH);
 	ctx->filePos += res;
 	return res;
 }

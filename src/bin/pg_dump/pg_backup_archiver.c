@@ -119,8 +119,8 @@ static int	_discoverArchiveFormat(ArchiveHandle *AH);
 
 static int	RestoringToDB(ArchiveHandle *AH);
 static void dump_lo_buf(ArchiveHandle *AH);
-static void _write_msg(const char *modulename, const char *fmt, va_list ap);
-static void _die_horribly(ArchiveHandle *AH, const char *modulename, const char *fmt, va_list ap);
+static void _write_msg(const char *modulename, const char *fmt, va_list ap) __attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 0)));
+static void _die_horribly(ArchiveHandle *AH, const char *modulename, const char *fmt, va_list ap) __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 0)));
 
 static void dumpTimestamp(ArchiveHandle *AH, const char *msg, time_t tim);
 static void SetOutput(ArchiveHandle *AH, char *filename, int compression);
@@ -1393,7 +1393,7 @@ ahwrite(const void *ptr, size_t size, size_t nmemb, ArchiveHandle *AH)
 	}
 	else if (AH->gzOut)
 	{
-		res = GZWRITE((void *) ptr, size, nmemb, AH->OF);
+		res = GZWRITE(ptr, size, nmemb, AH->OF);
 		if (res != (nmemb * size))
 			die_horribly(AH, modulename, "could not write to output file: %s\n", strerror(errno));
 		return res;
@@ -1416,7 +1416,7 @@ ahwrite(const void *ptr, size_t size, size_t nmemb, ArchiveHandle *AH)
 			return ExecuteSqlCommandBuf(AH, (const char *) ptr, size * nmemb);
 		else
 		{
-			res = fwrite((void *) ptr, size, nmemb, AH->OF);
+			res = fwrite(ptr, size, nmemb, AH->OF);
 			if (res != nmemb)
 				die_horribly(AH, modulename, "could not write to output file: %s\n",
 							 strerror(errno));

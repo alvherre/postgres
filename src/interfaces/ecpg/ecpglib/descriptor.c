@@ -155,36 +155,36 @@ set_int_item(int lineno, int *target, const void *var, enum ECPGttype vartype)
 	switch (vartype)
 	{
 		case ECPGt_short:
-			*target = *(short *) var;
+			*target = *(const short *) var;
 			break;
 		case ECPGt_int:
-			*target = *(int *) var;
+			*target = *(const int *) var;
 			break;
 		case ECPGt_long:
-			*target = *(long *) var;
+			*target = *(const long *) var;
 			break;
 		case ECPGt_unsigned_short:
-			*target = *(unsigned short *) var;
+			*target = *(const unsigned short *) var;
 			break;
 		case ECPGt_unsigned_int:
-			*target = *(unsigned int *) var;
+			*target = *(const unsigned int *) var;
 			break;
 		case ECPGt_unsigned_long:
-			*target = *(unsigned long *) var;
+			*target = *(const unsigned long *) var;
 			break;
 #ifdef HAVE_LONG_LONG_INT
 		case ECPGt_long_long:
-			*target = *(long long int *) var;
+			*target = *(const long long int *) var;
 			break;
 		case ECPGt_unsigned_long_long:
-			*target = *(unsigned long long int *) var;
+			*target = *(const unsigned long long int *) var;
 			break;
 #endif   /* HAVE_LONG_LONG_INT */
 		case ECPGt_float:
-			*target = *(float *) var;
+			*target = *(const float *) var;
 			break;
 		case ECPGt_double:
-			*target = *(double *) var;
+			*target = *(const double *) var;
 			break;
 		default:
 			ecpg_raise(lineno, ECPG_VAR_NOT_NUMERIC, ECPG_SQLSTATE_RESTRICTED_DATA_TYPE_ATTRIBUTE_VIOLATION, NULL);
@@ -388,7 +388,7 @@ ECPGget_desc(int lineno, const char *desc_name, int index,...)
 				 */
 				if (arrsize > 0 && ntuples > arrsize)
 				{
-					ecpg_log("ECPGget_desc on line %d: incorrect number of matches; %d don't fit into array of %d\n",
+					ecpg_log("ECPGget_desc on line %d: incorrect number of matches; %d don't fit into array of %ld\n",
 							 lineno, ntuples, arrsize);
 					ecpg_raise(lineno, ECPG_TOO_MANY_MATCHES, ECPG_SQLSTATE_CARDINALITY_VIOLATION, NULL);
 					return false;
@@ -457,7 +457,7 @@ ECPGget_desc(int lineno, const char *desc_name, int index,...)
 		 */
 		if (data_var.ind_arrsize > 0 && ntuples > data_var.ind_arrsize)
 		{
-			ecpg_log("ECPGget_desc on line %d: incorrect number of matches (indicator); %d don't fit into array of %d\n",
+			ecpg_log("ECPGget_desc on line %d: incorrect number of matches (indicator); %d don't fit into array of %ld\n",
 					 lineno, ntuples, data_var.ind_arrsize);
 			ecpg_raise(lineno, ECPG_TOO_MANY_MATCHES, ECPG_SQLSTATE_CARDINALITY_VIOLATION, NULL);
 			return false;

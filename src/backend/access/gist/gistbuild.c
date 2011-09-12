@@ -14,6 +14,8 @@
  */
 #include "postgres.h"
 
+#include <math.h>
+
 #include "access/genam.h"
 #include "access/gist_private.h"
 #include "catalog/index.h"
@@ -420,7 +422,7 @@ calculatePagesPerBuffer(GISTBuildState *buildstate, int levelStep)
 	 */
 	pagesPerBuffer = 2 * pow(avgIndexTuplesPerPage, levelStep);
 
-	return round(pagesPerBuffer);
+	return (int) rint(pagesPerBuffer);
 }
 
 /*
@@ -962,10 +964,14 @@ gistEmptyAllBuffers(GISTBuildState *buildstate)
 				 * Add this buffer to the emptying queue, and proceed to empty
 				 * the queue.
 				 */
-				MemoryContextSwitchTo(gfbb->context);
-				gfbb->bufferEmptyingQueue =
-					lcons(nodeBuffer, gfbb->bufferEmptyingQueue);
-				MemoryContextSwitchTo(buildstate->tmpCtx);
+				if (!nodeBuffer->queuedForEmptying)
+				{
+					MemoryContextSwitchTo(gfbb->context);
+					nodeBuffer->queuedForEmptying = true;
+					gfbb->bufferEmptyingQueue =
+						lcons(nodeBuffer, gfbb->bufferEmptyingQueue);
+					MemoryContextSwitchTo(buildstate->tmpCtx);
+				}
 				gistProcessEmptyingQueue(buildstate);
 			}
 			else

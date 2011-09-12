@@ -97,6 +97,7 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/timestamp.h"
 #include "utils/tqual.h"
 
 
@@ -1027,10 +1028,10 @@ rebuild_database_list(Oid newdb)
 static int
 db_comparator(const void *a, const void *b)
 {
-	if (((avl_dbase *) a)->adl_score == ((avl_dbase *) b)->adl_score)
+	if (((const avl_dbase *) a)->adl_score == ((const avl_dbase *) b)->adl_score)
 		return 0;
 	else
-		return (((avl_dbase *) a)->adl_score < ((avl_dbase *) b)->adl_score) ? 1 : -1;
+		return (((const avl_dbase *) a)->adl_score < ((const avl_dbase *) b)->adl_score) ? 1 : -1;
 }
 
 /*
