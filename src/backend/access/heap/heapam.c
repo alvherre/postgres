@@ -2619,33 +2619,8 @@ l2:
 			 */
 			update_xact = InvalidTransactionId;
 			if (!(oldtup.t_data->t_infomask & HEAP_IS_LOCKED))
-			{
-				MultiXactMember	*members;
+				update_xact = HeapTupleGetUpdateXid(oldtup);
 
-				nmembers = GetMultiXactIdMembers(xwait, &members);
-
-				if (nmembers > 0)
-				{
-					int		i;
-
-					for (i = 0; i < nmembers; i++)
-					{
-						/* KEY SHARE lockers are okay */
-						if (members[i].status == MultiXactStatusKeyShare)
-							continue;
-						/* there should be at most one updater */
-						Assert(update_xact == InvalidTransactionId);
-						/*
-						 * not interested in our own xact ... FIXME I think this
-						 * is not right: HeapTupleSatisfiesUpdate should
-						 * have returned SelfUpdate in this case.
-						 */
-						if (TransactionIdIsCurrentTransactionId(members[i].xid))
-							continue;
-						update_xact = members[i].xid;
-					}
-				}
-			}
 			/* there was no UPDATE in the MultiXact; or it aborted. */
 			if ((update_xact == InvalidTransactionId) ||
 				(TransactionIdDidAbort(update_xact)))
