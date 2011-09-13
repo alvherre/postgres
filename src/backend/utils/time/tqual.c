@@ -143,14 +143,14 @@ HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 TransactionId
 HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 {
-	TransactionId	update_xact;
+	TransactionId	update_xact = InvalidTransactionId;
+	MultiXactMember	*members;
+	int				nmembers;
 
 	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE));
 	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
 
-	MultiXactMember	*members;
-
-	nmembers = GetMultiXactIdMembers(xwait, &members);
+	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple), &members);
 
 	if (nmembers > 0)
 	{
@@ -717,7 +717,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 				TransactionId	xmax;
 
 				xmax = HeapTupleGetUpdateXid(tuple);
-				if (!TransactionIdIsValid)
+				if (!TransactionIdIsValid(xmax))
 					return HeapTupleMayBeUpdated;
 
 				/* updating subtransaction must have aborted */
@@ -774,7 +774,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		xmax = HeapTupleGetUpdateXid(tuple);
 
-		if (TransactionIdIsCurrentTransaction(xmax))
+		if (TransactionIdIsCurrentTransactionId(xmax))
 		{
 			if (HeapTupleHeaderGetCmax(tuple) >= curcid)
 				return HeapTupleSelfUpdated;		/* updated after scan started */
@@ -1108,8 +1108,10 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 				/* updating subtransaction must have aborted */
 				if (!TransactionIdIsCurrentTransactionId(xmax))
 					return true;
+				else if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+					return true;	/* updated after scan started */
 				else
-					return false;
+					return false;	/* updated before scan started */
 			}
 
 			if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tuple)))
@@ -1154,8 +1156,19 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 
 	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 	{
-		/* MultiXacts are currently only allowed to lock tuples */
-		Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+		TransactionId	xmax;
+
+		if (tuple->t_infomask & HEAP_IS_LOCKED)
+			return true;
+
+		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdDidCommit(xmax))
+		{
+			/* updating transaction committed, but when? */
+			if (XidInMVCCSnapshot(xmax, snapshot))
+				return true;	/* treat as still in progress */
+			return false;
+		}
 		return true;
 	}
 
@@ -1264,6 +1277,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 				return HEAPTUPLE_INSERT_IN_PROGRESS;
 			if (tuple->t_infomask & HEAP_IS_LOCKED)
 				return HEAPTUPLE_INSERT_IN_PROGRESS;
+			/* FIXME -- probably need something here */
 			/* inserted and then deleted by same xact */
 			return HEAPTUPLE_DELETE_IN_PROGRESS;
 		}
@@ -1330,9 +1344,18 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 
 	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 	{
-		/* MultiXacts are currently only allowed to lock tuples */
-		Assert(tuple->t_infomask & HEAP_IS_LOCKED);
-		return HEAPTUPLE_LIVE;
+		TransactionId xmax;
+	   
+		if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(tuple)))
+			return HEAPTUPLE_LIVE;
+	
+		xmax = HeapTupleGetUpdateXid(tuple);
+
+		Assert(!TransactionIdIsInProgress(xmax));
+		/* FIXME -- can we do something to remove the multixactid? */
+		if (TransactionIdDidCommit(xmax))
+			return HEAPTUPLE_RECENTLY_DEAD;
+		return HEAPTUPLE_LIVE;	/* either aborted or crashed */
 	}
 
 	if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))

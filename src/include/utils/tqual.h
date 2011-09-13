@@ -86,5 +86,6 @@ extern HTSV_Result HeapTupleSatisfiesVacuum(HeapTupleHeader tuple,
 
 extern void HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 					 uint16 infomask, TransactionId xid);
+extern TransactionId HeapTupleGetUpdateXid(HeapTupleHeader tuple);
 
 #endif   /* TQUAL_H */
