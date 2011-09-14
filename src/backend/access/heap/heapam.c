@@ -3413,28 +3413,36 @@ l3:
 			have_tuple_lock = true;
 		}
 
-		if (mode == LockTupleKeyShare && (infomask & HEAP_XMAX_KEYSHR_LOCK))
+		/*
+		 * if our is either KeyShare or Share, and there's no update,
+		 * we don't need to wait for the MultiXact to finish.
+		 * Similarly, if there's an update but the key hasn't been modified,
+		 * we can continue without blocking.
+		 */
+
+		gotta_sleep = true;
+		if ((mode == LockTupleKeyShare || mode == LockTupleShare) &&
+			(infomask & HEAP_IS_LOCKED))
 		{
-			/*
-			 * Acquiring keylock when there's at least one key-share locker
-			 * already.  We need not wait for him/them to complete.
-			 */
+			gotta_sleep = false;
+		}
+
+		if ((mode == LockTupleKeyShare) &&
+			(infomask2 & HEAP_UPDATE_KEY_INTACT))
+		{
+			gotta_sleep = false;
+		}
+
+		if (!gotta_sleep)
+		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
 			 * Make sure it's still an appropriate lock, else start over.
 			 */
+			/* FIXME clean up this bit recheck */
 			if (!(tuple->t_data->t_infomask & (HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEYSHR_LOCK)))
 				goto l3;
-
-			gotta_sleep = false;
-
-		}
-
-		if (mode == LockTupleShare)
-		{
-			/* if there's a share locker, no need to wait. */
-			gotta_sleep = false;
 		}
 
 		if (gotta_sleep)
