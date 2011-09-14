@@ -792,7 +792,8 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 		{
 			/*
 			 * XXX we could set HEAP_XMAX_COMMITTED here, but only if we were
-			 * to reset HEAP_XMAX_IS_MULTI
+			 * to reset HEAP_XMAX_IS_MULTI and relabel the Xmax to the update
+			 * xact
 			 */
 			return HeapTupleUpdated;
 		}
@@ -803,7 +804,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tuple)))
 	{
 		if (tuple->t_infomask & HEAP_IS_LOCKED)
-			return HeapTupleMayBeUpdated;
+			return HeapTupleMayBeUpdated;	/* FIXME -- ensure heap_lock_tuple agrees with this */
 		if (HeapTupleHeaderGetCmax(tuple) >= curcid)
 			return HeapTupleSelfUpdated;		/* updated after scan started */
 		else
@@ -811,7 +812,10 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	}
 
 	if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(tuple)))
+	{
+		/* FIXME -- if HEAP_IS_LOCKED, could we do differently here? */
 		return HeapTupleBeingUpdated;
+	}
 
 	if (!TransactionIdDidCommit(HeapTupleHeaderGetXmax(tuple)))
 	{
