@@ -58,6 +58,8 @@ typedef struct xl_multixact_create
 #define MinSizeOfMultiXactCreate offsetof(xl_multixact_create, members)
 
 
+extern MultiXactId MultiXactIdCreateSingleton(TransactionId xid,
+						   MultiXactStatus status);
 extern MultiXactId MultiXactIdCreate(TransactionId xid1,
 				  MultiXactStatus status1, TransactionId xid2,
 				  MultiXactStatus status2);

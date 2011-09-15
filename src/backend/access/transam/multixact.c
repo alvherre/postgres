@@ -299,6 +299,32 @@ static void WriteMZeroPageXlogRec(int pageno, uint8 info);
 
 
 /*
+ * MultiXactIdCreateSingleton
+ * 		Construct a MultiXactId representing a single transaction.
+ *
+ * NB - we don't worry about our local MultiXactId cache here, because that
+ * is handled by the lower-level routines.
+ */
+MultiXactId
+MultiXactIdCreateSingleton(TransactionId xid, MultiXactStatus status)
+{
+	MultiXactId	newMulti;
+	MultiXactMember	member[1];
+
+	AssertArg(TransactionIdIsValid(xid));
+
+	members[0].xid = xid;
+	members[1].status = status;
+
+	newMulti = CreateMultiXactId(1, member);
+
+	debug_elog4(DEBUG2, "Create: returning %u for %u",
+			   newMulti, xid);
+
+	return newMulti;
+}
+
+/*
  * MultiXactIdCreate
  *		Construct a MultiXactId representing two TransactionIds.
  *
