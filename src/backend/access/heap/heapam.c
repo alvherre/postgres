@@ -3264,6 +3264,17 @@ get_mxact_status_for_tuplelock(LockTupleMode mode)
 	return status;
 }
 
+static uint16
+get_hintbit_for_tuplelock(mode)
+{
+	if (mode == LockTupleKeyShare)
+		return HEAP_XMAX_KEYSHR_LOCK;
+	else if (mode == LockTupleUpdate)
+		return HEAP_XMAX_EXCL_LOCK;
+
+	return 0;
+}
+
 /*
  *	heap_lock_tuple - lock a tuple in shared or exclusive mode
  *
@@ -3753,10 +3764,7 @@ l3:
 				elog(ERROR, "unexpected existing lock mode, infomask %u", infomask);
 			xid = MultiXactIdCreate(keep_xmax, existing_lock_mode,
 								  	xid, get_mxact_status_for_tuplelock(mode));
-			if (mode == LockTupleKeyShare)
-				new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-			else if (mode == LockTupleUpdate)
-				new_infomask |= HEAP_XMAX_EXCL_LOCK;
+			new_infomask |= get_hintbit_for_tuplelock(mode);
 		}
 
 		/* in either case we got a new multixact */
@@ -3764,13 +3772,7 @@ l3:
 	}
 	else
 	{
-		if (mode == LockTupleKeyShare)
-			new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-		else if (mode == LockTupleUpdate)
-			new_infomask |= HEAP_XMAX_EXCL_LOCK;
-		else if (mode == LockTupleShare)
-			need_multi = true;
-		
+		new_infomask |= get_hintbit_for_tuplelock(mode);
 		new_mxact_status = get_mxact_status_for_tuplelock(mode);
 
 		/*
@@ -3809,8 +3811,8 @@ l3:
 				MultiXactStatus status;
 
 				if (old_infomask & HEAP_XMAX_EXCL_LOCK)
-					status = MultiXactStatusKeyUpdate;
-				else if (old_infomask & HEAP_XMAX_SHARED_LOCK)
+					status = MultiXactStatusUpdate;
+				else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
 					status = MultiXactStatusShare;
 				else
 				{
@@ -3821,8 +3823,12 @@ l3:
 				xid = MultiXactIdCreate(xmax, status, xid, new_mxact_status);
 				new_infomask |= HEAP_XMAX_IS_MULTI;
 			}
-			else if (need_multi)
+			else if (mode == LockTupleShare)
 			{
+				/*
+				 * There's no hint bit for FOR SHARE, so we need a multixact
+				 * here no matter what.
+				 */
 				xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
 				new_infomask |= HEAP_XMAX_IS_MULTI;
 			}
@@ -3851,12 +3857,14 @@ l3:
 	 * Store transaction information of xact locking the tuple.
 	 *
 	 * Note: Cmax is meaningless in this context, so don't set it; this avoids
-	 * possibly generating a useless combo CID.
+	 * possibly generating a useless combo CID.  FIXME -- it's not useless
+	 * if a multixact contains an update.
 	 */
 	tuple->t_data->t_infomask = new_infomask;
 	HeapTupleHeaderClearHotUpdated(tuple->t_data);
 	HeapTupleHeaderSetXmax(tuple->t_data, xid);
 	/* Make sure there is no forward chain link in t_ctid */
+	/* FIXME -- this needs some thought */
 	tuple->t_data->t_ctid = *tid;
 
 	MarkBufferDirty(*buffer);
