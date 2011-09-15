@@ -3240,6 +3240,30 @@ get_lockmode_for_tuplelock(LockTupleMode mode)
 	return tuple_lock_type;
 }
 
+static MultiXactStatus
+get_mxact_status_for_tuplelock(LockTupleMode mode)
+{
+	MultiXactStatus	status;
+
+	switch (mode)
+	{
+		case LockTupleKeyShare:
+			status = MultiXactStatusKeyShare;
+			break;
+		case LockTupleShare:
+			status = MultiXactStatusShare;
+			break;
+		case LockTupleUpdate:
+			status = MultiXactStatusUpdate;
+			break;
+		case LockTupleKeyUpdate:
+			status = MultiXactStatusKeyUpdate;
+			break;
+	}
+
+	return status;
+}
+
 /*
  *	heap_lock_tuple - lock a tuple in shared or exclusive mode
  *
@@ -3439,12 +3463,14 @@ l3:
 				   (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT))))
 				goto l3;
 			gotta_sleep = false;
+			keep_xmax = xwait;
+			keep_xmax_multi = infomask & HEAP_XMAX_IS_MULTI;
 		}
 
 		/*
 		 * If our lock is Update, we might also be able to skip the sleep; for
 		 * this to be true, we need to ensure that there's no other lock type
-		 * that KeyShare.
+		 * than KeyShare.
 		 */
 		if (mode == LockTupleUpdate)
 		{
@@ -3457,7 +3483,13 @@ l3:
 				 */
 				nmembers = GetMultiXactIdMembers(xwait, &members);
 				if (nmembers == 0)
+				{
 					gotta_sleep = false;
+					/*
+					 * No need to keep the previous xmax here. Unlikely to
+					 * happen anyway.
+					 */
+				}
 				else
 				{
 					for (i = 0; i++; i < nmembers)
@@ -3466,7 +3498,7 @@ l3:
 							continue;
 						/* no dice */
 					}
-					if (i == nmembers && members[i - 1] == MultiXactStatusKeyShare)
+					if (i == nmembers && members[i - 1].status == MultiXactStatusKeyShare)
 					{
 						/*
 						 * if the xmax changed under us in the meantime, start
@@ -3479,6 +3511,8 @@ l3:
 							goto l3;
 						/* otherwise, we're good */
 						gotta_sleep = false;
+						keep_xmax = xwait;
+						keep_xmax_multi = true;
 					}
 				}
 			}
@@ -3495,6 +3529,8 @@ l3:
 						goto l3;
 					/* otherwise, we're good */
 					gotta_sleep = false;
+					keep_xmax = xwait;
+					keep_xmax_multi = false;
 				}
 			}
 		}
@@ -3503,26 +3539,10 @@ l3:
 		{
 			if (infomask & HEAP_XMAX_IS_MULTI)
 			{
-				MultiXactStatus status;
+				MultiXactStatus status = get_mxact_status_for_tuplelock(mode);
 
-				switch (mode)
-				{
-					case LockTupleKeyShare:
-						status = MultiXactStatusKeyShare;
-						break;
-					case LockTupleShare:
-						status = MultiXactStatusShare;
-						break;
-					case LockTupleUpdate:
-						status = MultiXactStatusKeyUpdate;
-						break;
-					case LockTupleKeyUpdate:
-						elog(ERROR, "invalid KEY UPDATE lock mode in heap_tuple_lock");	
-						status = 0;		/* keep compiler quiet */
-					default:
-						elog(ERROR, "unrecognized lock mode %d", mode);
-						status = 0;		/* keep compiler quiet */
-				}
+				if (status == MultiXactStatusKeyUpdate)
+					elog(ERROR, "invalid KEY UPDATE lock mode in heap_tuple_lock");	
 
 				/* wait for multixact to end */
 				if (nowait)
