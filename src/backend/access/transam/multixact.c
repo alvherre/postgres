@@ -313,8 +313,8 @@ MultiXactIdCreateSingleton(TransactionId xid, MultiXactStatus status)
 
 	AssertArg(TransactionIdIsValid(xid));
 
-	members[0].xid = xid;
-	members[1].status = status;
+	member[0].xid = xid;
+	member[0].status = status;
 
 	newMulti = CreateMultiXactId(1, member);
 
