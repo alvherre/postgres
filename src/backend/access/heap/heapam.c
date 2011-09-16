@@ -3491,7 +3491,7 @@ l3:
 				goto l3;
 			gotta_sleep = false;
 			keep_xmax = xwait;
-			keep_xmax_multi = infomask & HEAP_XMAX_IS_MULTI ? true : false;
+			keep_xmax_multi = ((infomask & HEAP_XMAX_IS_MULTI) != 0);
 		}
 
 		/*
@@ -3672,7 +3672,6 @@ l3:
 		return result;
 	}
 
-#ifdef NOT_USED
 	/* FIXME --- see above for the same or similar check */
 	/*
 	 * We might already hold the desired lock (or stronger), possibly under a
@@ -3688,6 +3687,7 @@ l3:
 	xmax = HeapTupleHeaderGetXmax(tuple->t_data);
 	old_infomask = tuple->t_data->t_infomask;
 
+#ifdef NOT_USED
 	if (!(old_infomask & (HEAP_XMAX_INVALID |
 						  HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_IS_MULTI)) &&
@@ -3770,7 +3770,10 @@ l3:
 			else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
 				existing_lock_mode = MultiXactStatusKeyShare;
 			else
+			{
+				existing_lock_mode = 0;
 				elog(ERROR, "unexpected existing lock mode, infomask %u", old_infomask);
+			}
 			xid = MultiXactIdCreate(keep_xmax, existing_lock_mode,
 								  	xid, get_mxact_status_for_tuplelock(mode));
 			new_infomask |= get_hintbit_for_tuplelock(mode);
@@ -3901,8 +3904,12 @@ l3:
 		xlrec.target.node = relation->rd_node;
 		xlrec.target.tid = tuple->t_self;
 		xlrec.locking_xid = xid;
-		xlrec.xid_is_mxact = ((new_infomask & HEAP_XMAX_IS_MULTI) != 0);
-		xlrec.lock_strength = mode;
+		xlrec.infobits_set =
+			(((new_infomask & HEAP_XMAX_IS_MULTI) != 0) ? XLHL_XMAX_IS_MULTI : 0) |
+			(((new_infomask & HEAP_XMAX_IS_NOT_UPDATE) != 0) ? XLHL_XMAX_IS_NOT_UPDATE : 0) |
+			(((new_infomask & HEAP_XMAX_EXCL_LOCK) != 0) ? XLHL_XMAX_EXCL_LOCK : 0) |
+			(((new_infomask & HEAP_XMAX_KEYSHR_LOCK) != 0) ? XLHL_XMAX_KEYSHR_LOCK : 0) |
+			(((tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT) != 0) ? XLHL_XMAX_KEYSHR_LOCK : 0);
 		rdata[0].data = (char *) &xlrec;
 		rdata[0].len = SizeOfHeapLock;
 		rdata[0].buffer = InvalidBuffer;
@@ -5355,17 +5362,16 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 						  HEAP_XMAX_IS_MULTI |
 						  HEAP_IS_LOCKED |
 						  HEAP_MOVED);
-	if (xlrec->xid_is_mxact)
+	if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
 		htup->t_infomask |= HEAP_XMAX_IS_MULTI;
-	if (xlrec->lock_strength == LockTupleShare)
-		htup->t_infomask |= HEAP_XMAX_SHARED_LOCK;
-	else if (xlrec->lock_strength == LockTupleKeyShare)
-		htup->t_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-	else
-	{
-		Assert(xlrec->lock_strength == LockTupleUpdate);
+	if (xlrec->infobits_set & XLHL_XMAX_IS_NOT_UPDATE)
+		htup->t_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+	if (xlrec->infobits_set & XLHL_XMAX_EXCL_LOCK)
 		htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
-	}
+	if (xlrec->infobits_set & XLHL_XMAX_KEYSHR_LOCK)
+		htup->t_infomask |= HEAP_XMAX_KEYSHR_LOCK;
+	if (xlrec->infobits_set & XLHL_UPDATE_KEY_INTACT)
+		htup->t_infomask2 |= HEAP_UPDATE_KEY_INTACT;
 	HeapTupleHeaderClearHotUpdated(htup);
 	HeapTupleHeaderSetXmax(htup, xlrec->locking_xid);
 	HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
@@ -5569,20 +5575,19 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 	{
 		xl_heap_lock *xlrec = (xl_heap_lock *) rec;
 
-		if (xlrec->lock_strength == LockTupleShare)
-			appendStringInfo(buf, "shared_lock: ");
-		else if (xlrec->lock_strength == LockTupleKeyShare)
-			appendStringInfo(buf, "key_lock: ");
-		else if (xlrec->lock_strength == LockTupleUpdate)
-			appendStringInfo(buf, "exclusive_lock: ");
-		else
-			appendStringInfo(buf, "unknown_type_lock: ");
-		if (xlrec->xid_is_mxact)
-			appendStringInfo(buf, "mxid ");
-		else
-			appendStringInfo(buf, "xid ");
-		appendStringInfo(buf, "%u ", xlrec->locking_xid);
+		appendStringInfo(buf, "lock %u: ", xlrec->locking_xid);
 		out_target(buf, &(xlrec->target));
+		appendStringInfoChar(buf, ' ');
+		if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
+			appendStringInfo(buf, "XMAX_IS_MULTI ");
+		if (xlrec->infobits_set & XLHL_XMAX_IS_NOT_UPDATE)
+			appendStringInfo(buf, "XMAX_IS_NOT_UPDATE ");
+		if (xlrec->infobits_set & XLHL_XMAX_EXCL_LOCK)
+			appendStringInfo(buf, "XMAX_EXCL_LOCK ");
+		if (xlrec->infobits_set & XLHL_XMAX_KEYSHR_LOCK)
+			appendStringInfo(buf, "XMAX_KEYSHR_LOCK ");
+		if (xlrec->infobits_set & XLHL_UPDATE_KEY_INTACT)
+			appendStringInfo(buf, "UPDATE_KEY_INTACT ");
 	}
 	else if (info == XLOG_HEAP_INPLACE)
 	{

@@ -727,16 +727,22 @@ typedef struct xl_heap_newpage
 
 #define SizeOfHeapNewpage	(offsetof(xl_heap_newpage, blkno) + sizeof(BlockNumber))
 
+/* flags for xl_heap_lock.infobits_set */
+#define XLHL_XMAX_IS_MULTI		0x01
+#define XLHL_XMAX_IS_NOT_UPDATE	0x02
+#define XLHL_XMAX_EXCL_LOCK		0x04
+#define XLHL_XMAX_KEYSHR_LOCK	0x08
+#define XLHL_UPDATE_KEY_INTACT	0x10
+
 /* This is what we need to know about lock */
 typedef struct xl_heap_lock
 {
 	xl_heaptid	target;			/* locked tuple id */
 	TransactionId locking_xid;	/* might be a MultiXactId not xid */
-	bool		xid_is_mxact;	/* is it? */
-	int8		lock_strength;	/* keylock, shared, exclusive lock? */
+	int8		infobits_set;	/* infomask and infomask2 bits to set */
 } xl_heap_lock;
 
-#define SizeOfHeapLock	(offsetof(xl_heap_lock, lock_strength) + sizeof(int8))
+#define SizeOfHeapLock	(offsetof(xl_heap_lock, infobits_set) + sizeof(int8))
 
 /* This is what we need to know about in-place update */
 typedef struct xl_heap_inplace
