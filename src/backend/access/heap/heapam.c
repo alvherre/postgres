@@ -2738,9 +2738,9 @@ l2:
 	}
 
 	/*
-	 * If the tuple we're updating is locked, we need to preserve this in
-	 * the new tuple's Xmax as well as in the old tuple.  Prepare the new
-	 * xmax value for these uses.
+	 * If the tuple we're updating is locked, we need to preserve this in the
+	 * new tuple's Xmax as well as in the old tuple.  Prepare the new xmax
+	 * value for these uses.
 	 */
 	if (TransactionIdIsValid(keep_xmax))
 	{
@@ -2751,7 +2751,6 @@ l2:
 		else
 			keep_xmax = MultiXactIdCreate(keep_xmax, MultiXactStatusKeyShare,
 										  xid, MultiXactStatusUpdate);
-		/* XXX do we need the HEAP_XMAX_EXCL_LOCK bit here? */
 		keep_xmax_infomask = HEAP_XMAX_IS_MULTI | HEAP_XMAX_KEYSHR_LOCK;
 		/* FIXME -- need to set the other infomask bits as well ... what are they? */
 	}
