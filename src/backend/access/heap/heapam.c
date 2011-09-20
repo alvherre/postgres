@@ -2471,8 +2471,9 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	bool		use_hot_update = false;
 	bool		all_visible_cleared = false;
 	bool		all_visible_cleared_new = false;
-	bool			setxmax_is_multi = false;
-	TransactionId	setxmax = InvalidTransactionId;
+	bool			keep_xmax_multi = false;
+	TransactionId	keep_xmax = InvalidTransactionId;
+	uint16		keep_xmax_infomask = 0;
 
 	Assert(ItemPointerIsValid(otid));
 
@@ -2513,6 +2514,11 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	oldtup.t_len = ItemIdGetLength(lp);
 	oldtup.t_self = *otid;
 
+	/*
+	 * If we're not updating any "key" column, we can grab a milder lock type.
+	 * This allows for more concurrency when we are running simultaneously with
+	 * foreign key checks.
+	 */
 	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup))
 		tuplock = LockTupleUpdate;
 	else
@@ -2621,8 +2627,8 @@ l2:
 			if ((update_xact == InvalidTransactionId) ||
 				(TransactionIdDidAbort(update_xact)))
 			{
-				setxmax = xwait;
-				setxmax_is_multi = true;
+				keep_xmax = xwait;
+				keep_xmax_multi = true;
 				result = HeapTupleMayBeUpdated;
 			}
 		}
@@ -2650,8 +2656,8 @@ l2:
 			else
 			{
 				/* just a key-share locker; need to preserve him as locker */
-				setxmax = xwait;
-				setxmax_is_multi = false;
+				keep_xmax = xwait;
+				keep_xmax_multi = false;
 				result = HeapTupleMayBeUpdated;
 			}
 		}
@@ -2732,6 +2738,25 @@ l2:
 	}
 
 	/*
+	 * If the tuple we're updating is locked, we need to preserve this in
+	 * the new tuple's Xmax as well as in the old tuple.  Prepare the new
+	 * xmax value for these uses.
+	 */
+	if (TransactionIdIsValid(keep_xmax))
+	{
+		Assert(tuplock == LockTupleUpdate);
+		if (keep_xmax_multi)
+			keep_xmax = MultiXactIdExpand(keep_xmax,
+										  xid, MultiXactStatusUpdate);
+		else
+			keep_xmax = MultiXactIdCreate(keep_xmax, MultiXactStatusKeyShare,
+										  xid, MultiXactStatusUpdate);
+		/* XXX do we need the HEAP_XMAX_EXCL_LOCK bit here? */
+		keep_xmax_infomask = HEAP_XMAX_IS_MULTI | HEAP_XMAX_KEYSHR_LOCK;
+		/* FIXME -- need to set the other infomask bits as well ... what are they? */
+	}
+
+	/*
 	 * Prepare the new tuple with the appropriate initial values of Xmin and
 	 * Xmax, as well as initial infomask bits.
 	 */
@@ -2741,17 +2766,10 @@ l2:
 	HeapTupleHeaderSetXmin(newtup->t_data, xid);
 	HeapTupleHeaderSetCmin(newtup->t_data, cid);
 	newtup->t_tableOid = RelationGetRelid(relation);
-	if (setxmax != InvalidTransactionId)
+	if (TransactionIdIsValid(keep_xmax))
 	{
-		if (setxmax_is_multi)
-			setxmax = MultiXactIdExpand(setxmax, xid, tuplock);
-		else
-			setxmax = MultiXactIdCreate(setxmax, MultiXactStatusKeyShare,
-										xid, MultiXactStatusUpdate);
-		HeapTupleHeaderSetXmax(newtup->t_data, setxmax);
-		newtup->t_data->t_infomask |= (oldtup.t_data->t_infomask & 
-									   HEAP_XMAX_IS_MULTI);
-		/* FIXME -- need to set the other infomask bits as well ... what are they? */
+		newtup->t_data->t_infomask |= keep_xmax_infomask;
+		HeapTupleHeaderSetXmax(newtup->t_data, keep_xmax);
 	}
 	else
 	{
@@ -2802,7 +2820,13 @@ l2:
 									   HEAP_MOVED);
 		HeapTupleClearHotUpdated(&oldtup);
 		/* ... and store info about transaction updating this tuple */
-		HeapTupleHeaderSetXmax(oldtup.t_data, xid);
+		if (TransactionIdIsValid(keep_xmax))
+		{
+			HeapTupleHeaderSetXmax(oldtup.t_data, keep_xmax);
+			oldtup.t_data->t_infomask |= keep_xmax_infomask;
+		}
+		else
+			HeapTupleHeaderSetXmax(oldtup.t_data, xid);
 		HeapTupleHeaderSetCmax(oldtup.t_data, cid, iscombo);
 		/* temporarily make it look not-updated */
 		oldtup.t_data->t_ctid = oldtup.t_self;
@@ -2959,7 +2983,13 @@ l2:
 									   HEAP_IS_LOCKED |
 									   HEAP_MOVED);
 		/* ... and store info about transaction updating this tuple */
-		HeapTupleHeaderSetXmax(oldtup.t_data, xid);
+		if (TransactionIdIsValid(keep_xmax))
+		{
+			HeapTupleHeaderSetXmax(oldtup.t_data, keep_xmax);
+			oldtup.t_data->t_infomask |= keep_xmax_infomask;
+		}
+		else
+			HeapTupleHeaderSetXmax(oldtup.t_data, xid);
 		HeapTupleHeaderSetCmax(oldtup.t_data, cid, iscombo);
 	}
 
@@ -3032,7 +3062,8 @@ l2:
 	 * Release the lmgr tuple lock, if we had it.
 	 */
 	if (have_tuple_lock)
-		UnlockTuple(relation, &(oldtup.t_self), ExclusiveLock);
+		UnlockTuple(relation, &(oldtup.t_self),
+					get_lockmode_for_tuplelock(tuplock));
 
 	pgstat_count_heap_update(relation, use_hot_update);
 
