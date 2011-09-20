@@ -3409,65 +3409,68 @@ l3:
 		uint16		infomask2;
 		bool		gotta_sleep;
 
-		/*
-		 * XXX before unlocking the buffer, we must check whether our xact
-		 * holds the same lock, or a stricter one, on the tuple already.  If it
-		 * does, we must do the xmax changes immediately, without releasing the
-		 * buffer lock and without acquiring the tuple lock.  This allows us to
-		 * update the Xmax and multixact bit, without having to acquire the
-		 * tuple lock; this is necessary because if we were to try to acquire
-		 * tuple lock, we might deadlock against somebody waiting for us to
-		 * release it.
-		 *
-		 * FIXME -- having to call MultiXactGetMembers with the buffer lock
-		 * held is a serious problem.
-		 *
-		 * old comment follows -- probably needs adjustments.
-		 *
-		 * If we wish to acquire share lock, and the tuple is already
-		 * share-locked by a multixact that includes any subtransaction of the
-		 * current top transaction, then we effectively hold the desired lock
-		 * already.  We *must* succeed without trying to take the tuple lock,
-		 * else we will deadlock against anyone waiting to acquire exclusive
-		 * lock.  We don't need to make any state changes in this case.
-		 *
-		 * Likewise, if we wish to acquire a key lock, and the tuple is already
-		 * key-locked by us, we effectively hold the lock already.
-		 *
-		 * Note we cannot do this if we're asking for share lock and the tuple
-		 * is only key-locked.
-		 *
-		 * FIXME -- this needs to be rethought.
-		 */
-#ifdef NOT_USED
-		if (infomask & HEAP_XMAX_IS_MULTI)
-		{
-			bool	tryit = false;
-
-			if ((mode == LockTupleShare) && (infomask & HEAP_XMAX_SHARED_LOCK))
-				tryit = true;
-			if ((mode == LockTupleKeyShare) && (infomask & HEAP_XMAX_KEYSHR_LOCK))
-				tryit = true;
-			if ((mode == LockTupleUpdate) && (infomask & HEAP_XMAX_EXCL_LOCK))
-				tryit = true;
-
-			if (tryit && MultiXactIdIsCurrent((MultiXactId) xwait))
-			{
-				/* Probably can't hold tuple lock here, but may as well check */
-				if (have_tuple_lock)
-					UnlockTuple(relation, tid, tuple_lock_type);
-				LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
-				return HeapTupleMayBeUpdated;
-			}
-		}
-#endif
-
 		/* must copy state data before unlocking buffer */
 		xwait = HeapTupleHeaderGetXmax(tuple->t_data);
 		infomask = tuple->t_data->t_infomask;
 		infomask2 = tuple->t_data->t_infomask2;
 
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
+
+		/*
+		 * If we wish to acquire share or key lock, and the tuple is already
+		 * key or share locked by a multixact that includes any subtransaction
+		 * of the current top transaction, the we effectively hold the desired
+		 * lock already (except if we own key share lock and now desire share
+		 * lock).  We *must* succeed without trying to take the tuple lock,
+		 * else we will deadlock against anyone wanting to acquire a stronger
+		 * lock.  We update the Xmax with a new MultiXactId to include the new
+		 * lock mode in this case.
+		 *
+		 * Note that since we want to alter the Xmax, we need to re-acquire the
+		 * buffer lock.  The xmax could have changed in the meantime, so we
+		 * recheck it in that case, but we keep the buffer lock while doing it
+		 * to prevent starvation.  The second time around we know we must be
+		 * part of the MultiXactId in any case, which is why we don't need to
+		 * go back to recheck HeapTupleSatisfiesUpdate.
+		 */
+		if ((infomask & HEAP_XMAX_IS_MULTI) &&
+			((mode == LockTupleShare) || (mode == LockTupleKeyShare)))
+		{
+			int	nmembers;
+			MultiXactMember *member;
+
+			nmembers = GetMultiXactIdMembers(xwait, &member);
+			
+			for (i = 0; i < nmembers; i++)
+			{
+				if (TransactionIdIsCurrentTransactionId(members[i].xid))
+				{
+					if (mode == LockTupleKeyShare) /* any lock is good */
+					{
+						wehold = true;
+						break;
+					}
+					if (mode == LockTupleShare) /* need Share or Update */
+					{
+						if (members[i].status == MultiXactStatusShare ||
+							members[i].status == MultiXactStatusUpdate)
+
+						{
+							wehold = true;
+							break;
+						}
+					}
+				}
+			}
+
+			if (wehold)
+			{
+				/* FIXME -- re-acquire lock, update Xmax, release lock */
+				if (have_tuple_lock)
+					UnlockTuple(relation, tid, tuple_lock_type);
+				return HeapTupleMayBeUpdated;
+			}
+		}
 
 		/*
 		 * Acquire tuple lock to establish our priority for the tuple.
