@@ -308,6 +308,8 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 			return true;
 	
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsInProgress(xmax))
+			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
 			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
@@ -497,7 +499,6 @@ HeapTupleSatisfiesNow(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 
 	if (tuple->t_infomask & HEAP_XMAX_COMMITTED)
 	{
-		Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
 		if (tuple->t_infomask & HEAP_IS_LOCKED)
 			return true;
 		return false;
@@ -511,8 +512,14 @@ HeapTupleSatisfiesNow(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 			return true;
 	
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsInProgress(xmax))
+			return true;
 		if (TransactionIdDidCommit(xmax))
+		{
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+						InvalidTransactionId);
 			return false;
+		}
 		return true;
 	}
 
@@ -765,9 +772,9 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 	if (tuple->t_infomask & HEAP_XMAX_COMMITTED)
 	{
-		Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
 		if (tuple->t_infomask & HEAP_IS_LOCKED)
 			return HeapTupleMayBeUpdated;
+		/* XXX might have XMAX_IS_MULTI ... */
 		return HeapTupleUpdated;	/* updated by other */
 	}
 
@@ -793,11 +800,8 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		if (TransactionIdDidCommit(xmax))
 		{
-			/*
-			 * XXX we could set HEAP_XMAX_COMMITTED here, but only if we were
-			 * to reset HEAP_XMAX_IS_MULTI and relabel the Xmax to the update
-			 * xact
-			 */
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+						InvalidTransactionId);
 			return HeapTupleUpdated;
 		}
 		/* it must have aborted or crashed */
@@ -970,7 +974,6 @@ HeapTupleSatisfiesDirty(HeapTupleHeader tuple, Snapshot snapshot,
 
 	if (tuple->t_infomask & HEAP_XMAX_COMMITTED)
 	{
-		Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
 		if (tuple->t_infomask & HEAP_IS_LOCKED)
 			return true;
 		return false;			/* updated by other */
@@ -984,8 +987,14 @@ HeapTupleSatisfiesDirty(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 	
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsInProgress(xmax))
+			return true;
 		if (TransactionIdDidCommit(xmax))
+		{
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+						InvalidTransactionId);
 			return false;
+		}
 		return true;
 	}
 
@@ -1169,8 +1178,12 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsInProgress(xmax))
+			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+						InvalidTransactionId);
 			/* updating transaction committed, but when? */
 			if (XidInMVCCSnapshot(xmax, snapshot))
 				return true;	/* treat as still in progress */
