@@ -312,8 +312,7 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-						InvalidTransactionId);
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			return false;
 		}
 		return true;
@@ -516,8 +515,7 @@ HeapTupleSatisfiesNow(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-						InvalidTransactionId);
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			return false;
 		}
 		return true;
@@ -800,8 +798,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-						InvalidTransactionId);
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			return HeapTupleUpdated;
 		}
 		/* it must have aborted or crashed */
@@ -991,8 +988,7 @@ HeapTupleSatisfiesDirty(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-						InvalidTransactionId);
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			return false;
 		}
 		return true;
@@ -1182,8 +1178,7 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
-						InvalidTransactionId);
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			/* updating transaction committed, but when? */
 			if (XidInMVCCSnapshot(xmax, snapshot))
 				return true;	/* treat as still in progress */
@@ -1352,6 +1347,10 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 			}
 
 			/*
+			 * FIXME -- if the multixact is gone, we should replace it with
+			 * the plain updating Xid and remove the IS_MULTI bit.
+			 */
+			/*
 			 * We don't really care whether xmax did commit, abort or crash.
 			 * We know that xmax did lock the tuple, but it did not and will
 			 * never actually update it.
@@ -1359,6 +1358,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
 						InvalidTransactionId);
 		}
+
 		return HEAPTUPLE_LIVE;
 	}
 
