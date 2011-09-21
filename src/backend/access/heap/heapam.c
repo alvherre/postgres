@@ -2649,6 +2649,7 @@ l2:
 			}
 			else
 			{
+				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 				/* just a key-share locker; need to preserve him as locker */
 				setxmax = xwait;
 				setxmax_is_multi = false;
