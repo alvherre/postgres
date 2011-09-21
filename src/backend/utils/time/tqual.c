@@ -295,7 +295,6 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 
 	if (tuple->t_infomask & HEAP_XMAX_COMMITTED)
 	{
-		Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
 		if (tuple->t_infomask & HEAP_IS_LOCKED)
 			return true;
 		return false;			/* updated by other */
@@ -310,7 +309,11 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 	
 		xmax = HeapTupleGetUpdateXid(tuple);
 		if (TransactionIdDidCommit(xmax))
+		{
+			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
+						InvalidTransactionId);
 			return false;
+		}
 		return true;
 	}
 

@@ -2618,6 +2618,11 @@ l2:
 			 * Note that there could have been another update in the MultiXact.
 			 * In that case, we need to check whether it committed or aborted,
 			 * and make sure we fix up the return value appropriately.
+			 *
+			 * In the LockTupleKeyUpdate case, we still need to preserve the
+			 * surviving members: those would include the tuple locks we had
+			 * before this one, which are important to keep in case this
+			 * subxact aborts.
 			 */
 			update_xact = InvalidTransactionId;
 			if (!(oldtup.t_data->t_infomask & HEAP_IS_LOCKED))
@@ -2742,6 +2747,10 @@ l2:
 	 * If the tuple we're updating is locked, we need to preserve this in the
 	 * new tuple's Xmax as well as in the old tuple.  Prepare the new xmax
 	 * value for these uses.
+	 *
+	 * Note there cannot be an xmax to save if we're changing key columns; in
+	 * this case, the wait above should have only returned when the locking
+	 * transactions finished.
 	 */
 	if (TransactionIdIsValid(keep_xmax))
 	{
