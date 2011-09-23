@@ -3513,34 +3513,46 @@ l3:
 		}
 
 		/*
-		 * If our lock is either KeyShare or Share, and there's no update
-		 * present, we don't need to wait for the locking transaction(s) to
-		 * finish.
+		 * FIXME -- rephrase this comment
+		 * If our lock is KeyShare, and there's no update present, we don't
+		 * need to wait for the locking transaction(s) to finish.
 		 *
 		 * Similarly, for a KeyShare lock, if there's an update but the key
 		 * hasn't been modified, we can also continue without blocking.
 		 */
 		require_sleep = true;
-		if (((mode == LockTupleKeyShare || mode == LockTupleShare) &&
-			 (infomask & HEAP_IS_LOCKED)) ||
-			((mode == LockTupleKeyShare) &&
-			 (infomask2 & HEAP_UPDATE_KEY_INTACT)))
+		if ((mode == LockTupleKeyShare) &&
+			(infomask & HEAP_IS_LOCKED || infomask2 & HEAP_UPDATE_KEY_INTACT))
 		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
 			 * Make sure it's still an appropriate lock, else start over.
+			 * FIXME -- correct this ... no more "share" stuff here
 			 */
-			if (!(((mode == LockTupleKeyShare || mode == LockTupleShare) &&
-				   (tuple->t_data->t_infomask & HEAP_IS_LOCKED)) ||
-				  ((mode == LockTupleKeyShare) &&
-				   (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) &&
-				   (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT))))
+			if (!((tuple->t_data->t_infomask & HEAP_IS_LOCKED) ||
+				  (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT)))
+				goto l3;
+			require_sleep = false;
+			keep_xmax = xwait;	/* FIXME -- oughta use the possibly changed xmax here ..*/
+			keep_xmax_multi = (infomask & HEAP_XMAX_IS_MULTI) != 0;
+		}
+
+		if (mode == LockTupleShare &&
+			!(infomask & HEAP_XMAX_EXCL_LOCK))
+		{
+			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+
+			/*
+			 * make sure it's still an appropriate lock, else start over.
+			 */
+			if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
 				goto l3;
 			require_sleep = false;
 			keep_xmax = xwait;
-			keep_xmax_multi = ((infomask & HEAP_XMAX_IS_MULTI) != 0);
+			keep_xmax_multi = (infomask & HEAP_XMAX_IS_MULTI) != 0;
 		}
+
 
 		/*
 		 * If our lock is Update, we might also be able to skip the sleep; for
@@ -3571,15 +3583,17 @@ l3:
 				else
 				{
 					int		i;
+					bool	allowed = true;
 
 					for (i = 0; i < nmembers; i++)
 					{
-						if (members[i].status == MultiXactStatusKeyShare)
-							continue;
-						/* no dice */
+						if (members[i].status != MultiXactStatusKeyShare)
+						{
+							allowed = false;
+							break;
+						}
 					}
-					if (i == nmembers &&
-						members[i - 1].status == MultiXactStatusKeyShare)
+					if (allowed)
 					{
 						/*
 						 * if the xmax changed under us in the meantime, start
