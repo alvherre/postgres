@@ -780,6 +780,13 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	{
 		TransactionId	xmax;
 
+		if (tuple->t_infomask & HEAP_IS_LOCKED)
+		{
+			if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(tuple)))
+				return HeapTupleBeingUpdated;
+			return HeapTupleMayBeUpdated;
+		}
+
 		xmax = HeapTupleGetUpdateXid(tuple);
 
 		if (TransactionIdIsCurrentTransactionId(xmax))
@@ -792,9 +799,6 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(tuple)))
 			return HeapTupleBeingUpdated;
-
-		if (tuple->t_infomask & HEAP_IS_LOCKED)
-			return HeapTupleMayBeUpdated;
 
 		if (TransactionIdDidCommit(xmax))
 		{
