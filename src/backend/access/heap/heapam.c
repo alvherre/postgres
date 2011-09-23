@@ -3785,7 +3785,7 @@ l3:
 
 	/*
 	 * if we have keep_xmax, this is easy to compute -- just create a new mxact
-	 * including our new xid plus whatever was on Xmax previously.
+	 * including our new xid plus whatever there was on Xmax previously.
 	 */
 	if (TransactionIdIsValid(keep_xmax))
 	{
@@ -3830,10 +3830,8 @@ l3:
 			else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
 				existing_lock_mode = MultiXactStatusKeyShare;
 			else
-			{
-				existing_lock_mode = 0;
-				elog(ERROR, "unexpected existing lock mode, infomask %u", old_infomask);
-			}
+				/* must be a shared lock */
+				existing_lock_mode = MultiXactStatusShare;
 
 			xid = MultiXactIdCreate(keep_xmax, existing_lock_mode,
 									xid, get_mxact_status_for_tuplelock(mode));
@@ -3913,7 +3911,7 @@ l3:
 				 * here no matter what.
 				 */
 				xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
-				new_infomask |= HEAP_XMAX_IS_MULTI;
+				new_infomask |= HEAP_XMAX_IS_MULTI | HEAP_XMAX_IS_NOT_UPDATE;
 			}
 			else
 			{
@@ -3923,6 +3921,7 @@ l3:
 				 * TransactionIdIsInProgress() got to run.	Treat it like
 				 * there's no locker in the tuple.
 				 */
+				new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
 			}
 		}
 		else
@@ -3931,6 +3930,7 @@ l3:
 			 * There was no previous locker, so just insert our own
 			 * TransactionId.
 			 */
+			new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
 		}
 	}
 
