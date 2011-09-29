@@ -674,7 +674,7 @@ vac_update_datfrozenxid(void)
 	 * Initialize the "min" calculation with GetOldestXmin, which is a
 	 * reasonable approximation to the minimum relfrozenxid for not-yet-
 	 * committed pg_class entries for new tables; see AddNewRelationTuple().
-	 * Se we cannot produce a wrong minimum by starting with this.
+	 * So we cannot produce a wrong minimum by starting with this.
 	 */
 	newFrozenXid = GetOldestXmin(true, true);
 
