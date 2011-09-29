@@ -54,6 +54,7 @@
 #include "nodes/nodeFuncs.h"
 #include "optimizer/planmain.h"
 #include "optimizer/prep.h"
+#include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "storage/lmgr.h"
 #include "tcop/pquery.h"
@@ -696,7 +697,8 @@ CheckCachedPlan(CachedPlanSource *plansource)
 /*
  * BuildCachedPlan: construct a new CachedPlan from a CachedPlanSource.
  *
- * qlist should be the result value from a previous RevalidateCachedQuery.
+ * qlist should be the result value from a previous RevalidateCachedQuery,
+ * or it can be set to NIL if we need to re-copy the plansource's query_list.
  *
  * To build a generic, parameter-value-independent plan, pass NULL for
  * boundParams.  To build a custom plan, pass the actual parameter values via
@@ -756,14 +758,12 @@ BuildCachedPlan(CachedPlanSource *plansource, List *qlist,
 	PushOverrideSearchPath(plansource->search_path);
 
 	/*
-	 * If a snapshot is already set (the normal case), we can just use
-	 * that for parsing/planning.  But if it isn't, install one.  Note: no
-	 * point in checking whether parse analysis requires a snapshot;
-	 * utility commands don't have invalidatable plans, so we'd not get
-	 * here for such a command.
+	 * If a snapshot is already set (the normal case), we can just use that
+	 * for planning.  But if it isn't, and we need one, install one.
 	 */
 	snapshot_set = false;
-	if (!ActiveSnapshotSet())
+	if (!ActiveSnapshotSet() &&
+		analyze_requires_snapshot(plansource->raw_parse_tree))
 	{
 		PushActiveSnapshot(GetTransactionSnapshot());
 		snapshot_set = true;
@@ -981,6 +981,13 @@ GetCachedPlan(CachedPlanSource *plansource, ParamListInfo boundParams,
 			 * plan.
 			 */
 			customplan = choose_custom_plan(plansource, boundParams);
+
+			/*
+			 * If we choose to plan again, we need to re-copy the query_list,
+			 * since the planner probably scribbled on it.  We can force
+			 * BuildCachedPlan to do that by passing NIL.
+			 */
+			qlist = NIL;
 		}
 	}
 
