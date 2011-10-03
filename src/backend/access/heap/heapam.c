@@ -2718,13 +2718,16 @@ l2:
 	 * visible while we were busy locking the buffer, or during some subsequent
 	 * window during which we had it unlocked, we'll have to unlock and
 	 * re-lock, to avoid holding the buffer lock across an I/O.  That's a bit
-	 * unfortunate, but hopefully shouldn't happen often.
+	 * unfortunate, esepecially since we'll now have to recheck whether the
+	 * tuple has been locked or updated under us, but hopefully it won't
+	 * happen very often.
 	 */
 	if (vmbuffer == InvalidBuffer && PageIsAllVisible(page))
 	{
 		LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 		visibilitymap_pin(relation, block, &vmbuffer);
 		LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+		goto l2;
 	}
 
 	/*
@@ -3513,12 +3516,10 @@ l3:
 		}
 
 		/*
-		 * FIXME -- rephrase this comment
-		 * If our lock is KeyShare, and there's no update present, we don't
-		 * need to wait for the locking transaction(s) to finish.
-		 *
-		 * Similarly, for a KeyShare lock, if there's an update but the key
-		 * hasn't been modified, we can also continue without blocking.
+		 * If we're requesting KeyShare, and there's no update present, we
+		 * don't need to wait for locking transaction(s) to finish.  Even if
+		 * there is an update, we can still continue if the key hasn't been
+		 * modified.
 		 */
 		require_sleep = true;
 		if ((mode == LockTupleKeyShare) &&
@@ -3528,17 +3529,22 @@ l3:
 
 			/*
 			 * Make sure it's still an appropriate lock, else start over.
-			 * FIXME -- correct this ... no more "share" stuff here
 			 */
 			if (!((tuple->t_data->t_infomask & HEAP_IS_LOCKED) ||
 				  (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT)))
 				goto l3;
 			require_sleep = false;
-			keep_xmax = xwait;	/* FIXME -- oughta use the possibly changed xmax here ..*/
-			keep_xmax_multi = (infomask & HEAP_XMAX_IS_MULTI) != 0;
+			/* acquire fresh values -- XXX do we need to restart if xmax changed? */
+			keep_xmax = HeapTupleHeaderGetXmax(tuple->t_data);
+			keep_xmax_multi = (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
 		}
 
+		/*
+		 * If we're requesting Share, we need to ensure there's no update
+		 * and no exclusive lock present.
+		 */
 		if (mode == LockTupleShare &&
+			(infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_NOT_UPDATE)) &&
 			!(infomask & HEAP_XMAX_EXCL_LOCK))
 		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3546,11 +3552,14 @@ l3:
 			/*
 			 * make sure it's still an appropriate lock, else start over.
 			 */
-			if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
+			if (!(tuple->t_data->t_infomask &
+				  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_NOT_UPDATE)) ||
+				(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
 				goto l3;
 			require_sleep = false;
-			keep_xmax = xwait;
-			keep_xmax_multi = (infomask & HEAP_XMAX_IS_MULTI) != 0;
+			/* acquire fresh values */
+			keep_xmax = HeapTupleHeaderGetXmax(tuple->t_data);
+			keep_xmax_multi = (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
 		}
 
 

@@ -101,7 +101,9 @@ include 'filename'
     value. Alternatively, you can send the signal to a single server
     process directly.  Some parameters can only be set at server start;
     any changes to their entries in the configuration file will be ignored
-    until the server is restarted.
+    until the server is restarted.  Invalid parameter settings in the
+    configuration file are likewise ignored (but logged) during
+    <systemitem>SIGHUP</> processing.
    </para>
 
    <para>
@@ -1537,7 +1539,7 @@ SET ENABLE_SEQSCAN TO OFF;
      </varlistentry>
 
      <varlistentry id="guc-synchronous-commit" xreflabel="synchronous_commit">
-      <term><varname>synchronous_commit</varname> (<type>boolean</type>)</term>
+      <term><varname>synchronous_commit</varname> (<type>enum</type>)</term>
       <indexterm>
        <primary><varname>synchronous_commit</> configuration parameter</primary>
       </indexterm>
@@ -2533,8 +2535,8 @@ SET ENABLE_SEQSCAN TO OFF;
        <para>
         Sets the planner's estimate of the cost of a disk page fetch
         that is part of a series of sequential fetches.  The default is 1.0.
-        This value can be overridden for a particular tablespace by setting
-        the tablespace parameter of the same name
+        This value can be overridden for tables and indexes in a particular
+        tablespace by setting the tablespace parameter of the same name
         (see <xref linkend="sql-altertablespace">).
        </para>
       </listitem>
@@ -2549,8 +2551,8 @@ SET ENABLE_SEQSCAN TO OFF;
        <para>
         Sets the planner's estimate of the cost of a
         non-sequentially-fetched disk page.  The default is 4.0.
-        This value can be overridden for a particular tablespace by setting
-        the tablespace parameter of the same name
+        This value can be overridden for tables and indexes in a particular
+        tablespace by setting the tablespace parameter of the same name
         (see <xref linkend="sql-altertablespace">).
        </para>
 
