@@ -216,7 +216,6 @@ typedef struct MxactZeroOffPg
 {
 	int				pageno;
 	TransactionId	freezeXid;
-	bool			skip_invalid;
 } MxactZeroOffPg;
 
 /*
@@ -282,6 +281,7 @@ static MultiXactId CreateMultiXactId(int nmembers, MultiXactMember *members);
 static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 				   int nmembers, MultiXactMember *members);
 static MultiXactId GetNewMultiXactId(int nmembers, MultiXactOffset *offset);
+static MultiXactId HandleMxactOffsetCornerCases(MultiXactId multi);
 static bool MultiXactStatusConflict(MultiXactStatus status1,
 						MultiXactStatus status2);
 
@@ -296,8 +296,8 @@ static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *me
 #endif
 
 /* management of SLRU infrastructure */
-static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId freezeXid,
-						bool skip_invalid);
+static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog,
+						TransactionId freezeXid);
 static int	ZeroMultiXactMemberPage(int pageno, bool writeXlog);
 static bool MultiXactOffsetPagePrecedes(int page1, int page2);
 static bool MultiXactMemberPagePrecedes(int page1, int page2);
@@ -307,11 +307,8 @@ static bool MultiXactOffsetPrecedes(MultiXactOffset offset1,
 static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
 static void TruncateMultiXact(void);
-static void WriteMZeroOffsetPageXlogRec(int pageno, TransactionId freezeXid,
-							bool skip_invalid);
+static void WriteMZeroOffsetPageXlogRec(int pageno, TransactionId freezeXid);
 static void WriteMZeroMemberPageXlogRec(int pageno);
-static void StoreXidInOffsetPage(int slotno, TransactionId freezeXid,
-					 int offset);
 
 
 /*
@@ -580,28 +577,6 @@ MultiXactIdIsCurrent(MultiXactId multi)
 	return result;
 }
 
-/*
- * HandleMxactOffsetCornerCases
- * 		Properly handle corner cases of MultiXactId enumeration
- *
- * This function takes a MultiXactId and returns a value that's actually a
- * valid multi.  In most cases it returns the value it was handed, with
- * two exceptions: (a) if one of the two reserved values in the very first page
- * is passed, return FirstMultiXactId; (b) if the first value of the first page
- * of any segment is passed, return the next value.
- */
-static MultiXactId
-HandleMxactOffsetCornerCases(MultiXactId multi)
-{
-	if (multi < FirstMultiXactId)
-		return FirstMultiXactId;
-
-	if (MultiXactIdToOffsetEntry(multi) == 0 &&
-		multi % SLRU_PAGES_PER_SEGMENT == 0)
-		return multi + 1;
-
-	return multi;
-}
 
 /*
  * MultiXactIdSetOldestMember
@@ -1048,6 +1023,30 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	debug_elog4(DEBUG2, "GetNew: returning %u offset %u", result, *offset);
 	return result;
 }
+
+/*
+ * HandleMxactOffsetCornerCases
+ * 		Properly handle corner cases of MultiXactId enumeration
+ *
+ * This function takes a MultiXactId and returns a value that's actually a
+ * valid multi.  In most cases it returns the value it was handed, with
+ * two exceptions: (a) if one of the two reserved values in the very first page
+ * is passed, return FirstMultiXactId; (b) if the first value of the first page
+ * of any segment is passed, return the next value.
+ */
+static MultiXactId
+HandleMxactOffsetCornerCases(MultiXactId multi)
+{
+	if (multi < FirstMultiXactId)
+		return FirstMultiXactId;
+
+	if (MultiXactIdToOffsetEntry(multi) == 0 &&
+		multi % SLRU_PAGES_PER_SEGMENT == 0)
+		return multi + 1;
+
+	return multi;
+}
+
 
 /*
  * GetMultiXactIdMembers
@@ -1669,7 +1668,7 @@ BootStrapMultiXact(void)
 	LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
 	/* Create and zero the first page of the offsets log */
-	slotno = ZeroMultiXactOffsetPage(0, false, InvalidTransactionId, false);
+	slotno = ZeroMultiXactOffsetPage(0, false, InvalidTransactionId);
 
 	/* Make sure it's written out */
 	SimpleLruWritePage(MultiXactOffsetCtl, slotno);
@@ -1692,6 +1691,7 @@ BootStrapMultiXact(void)
 /*
  * Initialize (or reinitialize) a page of MultiXactOffset to zeroes.
  * If writeXlog is TRUE, also emit an XLOG record saying we did this.
+ *
  * If freezeXid is valid, store it in the first position of the page.
  *
  * The page is not actually written, just set up in shared memory.
@@ -1700,17 +1700,26 @@ BootStrapMultiXact(void)
  * Control lock must be held at entry, and will be held at exit.
  */
 static int
-ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId freezeXid, bool skip_invalid)
+ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId freezeXid)
 {
 	int			slotno;
 
 	slotno = SimpleLruZeroPage(MultiXactOffsetCtl, pageno);
 
 	if (writeXlog)
-		WriteMZeroOffsetPageXlogRec(pageno, freezeXid, skip_invalid);
+		WriteMZeroOffsetPageXlogRec(pageno, freezeXid);
 
 	if (TransactionIdIsValid(freezeXid))
-		StoreXidInOffsetPage(slotno, freezeXid, skip_invalid ? 1 : 0);
+	{
+		MultiXactOffset *offptr;
+
+		offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
+		if (pageno == 0)
+			offptr++;
+		*offptr = freezeXid;
+
+		MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
+	}
 
 	return slotno;
 }
@@ -1884,25 +1893,6 @@ CheckPointMultiXact(void)
 }
 
 /*
- * Store the given TransactionId in the offset page living at the given slot.
- *
- * Offset control lock must be held at entry, and will be held at exit.  A
- * valid page must be already loaded into the slot.
- */
-static void
-StoreXidInOffsetPage(int slotno, TransactionId freezeXid, int offset)
-{
-	MultiXactOffset *offptr;
-
-
-	offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
-	offptr += offset;
-	*offptr = freezeXid;
-
-	MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
-}
-
-/*
  * Set the next-to-be-assigned MultiXactId and offset
  *
  * This is used when we can determine the correct next ID/offset exactly
@@ -1981,8 +1971,7 @@ ExtendMultiXactOffset(MultiXactId multi)
 	 */
 	Assert(TransactionIdIsValid(RecentGlobalXmin));
 	ZeroMultiXactOffsetPage(pageno, true,
-							segpage == 0 ? RecentGlobalXmin : InvalidTransactionId,
-							multi == FirstMultiXactId);
+							segpage == 0 ? RecentGlobalXmin : InvalidTransactionId);
 	LWLockRelease(MultiXactOffsetControlLock);
 }
 
@@ -2212,14 +2201,13 @@ MultiXactOffsetPrecedes(MultiXactOffset offset1, MultiXactOffset offset2)
 }
 
 static void
-WriteMZeroOffsetPageXlogRec(int pageno, TransactionId freezeXid, bool skip_invalid)
+WriteMZeroOffsetPageXlogRec(int pageno, TransactionId freezeXid)
 {
 	XLogRecData	rdata;
 	MxactZeroOffPg zerooff;
 
 	zerooff.pageno = pageno;
 	zerooff.freezeXid = freezeXid;
-	zerooff.skip_invalid = skip_invalid;
 
 	rdata.data = (char *) (&zerooff);
 	rdata.len = sizeof(MxactZeroOffPg);
@@ -2264,8 +2252,7 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
 		slotno = ZeroMultiXactOffsetPage(zerooff.pageno, false,
-										 zerooff.freezeXid,
-										 zerooff.skip_invalid);
+										 zerooff.freezeXid);
 		SimpleLruWritePage(MultiXactOffsetCtl, slotno);
 		Assert(!MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
@@ -2339,9 +2326,8 @@ multixact_desc(StringInfo buf, uint8 xl_info, char *rec)
 		MxactZeroOffPg zerooff;
 
 		memcpy(&zerooff, XLogRecGetData(rec), sizeof(MxactZeroOffPg));
-		appendStringInfo(buf, "zero offsets page: %d freeze: %u (at pos %d)",
-						 zerooff.pageno, zerooff.freezeXid,
-						 zerooff.skip_invalid ? 1 : 0);
+		appendStringInfo(buf, "zero offsets page: %d freeze: %u",
+						 zerooff.pageno, zerooff.freezeXid);
 	}
 	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
 	{
