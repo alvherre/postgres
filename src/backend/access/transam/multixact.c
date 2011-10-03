@@ -968,6 +968,13 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	ExtendMultiXactOffset(result);
 
 	/*
+	 * If this is the first value on a page that is the first of its SLRU
+	 * segment, ExtendMultiXactOffset already wrote the freezeXid to it,
+	 * so we must skip it in the next iteration.
+	 */
+	result = MultiXactHandleOffsetPageBoundary(result);
+
+	/*
 	 * Reserve the members space, similarly to above.  Also, be careful not to
 	 * return zero as the starting offset for any multixact. See
 	 * GetMultiXactIdMembers() for motivation.
@@ -998,9 +1005,10 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 *
 	 * We don't care about MultiXactId wraparound here; it will be handled by
 	 * the next iteration.	But note that nextMXact may be InvalidMultiXactId
-	 * after this routine exits, so anyone else looking at the variable must
-	 * be prepared to deal with that.  Similarly, nextOffset may be zero, but
-	 * we won't use that as the actual start offset of the next multixact.
+	 * or the first value on a segment-beggining page after this routine exits,
+	 * so anyone else looking at the variable must be prepared to deal with
+	 * either case.  Similarly, nextOffset may be zero, but we won't use that
+	 * as the actual start offset of the next multixact.
 	 */
 	(MultiXactState->nextMXact)++;
 
@@ -1887,6 +1895,9 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 
 /*
  * Make sure that MultiXactOffset has room for a newly-allocated MultiXactId.
+ *
+ * If the newly allocated page is the first page on the segment, store an
+ * appropriate truncate Xid value in the page first position.
  *
  * NB: this is called while holding MultiXactGenLock.  We want it to be very
  * fast most of the time; even when it's not so fast, no actual I/O need
