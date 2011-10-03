@@ -1669,7 +1669,7 @@ BootStrapMultiXact(void)
 	LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
 	/* Create and zero the first page of the offsets log */
-	slotno = ZeroMultiXactOffsetPage(0, false, FirstNormalTransactionId, true);
+	slotno = ZeroMultiXactOffsetPage(0, false, InvalidTransactionId, false);
 
 	/* Make sure it's written out */
 	SimpleLruWritePage(MultiXactOffsetCtl, slotno);
@@ -1900,9 +1900,6 @@ StoreXidInOffsetPage(int slotno, TransactionId freezeXid, int offset)
 	*offptr = freezeXid;
 
 	MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
-	SimpleLruWritePage(MultiXactOffsetCtl, slotno);
-	elog(LOG, "stored %u at offset %d in page %d in %s",
-		 freezeXid, offset, MultiXactOffsetCtl->shared->page_number[slotno], MultiXactOffsetCtl->Dir);
 }
 
 /*
