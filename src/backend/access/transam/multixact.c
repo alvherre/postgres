@@ -981,8 +981,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 */
 	result = MultiXactState->nextMXact;
 
-	/* give a change for ExtendMultiXactOffset to increment the mxid */
-	result = ExtendMultiXactOffset(result);
+	ExtendMultiXactOffset(result);
 
 	/*
 	 * If this is the first value on a page that is the first of its SLRU
