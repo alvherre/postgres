@@ -14,12 +14,8 @@
 #include "access/xlog.h"
 
 #define InvalidMultiXactId	((MultiXactId) 0)
-#define FirstMultiXactId	((MultiXactId) 1)
-/*
- * This value is used to bootstrap; FirstMultiXactId is actually reserved
- * to store mxact offset truncate position.
- */
-#define BootstrapMultiXactId	((MultiXactId) 2)
+/* MultiXactId 1 is reserved to store the freezeXid of the first segment */
+#define FirstMultiXactId	((MultiXactId) 2)
 
 #define MultiXactIdIsValid(multi) ((multi) != InvalidMultiXactId)
 

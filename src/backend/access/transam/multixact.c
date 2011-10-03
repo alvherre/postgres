@@ -304,7 +304,7 @@ static bool MultiXactMemberPagePrecedes(int page1, int page2);
 static bool MultiXactIdPrecedes(MultiXactId multi1, MultiXactId multi2);
 static bool MultiXactOffsetPrecedes(MultiXactOffset offset1,
 						MultiXactOffset offset2);
-static MultiXactId ExtendMultiXactOffset(MultiXactId multi);
+static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
 static void TruncateMultiXact(void);
 static void WriteMZeroOffsetPageXlogRec(int pageno, TransactionId freezeXid,
@@ -581,6 +581,29 @@ MultiXactIdIsCurrent(MultiXactId multi)
 }
 
 /*
+ * HandleMxactOffsetCornerCases
+ * 		Properly handle corner cases of MultiXactId enumeration
+ *
+ * This function takes a MultiXactId and returns a value that's actually a
+ * valid multi.  In most cases it returns the value it was handed, with
+ * two exceptions: (a) if one of the two reserved values in the very first page
+ * is passed, return FirstMultiXactId; (b) if the first value of the first page
+ * of any segment is passed, return the next value.
+ */
+static MultiXactId
+HandleMxactOffsetCornerCases(MultiXactId multi)
+{
+	if (multi < FirstMultiXactId)
+		return FirstMultiXactId;
+
+	if (MultiXactIdToOffsetEntry(multi) == 0 &&
+		multi % SLRU_PAGES_PER_SEGMENT == 0)
+		return multi + 1;
+
+	return multi;
+}
+
+/*
  * MultiXactIdSetOldestMember
  *		Save the oldest MultiXactId this transaction could be a member of.
  *
@@ -616,8 +639,7 @@ MultiXactIdSetOldestMember(void)
 		 * must be sure to store a valid value in our array entry.
 		 */
 		nextMXact = MultiXactState->nextMXact;
-		if (nextMXact < FirstMultiXactId)
-			nextMXact = FirstMultiXactId;
+		nextMXact = HandleMxactOffsetCornerCases(nextMXact);
 
 		OldestMemberMXactId[MyBackendId] = nextMXact;
 
@@ -660,8 +682,7 @@ MultiXactIdSetOldestVisible(void)
 		 * must be sure to store a valid value in our array entry.
 		 */
 		oldestMXact = MultiXactState->nextMXact;
-		if (oldestMXact < FirstMultiXactId)
-			oldestMXact = FirstMultiXactId;
+		oldestMXact = HandleMxactOffsetCornerCases(oldestMXact);
 
 		for (i = 1; i <= MaxOldestSlot; i++)
 		{
@@ -972,9 +993,8 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 
-	/* Handle wraparound of the nextMXact counter */
-	if (MultiXactState->nextMXact < FirstMultiXactId)
-		MultiXactState->nextMXact = FirstMultiXactId;
+	/* Handle corner cases of the nextMXact counter */
+	MultiXactState->nextMXact = HandleMxactOffsetCornerCases(MultiXactState->nextMXact);
 
 	/*
 	 * Assign the MXID, and make sure there is room for it in the file.
@@ -982,13 +1002,6 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	result = MultiXactState->nextMXact;
 
 	ExtendMultiXactOffset(result);
-
-	/*
-	 * If this is the first value on a page that is the first of its SLRU
-	 * segment, ExtendMultiXactOffset already wrote the freezeXid to it,
-	 * so we must skip it in the next iteration.
-	 */
-	result = MultiXactHandleOffsetPageBoundary(result);
 
 	/*
 	 * Reserve the members space, similarly to above.  Also, be careful not to
@@ -1026,7 +1039,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 * either case.  Similarly, nextOffset may be zero, but we won't use that
 	 * as the actual start offset of the next multixact.
 	 */
-	MultiXactState->nextMXact = result + 1;
+	(MultiXactState->nextMXact)++;
 
 	MultiXactState->nextOffset += nmembers;
 
@@ -1178,9 +1191,8 @@ retry:
 	{
 		MultiXactOffset nextMXOffset;
 
-		/* handle wraparound if needed */
-		if (tmpMXact < FirstMultiXactId)
-			tmpMXact = FirstMultiXactId;
+		/* Handle corner cases if needed */
+		tmpMXact = HandleMxactOffsetCornerCases(tmpMXact);
 
 		prev_pageno = pageno;
 
@@ -1946,12 +1958,11 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
  * happen unless we're forced to write out a dirty log or xlog page to make
  * room in shared memory.
  */
-static MultiXactId
+static void
 ExtendMultiXactOffset(MultiXactId multi)
 {
 	int			pageno;
 	int			segpage;
-	int			retmulti;
 
 	/*
 	 * No work except at first MultiXactId of a page.  But beware: just after
@@ -1959,7 +1970,7 @@ ExtendMultiXactOffset(MultiXactId multi)
 	 */
 	if (MultiXactIdToOffsetEntry(multi) != 0 &&
 		multi != FirstMultiXactId)
-		return multi;
+		return;
 
 	pageno = MultiXactIdToOffsetPage(multi);
 
@@ -1974,16 +1985,8 @@ ExtendMultiXactOffset(MultiXactId multi)
 	Assert(TransactionIdIsValid(RecentGlobalXmin));
 	ZeroMultiXactOffsetPage(pageno, true,
 							segpage == 0 ? RecentGlobalXmin : InvalidTransactionId,
-							multi == FirstMultiXactId ? true : false);
-	if (segpage == 0)
-		retmulti = multi + 1;
-	else
-		retmulti = multi;
-
-
+							multi == FirstMultiXactId);
 	LWLockRelease(MultiXactOffsetControlLock);
-
-	return retmulti;
 }
 
 /*
@@ -2065,9 +2068,7 @@ TruncateMultiXact(void)
 	 * wrapped-around state.  We don't fix the counter itself here, but we
 	 * must be sure to use a valid value in our calculation.
 	 */
-	nextMXact = MultiXactState->nextMXact;
-	if (nextMXact < FirstMultiXactId)
-		nextMXact = FirstMultiXactId;
+	nextMXact = HandleMxactOffsetCornerCases(MultiXactState->nextMXact);
 
 	oldestMXact = nextMXact;
 	for (i = 1; i <= MaxOldestSlot; i++)
