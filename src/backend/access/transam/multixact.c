@@ -1026,7 +1026,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 * either case.  Similarly, nextOffset may be zero, but we won't use that
 	 * as the actual start offset of the next multixact.
 	 */
-	(MultiXactState->nextMXact)++;
+	MultiXactState->nextMXact = result + 1;
 
 	MultiXactState->nextOffset += nmembers;
 

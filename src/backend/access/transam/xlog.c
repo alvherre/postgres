@@ -5157,7 +5157,7 @@ BootStrapXLOG(void)
 	checkPoint.nextXidEpoch = 0;
 	checkPoint.nextXid = FirstNormalTransactionId;
 	checkPoint.nextOid = FirstBootstrapObjectId;
-	checkPoint.nextMulti = FirstMultiXactId;
+	checkPoint.nextMulti = BootstrapMultiXactId;
 	checkPoint.nextMultiOffset = 0;
 	checkPoint.oldestXid = FirstNormalTransactionId;
 	checkPoint.oldestXidDB = TemplateDbOid;
