@@ -1714,6 +1714,10 @@ ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId freezeXid)
 		MultiXactOffset *offptr;
 
 		offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
+		/*
+		 * FIXME -- do we really need this? The motivation for this is skipping 
+		 * offset zero to store a freezeXid, but maybe that's pointless.
+		 */
 		if (pageno == 0)
 			offptr++;
 		*offptr = freezeXid;
