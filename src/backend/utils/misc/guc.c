@@ -3260,6 +3260,11 @@ static void InitializeGUCOptionsFromEnvironment(void);
 static void InitializeOneGUCOption(struct config_generic * gconf);
 static void push_old_value(struct config_generic * gconf, GucAction action);
 static void ReportGUCOption(struct config_generic * record);
+static void reapply_stacked_values(struct config_generic * variable,
+					   struct config_string *pHolder,
+					   GucStack *stack,
+					   const char *curvalue,
+					   GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char *name, DestReceiver *dest);
 static void ShowAllGUCConfig(DestReceiver *dest);
 static char *_ShowOption(struct config_generic * record, bool use_units);
@@ -3861,8 +3866,10 @@ static void
 InitializeOneGUCOption(struct config_generic * gconf)
 {
 	gconf->status = 0;
-	gconf->reset_source = PGC_S_DEFAULT;
 	gconf->source = PGC_S_DEFAULT;
+	gconf->reset_source = PGC_S_DEFAULT;
+	gconf->scontext = PGC_INTERNAL;
+	gconf->reset_scontext = PGC_INTERNAL;
 	gconf->stack = NULL;
 	gconf->extra = NULL;
 	gconf->sourcefile = NULL;
@@ -4213,6 +4220,7 @@ ResetAllOptions(void)
 		}
 
 		gconf->source = gconf->reset_source;
+		gconf->scontext = gconf->reset_scontext;
 
 		if (gconf->flags & GUC_REPORT)
 			ReportGUCOption(gconf);
@@ -4254,6 +4262,7 @@ push_old_value(struct config_generic * gconf, GucAction action)
 				if (stack->state == GUC_SET)
 				{
 					/* SET followed by SET LOCAL, remember SET's value */
+					stack->masked_scontext = gconf->scontext;
 					set_stack_value(gconf, &stack->masked);
 					stack->state = GUC_SET_LOCAL;
 				}
@@ -4291,6 +4300,7 @@ push_old_value(struct config_generic * gconf, GucAction action)
 			break;
 	}
 	stack->source = gconf->source;
+	stack->scontext = gconf->scontext;
 	set_stack_value(gconf, &stack->prior);
 
 	gconf->stack = stack;
@@ -4431,6 +4441,7 @@ AtEOXact_GUC(bool isCommit, int nestLevel)
 						if (prev->state == GUC_SET)
 						{
 							/* LOCAL migrates down */
+							prev->masked_scontext = stack->scontext;
 							prev->masked = stack->prior;
 							prev->state = GUC_SET_LOCAL;
 						}
@@ -4445,6 +4456,7 @@ AtEOXact_GUC(bool isCommit, int nestLevel)
 						/* prior state at this level no longer wanted */
 						discard_stack_value(gconf, &stack->prior);
 						/* copy down the masked state */
+						prev->masked_scontext = stack->masked_scontext;
 						if (prev->state == GUC_SET_LOCAL)
 							discard_stack_value(gconf, &prev->masked);
 						prev->masked = stack->masked;
@@ -4460,16 +4472,19 @@ AtEOXact_GUC(bool isCommit, int nestLevel)
 				/* Perform appropriate restoration of the stacked value */
 				config_var_value newvalue;
 				GucSource	newsource;
+				GucContext	newscontext;
 
 				if (restoreMasked)
 				{
 					newvalue = stack->masked;
 					newsource = PGC_S_SESSION;
+					newscontext = stack->masked_scontext;
 				}
 				else
 				{
 					newvalue = stack->prior;
 					newsource = stack->source;
+					newscontext = stack->scontext;
 				}
 
 				switch (gconf->vartype)
@@ -4581,7 +4596,9 @@ AtEOXact_GUC(bool isCommit, int nestLevel)
 				set_extra_field(gconf, &(stack->prior.extra), NULL);
 				set_extra_field(gconf, &(stack->masked.extra), NULL);
 
+				/* And restore source information */
 				gconf->source = newsource;
+				gconf->scontext = newscontext;
 			}
 
 			/* Finish popping the state stack */
@@ -5008,6 +5025,10 @@ config_enum_get_options(struct config_enum * record, const char *prefix,
  * If changeVal is false then don't really set the option but do all
  * the checks to see if it would work.
  *
+ * elevel should normally be passed as zero, allowing this function to make
+ * its standard choice of ereport level.  However some callers need to be
+ * able to override that choice; they should pass the ereport level to use.
+ *
  * Return value:
  *	+1: the value is valid and was successfully applied.
  *	0:  the name or value is invalid (but see below).
@@ -5016,34 +5037,37 @@ config_enum_get_options(struct config_enum * record, const char *prefix,
  * If there is an error (non-existing option, invalid value) then an
  * ereport(ERROR) is thrown *unless* this is called for a source for which
  * we don't want an ERROR (currently, those are defaults, the config file,
- * and per-database or per-user settings).  In those cases we write a
- * suitable error message via ereport() and return 0.
+ * and per-database or per-user settings, as well as callers who specify
+ * a less-than-ERROR elevel).  In those cases we write a suitable error
+ * message via ereport() and return 0.
  *
  * See also SetConfigOption for an external interface.
  */
 int
 set_config_option(const char *name, const char *value,
 				  GucContext context, GucSource source,
-				  GucAction action, bool changeVal)
+				  GucAction action, bool changeVal, int elevel)
 {
 	struct config_generic *record;
-	int			elevel;
 	bool		prohibitValueChange = false;
 	bool		makeDefault;
 
-	if (source == PGC_S_DEFAULT || source == PGC_S_FILE)
+	if (elevel == 0)
 	{
-		/*
-		 * To avoid cluttering the log, only the postmaster bleats loudly
-		 * about problems with the config file.
-		 */
-		elevel = IsUnderPostmaster ? DEBUG3 : LOG;
+		if (source == PGC_S_DEFAULT || source == PGC_S_FILE)
+		{
+			/*
+			 * To avoid cluttering the log, only the postmaster bleats loudly
+			 * about problems with the config file.
+			 */
+			elevel = IsUnderPostmaster ? DEBUG3 : LOG;
+		}
+		else if (source == PGC_S_DATABASE || source == PGC_S_USER ||
+				 source == PGC_S_DATABASE_USER)
+			elevel = WARNING;
+		else
+			elevel = ERROR;
 	}
-	else if (source == PGC_S_DATABASE || source == PGC_S_USER ||
-			 source == PGC_S_DATABASE_USER)
-		elevel = WARNING;
-	else
-		elevel = ERROR;
 
 	record = find_option(name, true, elevel);
 	if (record == NULL)
@@ -5255,6 +5279,7 @@ set_config_option(const char *name, const char *value,
 					newval = conf->reset_val;
 					newextra = conf->reset_extra;
 					source = conf->gen.reset_source;
+					context = conf->gen.reset_scontext;
 				}
 
 				if (prohibitValueChange)
@@ -5282,6 +5307,7 @@ set_config_option(const char *name, const char *value,
 					set_extra_field(&conf->gen, &conf->gen.extra,
 									newextra);
 					conf->gen.source = source;
+					conf->gen.scontext = context;
 				}
 				if (makeDefault)
 				{
@@ -5293,6 +5319,7 @@ set_config_option(const char *name, const char *value,
 						set_extra_field(&conf->gen, &conf->reset_extra,
 										newextra);
 						conf->gen.reset_source = source;
+						conf->gen.reset_scontext = context;
 					}
 					for (stack = conf->gen.stack; stack; stack = stack->prev)
 					{
@@ -5302,6 +5329,7 @@ set_config_option(const char *name, const char *value,
 							set_extra_field(&conf->gen, &stack->prior.extra,
 											newextra);
 							stack->source = source;
+							stack->scontext = context;
 						}
 					}
 				}
@@ -5355,6 +5383,7 @@ set_config_option(const char *name, const char *value,
 					newval = conf->reset_val;
 					newextra = conf->reset_extra;
 					source = conf->gen.reset_source;
+					context = conf->gen.reset_scontext;
 				}
 
 				if (prohibitValueChange)
@@ -5382,6 +5411,7 @@ set_config_option(const char *name, const char *value,
 					set_extra_field(&conf->gen, &conf->gen.extra,
 									newextra);
 					conf->gen.source = source;
+					conf->gen.scontext = context;
 				}
 				if (makeDefault)
 				{
@@ -5393,6 +5423,7 @@ set_config_option(const char *name, const char *value,
 						set_extra_field(&conf->gen, &conf->reset_extra,
 										newextra);
 						conf->gen.reset_source = source;
+						conf->gen.reset_scontext = context;
 					}
 					for (stack = conf->gen.stack; stack; stack = stack->prev)
 					{
@@ -5402,6 +5433,7 @@ set_config_option(const char *name, const char *value,
 							set_extra_field(&conf->gen, &stack->prior.extra,
 											newextra);
 							stack->source = source;
+							stack->scontext = context;
 						}
 					}
 				}
@@ -5452,6 +5484,7 @@ set_config_option(const char *name, const char *value,
 					newval = conf->reset_val;
 					newextra = conf->reset_extra;
 					source = conf->gen.reset_source;
+					context = conf->gen.reset_scontext;
 				}
 
 				if (prohibitValueChange)
@@ -5479,6 +5512,7 @@ set_config_option(const char *name, const char *value,
 					set_extra_field(&conf->gen, &conf->gen.extra,
 									newextra);
 					conf->gen.source = source;
+					conf->gen.scontext = context;
 				}
 				if (makeDefault)
 				{
@@ -5490,6 +5524,7 @@ set_config_option(const char *name, const char *value,
 						set_extra_field(&conf->gen, &conf->reset_extra,
 										newextra);
 						conf->gen.reset_source = source;
+						conf->gen.reset_scontext = context;
 					}
 					for (stack = conf->gen.stack; stack; stack = stack->prev)
 					{
@@ -5499,6 +5534,7 @@ set_config_option(const char *name, const char *value,
 							set_extra_field(&conf->gen, &stack->prior.extra,
 											newextra);
 							stack->source = source;
+							stack->scontext = context;
 						}
 					}
 				}
@@ -5567,6 +5603,7 @@ set_config_option(const char *name, const char *value,
 					newval = conf->reset_val;
 					newextra = conf->reset_extra;
 					source = conf->gen.reset_source;
+					context = conf->gen.reset_scontext;
 				}
 
 				if (prohibitValueChange)
@@ -5596,6 +5633,7 @@ set_config_option(const char *name, const char *value,
 					set_extra_field(&conf->gen, &conf->gen.extra,
 									newextra);
 					conf->gen.source = source;
+					conf->gen.scontext = context;
 				}
 
 				if (makeDefault)
@@ -5608,6 +5646,7 @@ set_config_option(const char *name, const char *value,
 						set_extra_field(&conf->gen, &conf->reset_extra,
 										newextra);
 						conf->gen.reset_source = source;
+						conf->gen.reset_scontext = context;
 					}
 					for (stack = conf->gen.stack; stack; stack = stack->prev)
 					{
@@ -5618,6 +5657,7 @@ set_config_option(const char *name, const char *value,
 							set_extra_field(&conf->gen, &stack->prior.extra,
 											newextra);
 							stack->source = source;
+							stack->scontext = context;
 						}
 					}
 				}
@@ -5673,6 +5713,7 @@ set_config_option(const char *name, const char *value,
 					newval = conf->reset_val;
 					newextra = conf->reset_extra;
 					source = conf->gen.reset_source;
+					context = conf->gen.reset_scontext;
 				}
 
 				if (prohibitValueChange)
@@ -5700,6 +5741,7 @@ set_config_option(const char *name, const char *value,
 					set_extra_field(&conf->gen, &conf->gen.extra,
 									newextra);
 					conf->gen.source = source;
+					conf->gen.scontext = context;
 				}
 				if (makeDefault)
 				{
@@ -5711,6 +5753,7 @@ set_config_option(const char *name, const char *value,
 						set_extra_field(&conf->gen, &conf->reset_extra,
 										newextra);
 						conf->gen.reset_source = source;
+						conf->gen.reset_scontext = context;
 					}
 					for (stack = conf->gen.stack; stack; stack = stack->prev)
 					{
@@ -5720,6 +5763,7 @@ set_config_option(const char *name, const char *value,
 							set_extra_field(&conf->gen, &stack->prior.extra,
 											newextra);
 							stack->source = source;
+							stack->scontext = context;
 						}
 					}
 				}
@@ -5766,9 +5810,11 @@ set_config_sourcefile(const char *name, char *sourcefile, int sourceline)
 }
 
 /*
- * Set a config option to the given value. See also set_config_option,
- * this is just the wrapper to be called from outside GUC.	NB: this
- * is used only for non-transactional operations.
+ * Set a config option to the given value.
+ *
+ * See also set_config_option; this is just the wrapper to be called from
+ * outside GUC.  (This function should be used when possible, because its API
+ * is more stable than set_config_option's.)
  *
  * Note: there is no support here for setting source file/line, as it
  * is currently not needed.
@@ -5778,7 +5824,7 @@ SetConfigOption(const char *name, const char *value,
 				GucContext context, GucSource source)
 {
 	(void) set_config_option(name, value, context, source,
-							 GUC_ACTION_SET, true);
+							 GUC_ACTION_SET, true, 0);
 }
 
 
@@ -6040,7 +6086,8 @@ ExecSetVariableStmt(VariableSetStmt *stmt)
 									 (superuser() ? PGC_SUSET : PGC_USERSET),
 									 PGC_S_SESSION,
 									 action,
-									 true);
+									 true,
+									 0);
 			break;
 		case VAR_SET_MULTI:
 
@@ -6103,7 +6150,8 @@ ExecSetVariableStmt(VariableSetStmt *stmt)
 									 (superuser() ? PGC_SUSET : PGC_USERSET),
 									 PGC_S_SESSION,
 									 action,
-									 true);
+									 true,
+									 0);
 			break;
 		case VAR_RESET_ALL:
 			ResetAllOptions();
@@ -6148,7 +6196,8 @@ SetPGVariable(const char *name, List *args, bool is_local)
 							 (superuser() ? PGC_SUSET : PGC_USERSET),
 							 PGC_S_SESSION,
 							 is_local ? GUC_ACTION_LOCAL : GUC_ACTION_SET,
-							 true);
+							 true,
+							 0);
 }
 
 /*
@@ -6191,7 +6240,8 @@ set_config_by_name(PG_FUNCTION_ARGS)
 							 (superuser() ? PGC_SUSET : PGC_USERSET),
 							 PGC_S_SESSION,
 							 is_local ? GUC_ACTION_LOCAL : GUC_ACTION_SET,
-							 true);
+							 true,
+							 0);
 
 	/* get the new current value */
 	new_value = GetConfigOptionByName(name, NULL);
@@ -6250,9 +6300,7 @@ define_custom_variable(struct config_generic * variable)
 {
 	const char *name = variable->name;
 	const char **nameAddr = &name;
-	const char *value;
 	struct config_string *pHolder;
-	GucContext	phcontext;
 	struct config_generic **res;
 
 	/*
@@ -6299,85 +6347,128 @@ define_custom_variable(struct config_generic * variable)
 	*res = variable;
 
 	/*
-	 * Infer context for assignment based on source of existing value. We
-	 * can't tell this with exact accuracy, but we can at least do something
-	 * reasonable in typical cases.
-	 */
-	switch (pHolder->gen.source)
-	{
-		case PGC_S_DEFAULT:
-		case PGC_S_DYNAMIC_DEFAULT:
-		case PGC_S_ENV_VAR:
-		case PGC_S_FILE:
-		case PGC_S_ARGV:
-
-			/*
-			 * If we got past the check in init_custom_variable, we can safely
-			 * assume that any existing value for a PGC_POSTMASTER variable
-			 * was set in postmaster context.
-			 */
-			if (variable->context == PGC_POSTMASTER)
-				phcontext = PGC_POSTMASTER;
-			else
-				phcontext = PGC_SIGHUP;
-			break;
-
-		case PGC_S_DATABASE:
-		case PGC_S_USER:
-		case PGC_S_DATABASE_USER:
-
-			/*
-			 * The existing value came from an ALTER ROLE/DATABASE SET
-			 * command. We can assume that at the time the command was issued,
-			 * we checked that the issuing user was superuser if the variable
-			 * requires superuser privileges to set.  So it's safe to use
-			 * SUSET context here.
-			 */
-			phcontext = PGC_SUSET;
-			break;
-
-		case PGC_S_CLIENT:
-		case PGC_S_SESSION:
-		default:
-
-			/*
-			 * We must assume that the value came from an untrusted user, even
-			 * if the current_user is a superuser.
-			 */
-			phcontext = PGC_USERSET;
-			break;
-	}
-
-	/*
-	 * Assign the string value stored in the placeholder to the real variable.
+	 * Assign the string value(s) stored in the placeholder to the real
+	 * variable.  Essentially, we need to duplicate all the active and stacked
+	 * values, but with appropriate validation and datatype adjustment.
 	 *
-	 * XXX this is not really good enough --- it should be a nontransactional
-	 * assignment, since we don't want it to roll back if the current xact
-	 * fails later.  (Or do we?)
+	 * If an assignment fails, we report a WARNING and keep going.  We don't
+	 * want to throw ERROR for bad values, because it'd bollix the add-on
+	 * module that's presumably halfway through getting loaded.  In such cases
+	 * the default or previous state will become active instead.
 	 */
-	value = *pHolder->variable;
 
-	if (value)
-	{
-		if (set_config_option(name, value,
-							  phcontext, pHolder->gen.source,
-							  GUC_ACTION_SET, true) > 0)
-		{
-			/* Also copy over any saved source-location information */
-			if (pHolder->gen.sourcefile)
-				set_config_sourcefile(name, pHolder->gen.sourcefile,
-									  pHolder->gen.sourceline);
-		}
-	}
+	/* First, apply the reset value if any */
+	if (pHolder->reset_val)
+		(void) set_config_option(name, pHolder->reset_val,
+								 pHolder->gen.reset_scontext,
+								 pHolder->gen.reset_source,
+								 GUC_ACTION_SET, true, WARNING);
+	/* That should not have resulted in stacking anything */
+	Assert(variable->stack == NULL);
+
+	/* Now, apply current and stacked values, in the order they were stacked */
+	reapply_stacked_values(variable, pHolder, pHolder->gen.stack,
+						   *(pHolder->variable),
+						   pHolder->gen.scontext, pHolder->gen.source);
+
+	/* Also copy over any saved source-location information */
+	if (pHolder->gen.sourcefile)
+		set_config_sourcefile(name, pHolder->gen.sourcefile,
+							  pHolder->gen.sourceline);
 
 	/*
-	 * Free up as much as we conveniently can of the placeholder structure
-	 * (this neglects any stack items...)
+	 * Free up as much as we conveniently can of the placeholder structure.
+	 * (This neglects any stack items, so it's possible for some memory to be
+	 * leaked.  Since this can only happen once per session per variable, it
+	 * doesn't seem worth spending much code on.)
 	 */
 	set_string_field(pHolder, pHolder->variable, NULL);
 	set_string_field(pHolder, &pHolder->reset_val, NULL);
 
 	free(pHolder);
+}
+
+/*
+ * Recursive subroutine for define_custom_variable: reapply non-reset values
+ *
+ * We recurse so that the values are applied in the same order as originally.
+ * At each recursion level, apply the upper-level value (passed in) in the
+ * fashion implied by the stack entry.
+ */
+static void
+reapply_stacked_values(struct config_generic * variable,
+					   struct config_string *pHolder,
+					   GucStack *stack,
+					   const char *curvalue,
+					   GucContext curscontext, GucSource cursource)
+{
+	const char *name = variable->name;
+	GucStack   *oldvarstack = variable->stack;
+
+	if (stack != NULL)
+	{
+		/* First, recurse, so that stack items are processed bottom to top */
+		reapply_stacked_values(variable, pHolder, stack->prev,
+							   stack->prior.val.stringval,
+							   stack->scontext, stack->source);
+
+		/* See how to apply the passed-in value */
+		switch (stack->state)
+		{
+			case GUC_SAVE:
+				(void) set_config_option(name, curvalue,
+										 curscontext, cursource,
+										 GUC_ACTION_SAVE, true, WARNING);
+				break;
+
+			case GUC_SET:
+				(void) set_config_option(name, curvalue,
+										 curscontext, cursource,
+										 GUC_ACTION_SET, true, WARNING);
+				break;
+
+			case GUC_LOCAL:
+				(void) set_config_option(name, curvalue,
+										 curscontext, cursource,
+										 GUC_ACTION_LOCAL, true, WARNING);
+				break;
+
+			case GUC_SET_LOCAL:
+				/* first, apply the masked value as SET */
+				(void) set_config_option(name, stack->masked.val.stringval,
+										 stack->masked_scontext, PGC_S_SESSION,
+										 GUC_ACTION_SET, true, WARNING);
+				/* then apply the current value as LOCAL */
+				(void) set_config_option(name, curvalue,
+										 curscontext, cursource,
+										 GUC_ACTION_LOCAL, true, WARNING);
+				break;
+		}
+
+		/* If we successfully made a stack entry, adjust its nest level */
+		if (variable->stack != oldvarstack)
+			variable->stack->nest_level = stack->nest_level;
+	}
+	else
+	{
+		/*
+		 * We are at the end of the stack.  If the active/previous value is
+		 * different from the reset value, it must represent a previously
+		 * committed session value.  Apply it, and then drop the stack entry
+		 * that set_config_option will have created under the impression that
+		 * this is to be just a transactional assignment.  (We leak the stack
+		 * entry.)
+		 */
+		if (curvalue != pHolder->reset_val ||
+			curscontext != pHolder->gen.reset_scontext ||
+			cursource != pHolder->gen.reset_source)
+		{
+			(void) set_config_option(name, curvalue,
+									 curscontext, cursource,
+									 GUC_ACTION_SET, true, WARNING);
+			variable->stack = NULL;
+		}
+	}
 }
 
 void
@@ -7283,7 +7374,10 @@ _ShowOption(struct config_generic * record, bool use_units)
  *
  *		variable name, string, null terminated
  *		variable value, string, null terminated
+ *		variable sourcefile, string, null terminated (empty if none)
+ *		variable sourceline, integer
  *		variable source, integer
+ *		variable scontext, integer
  */
 static void
 write_one_nondefault_variable(FILE *fp, struct config_generic * gconf)
@@ -7319,8 +7413,7 @@ write_one_nondefault_variable(FILE *fp, struct config_generic * gconf)
 			{
 				struct config_real *conf = (struct config_real *) gconf;
 
-				/* Could lose precision here? */
-				fprintf(fp, "%f", *conf->variable);
+				fprintf(fp, "%.17g", *conf->variable);
 			}
 			break;
 
@@ -7344,7 +7437,13 @@ write_one_nondefault_variable(FILE *fp, struct config_generic * gconf)
 
 	fputc(0, fp);
 
-	fwrite(&gconf->source, sizeof(gconf->source), 1, fp);
+	if (gconf->sourcefile)
+		fprintf(fp, "%s", gconf->sourcefile);
+	fputc(0, fp);
+
+	fwrite(&gconf->sourceline, 1, sizeof(gconf->sourceline), fp);
+	fwrite(&gconf->source, 1, sizeof(gconf->source), fp);
+	fwrite(&gconf->scontext, 1, sizeof(gconf->scontext), fp);
 }
 
 void
@@ -7435,8 +7534,11 @@ read_nondefault_variables(void)
 {
 	FILE	   *fp;
 	char	   *varname,
-			   *varvalue;
-	int			varsource;
+			   *varvalue,
+			   *varsourcefile;
+	int			varsourceline;
+	GucSource	varsource;
+	GucContext	varscontext;
 
 	/*
 	 * Open file
@@ -7461,16 +7563,28 @@ read_nondefault_variables(void)
 			break;
 
 		if ((record = find_option(varname, true, FATAL)) == NULL)
-			elog(FATAL, "failed to locate variable %s in exec config params file", varname);
+			elog(FATAL, "failed to locate variable \"%s\" in exec config params file", varname);
+
 		if ((varvalue = read_string_with_null(fp)) == NULL)
 			elog(FATAL, "invalid format of exec config params file");
-		if (fread(&varsource, sizeof(varsource), 1, fp) == 0)
+		if ((varsourcefile = read_string_with_null(fp)) == NULL)
+			elog(FATAL, "invalid format of exec config params file");
+		if (fread(&varsourceline, 1, sizeof(varsourceline), fp) != sizeof(varsourceline))
+			elog(FATAL, "invalid format of exec config params file");
+		if (fread(&varsource, 1, sizeof(varsource), fp) != sizeof(varsource))
+			elog(FATAL, "invalid format of exec config params file");
+		if (fread(&varscontext, 1, sizeof(varscontext), fp) != sizeof(varscontext))
 			elog(FATAL, "invalid format of exec config params file");
 
-		(void) set_config_option(varname, varvalue, record->context,
-								 varsource, GUC_ACTION_SET, true);
+		(void) set_config_option(varname, varvalue,
+								 varscontext, varsource,
+								 GUC_ACTION_SET, true, 0);
+		if (varsourcefile[0])
+			set_config_sourcefile(varname, varsourcefile, varsourceline);
+
 		free(varname);
 		free(varvalue);
+		free(varsourcefile);
 	}
 
 	FreeFile(fp);
@@ -7565,7 +7679,9 @@ ProcessGUCArray(ArrayType *array,
 			continue;
 		}
 
-		(void) set_config_option(name, value, context, source, action, true);
+		(void) set_config_option(name, value,
+								 context, source,
+								 action, true, 0);
 
 		free(name);
 		if (value)
@@ -7869,7 +7985,7 @@ validate_option_array_item(const char *name, const char *value,
 	/* test for permissions and valid option value */
 	(void) set_config_option(name, value,
 							 superuser() ? PGC_SUSET : PGC_USERSET,
-							 PGC_S_TEST, GUC_ACTION_SET, false);
+							 PGC_S_TEST, GUC_ACTION_SET, false, 0);
 
 	return true;
 }
