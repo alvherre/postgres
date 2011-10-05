@@ -14,8 +14,8 @@
 #include "access/xlog.h"
 
 #define InvalidMultiXactId	((MultiXactId) 0)
-/* MultiXactId 1 is reserved to store the freezeXid of the first segment */
-#define FirstMultiXactId	((MultiXactId) 2)
+#define FirstMultiXactId	((MultiXactId) 1)
+#define BoostrapInitialMultiXactId	((MultiXactId) 2)
 
 #define MultiXactIdIsValid(multi) ((multi) != InvalidMultiXactId)
 
@@ -85,7 +85,8 @@ extern void StartupMultiXact(void);
 extern void ShutdownMultiXact(void);
 extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset);
+						 MultiXactOffset *nextMultiOffset,
+						 TransactionId *freezeXid);
 extern void CheckPointMultiXact(void);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti,
 					  MultiXactOffset nextMultiOffset);

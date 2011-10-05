@@ -5157,8 +5157,9 @@ BootStrapXLOG(void)
 	checkPoint.nextXidEpoch = 0;
 	checkPoint.nextXid = FirstNormalTransactionId;
 	checkPoint.nextOid = FirstBootstrapObjectId;
-	checkPoint.nextMulti = FirstMultiXactId;
+	checkPoint.nextMulti = BoostrapInitialMultiXactId;
 	checkPoint.nextMultiOffset = 0;
+	checkPoint.mxactFreezeXid = InvalidTransactionId;
 	checkPoint.oldestXid = FirstNormalTransactionId;
 	checkPoint.oldestXidDB = TemplateDbOid;
 	checkPoint.time = (pg_time_t) time(NULL);
@@ -6251,8 +6252,8 @@ StartupXLOG(void)
 					checkPoint.nextXidEpoch, checkPoint.nextXid,
 					checkPoint.nextOid)));
 	ereport(DEBUG1,
-			(errmsg("next MultiXactId: %u; next MultiXactOffset: %u",
-					checkPoint.nextMulti, checkPoint.nextMultiOffset)));
+			(errmsg("next MultiXactId: %u; next MultiXactOffset: %u; oldest freezeXid: %u",
+					checkPoint.nextMulti, checkPoint.nextMultiOffset, checkpoint.nextFreezeXid)));
 	ereport(DEBUG1,
 			(errmsg("oldest unfrozen transaction ID: %u, in database %u",
 					checkPoint.oldestXid, checkPoint.oldestXidDB)));
@@ -7783,7 +7784,8 @@ CreateCheckPoint(int flags)
 
 	MultiXactGetCheckptMulti(shutdown,
 							 &checkPoint.nextMulti,
-							 &checkPoint.nextMultiOffset);
+							 &checkPoint.nextMultiOffset,
+							 &checkPoint.freezeXid);
 
 	/*
 	 * Having constructed the checkpoint record, ensure all shmem disk buffers
@@ -8600,7 +8602,7 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 		CheckPoint *checkpoint = (CheckPoint *) rec;
 
 		appendStringInfo(buf, "checkpoint: redo %X/%X; "
-						 "tli %u; xid %u/%u; oid %u; multi %u; offset %u; "
+						 "tli %u; xid %u/%u; oid %u; multi %u; offset %u; mxact freeze %u; "
 						 "oldest xid %u in DB %u; oldest running xid %u; %s",
 						 checkpoint->redo.xlogid, checkpoint->redo.xrecoff,
 						 checkpoint->ThisTimeLineID,
@@ -8608,6 +8610,7 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 						 checkpoint->nextOid,
 						 checkpoint->nextMulti,
 						 checkpoint->nextMultiOffset,
+						 checkpoint->mxactFreezeXid,
 						 checkpoint->oldestXid,
 						 checkpoint->oldestXidDB,
 						 checkpoint->oldestActiveXid,

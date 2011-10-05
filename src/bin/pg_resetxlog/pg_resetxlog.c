@@ -87,6 +87,7 @@ main(int argc, char *argv[])
 	Oid			set_oid = 0;
 	MultiXactId set_mxid = 0;
 	MultiXactOffset set_mxoff = (MultiXactOffset) -1;
+	TransactionId set_mxfreeze = FrozenTransactionId;
 	uint32		minXlogTli = 0,
 				minXlogId = 0,
 				minXlogSeg = 0;
@@ -116,7 +117,7 @@ main(int argc, char *argv[])
 	}
 
 
-	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:")) != -1)
+	while ((c = getopt(argc, argv, "fl:m:no:O:x:e:z:")) != -1)
 	{
 		switch (c)
 		{
@@ -199,6 +200,23 @@ main(int argc, char *argv[])
 				if (set_mxoff == -1)
 				{
 					fprintf(stderr, _("%s: multitransaction offset (-O) must not be -1\n"), progname);
+					exit(1);
+				}
+				break;
+
+			case 'z':
+				set_mxfreeze = strtoul(optarg, &endptr, 0);
+				if (endptr == optarg || *endptr != '\0')
+				{
+					fprintf(stderr, _("%s: invalid argument for option -z\n"), progname);
+					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+					exit(1);
+				}
+				/* InvalidTransactionId is allowed here */
+				if (set_mxfreeze == FrozenTransactionId ||
+					set_mxfreeze == BootstrapTransactionId)
+				{
+					fprintf(stderr, _("%s: multitransaction freezeXid (-z) must not be 1 or 2\n"), progname);
 					exit(1);
 				}
 				break;
@@ -331,6 +349,9 @@ main(int argc, char *argv[])
 
 	if (set_mxoff != -1)
 		ControlFile.checkPointCopy.nextMultiOffset = set_mxoff;
+
+	if (set_mxfreeze != -1)
+		ControlFile.checkPointCopy.mxactFreezeXid = set_mxfreeze;
 
 	if (minXlogTli > ControlFile.checkPointCopy.ThisTimeLineID)
 		ControlFile.checkPointCopy.ThisTimeLineID = minXlogTli;
@@ -578,6 +599,8 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.nextMulti);
 	printf(_("Latest checkpoint's NextMultiOffset:  %u\n"),
 		   ControlFile.checkPointCopy.nextMultiOffset);
+	printf(_("Latest checkpoint's MultiXact freezeXid: %u\n"),
+		   ControlFile.checkPointCopy.mxactFreezeXid);
 	printf(_("Latest checkpoint's oldestXID:        %u\n"),
 		   ControlFile.checkPointCopy.oldestXid);
 	printf(_("Latest checkpoint's oldestXID's DB:   %u\n"),

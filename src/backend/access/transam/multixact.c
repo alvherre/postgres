@@ -157,6 +157,9 @@ typedef struct MultiXactStateData
 	/* the Offset SLRU area was last truncated at this MultiXactId */
 	MultiXactId lastTruncationPoint;
 
+	/* freeze Xid for the oldest offset SLRU segment */
+	TransactionId	freezeXid;
+
 	/*
 	 * Per-backend data starts here.  We have two arrays stored in the area
 	 * immediately following the MultiXactStateData struct. Each is indexed by
@@ -1714,12 +1717,6 @@ ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId freezeXid)
 		MultiXactOffset *offptr;
 
 		offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
-		/*
-		 * FIXME -- do we really need this? The motivation for this is skipping 
-		 * offset zero to store a freezeXid, but maybe that's pointless.
-		 */
-		if (pageno == 0)
-			offptr++;
 		*offptr = freezeXid;
 
 		MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
@@ -1852,22 +1849,25 @@ ShutdownMultiXact(void)
 }
 
 /*
- * Get the next MultiXactId and offset to save in a checkpoint record
+ * Get the next MultiXactId, offset and freeze point to save in a checkpoint
+ * record
  */
 void
 MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset)
+						 MultiXactOffset *nextMultiOffset,
+						 TransactionId *freezeXid)
 {
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
 
 	*nextMulti = MultiXactState->nextMXact;
 	*nextMultiOffset = MultiXactState->nextOffset;
+	*freezeXid = MultiXactState->freezeXid;
 
 	LWLockRelease(MultiXactGenLock);
 
-	debug_elog4(DEBUG2, "MultiXact: checkpoint is nextMulti %u, nextOffset %u",
-				*nextMulti, *nextMultiOffset);
+	debug_elog4(DEBUG2, "MultiXact: checkpoint is nextMulti %u, nextOffset %u, freezeXid %u",
+				*nextMulti, *nextMultiOffset, *freezeXid);
 }
 
 /*
