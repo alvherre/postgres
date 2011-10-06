@@ -1866,7 +1866,7 @@ MultiXactGetCheckptMulti(bool is_shutdown,
 
 	LWLockRelease(MultiXactGenLock);
 
-	debug_elog4(DEBUG2, "MultiXact: checkpoint is nextMulti %u, nextOffset %u, freezeXid %u",
+	debug_elog5(DEBUG2, "MultiXact: checkpoint is nextMulti %u, nextOffset %u, freezeXid %u",
 				*nextMulti, *nextMultiOffset, *freezeXid);
 }
 
@@ -1889,6 +1889,8 @@ CheckPointMultiXact(void)
 	 * isn't valid (because StartupMultiXact hasn't been called yet) and so
 	 * SimpleLruTruncate would get confused.  It seems best not to risk
 	 * removing any data during recovery anyway, so don't truncate.
+	 *
+	 * XXX can we do it after we've reached consistent state?
 	 */
 	if (!RecoveryInProgress())
 		TruncateMultiXact();
@@ -1905,17 +1907,20 @@ CheckPointMultiXact(void)
  */
 void
 MultiXactSetNextMXact(MultiXactId nextMulti,
-					  MultiXactOffset nextMultiOffset)
+					  MultiXactOffset nextMultiOffset,
+					  TransactionId freezeXid)
 {
 	debug_elog4(DEBUG2, "MultiXact: setting next multi to %u offset %u",
 				nextMulti, nextMultiOffset);
 	MultiXactState->nextMXact = nextMulti;
 	MultiXactState->nextOffset = nextMultiOffset;
+	MultiXactState->freezeXid = freezeXid;
 }
 
 /*
  * Ensure the next-to-be-assigned MultiXactId is at least minMulti,
- * and similarly nextOffset is at least minMultiOffset
+ * nextOffset is at least minMultiOffset, and freezeXid is at least
+ * minFreezeXid (which might be Invalid, in which case we ignore it).
  *
  * This is used when we can determine minimum safe values from an XLog
  * record (either an on-line checkpoint or an mxact creation log entry).
@@ -1923,7 +1928,8 @@ MultiXactSetNextMXact(MultiXactId nextMulti,
  */
 void
 MultiXactAdvanceNextMXact(MultiXactId minMulti,
-						  MultiXactOffset minMultiOffset)
+						  MultiXactOffset minMultiOffset,
+						  TransactionId minFreezeXid)
 {
 	if (MultiXactIdPrecedes(MultiXactState->nextMXact, minMulti))
 	{
@@ -1935,6 +1941,13 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 		debug_elog3(DEBUG2, "MultiXact: setting next offset to %u",
 					minMultiOffset);
 		MultiXactState->nextOffset = minMultiOffset;
+	}
+	if (TransactionIdIsValid(minFreezeXid) &&
+		TransactionIdPrecedes(MultiXactState->freezeXid, minFreezeXid))
+	{
+		debug_elog3(DEBUG2, "MultiXact: setting freeze xid to %u",
+					minFreezeXid);
+		MultiXactState->freezeXid = minFreezeXid;
 	}
 }
 
@@ -1977,6 +1990,14 @@ ExtendMultiXactOffset(MultiXactId multi)
 	ZeroMultiXactOffsetPage(pageno, true,
 							segpage == 0 ? RecentGlobalXmin : InvalidTransactionId);
 	LWLockRelease(MultiXactOffsetControlLock);
+
+	/*
+	 * Finally, record the new truncation point in shared memory, if necessary.
+	 */
+	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+	if (!TransactionIdIsValid(MultiXactState->freezeXid))
+		MultiXactState->freezeXid = RecentGlobalXmin;
+	LWLockRelease(MultiXactGenLock);
 }
 
 /*
@@ -2039,6 +2060,7 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 static void
 TruncateMultiXact(void)
 {
+	TransactionId truncateXid;
 	MultiXactId nextMXact;
 	MultiXactOffset nextOffset;
 	MultiXactId oldestMXact;
@@ -2048,10 +2070,15 @@ TruncateMultiXact(void)
 
 	/*
 	 * First, compute where we can safely truncate.  Per notes above, this is
-	 * the oldest valid value among all the OldestMemberMXactId[] and
-	 * OldestVisibleMXactId[] entries, or nextMXact if none are valid.
+	 * MultiXactState->freezeXid, if valid; otherwise, no truncation is
+	 * possible.
 	 */
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
+	truncateXid = MultiXactState->freezeXid;
+	LWLockRelease(MultiXactGenLock);
+
+	if (!TransactionIdIsValid(truncateXid))
+		return;
 
 	/*
 	 * We have to beware of the possibility that nextMXact is in the
@@ -2261,6 +2288,11 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		Assert(!MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
 		LWLockRelease(MultiXactOffsetControlLock);
+
+		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+		if (!TransactionIdIsValid(MultiXactState->freezeXid))
+			MultiXactState->freezeXid = zerooff.freezeXid;
+		LWLockRelease(MultiXactGenLock);
 	}
 	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
 	{
@@ -2287,8 +2319,12 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		/* Store the data back into the SLRU files */
 		RecordNewMultiXact(xlrec->mid, xlrec->moff, xlrec->nmembers, members);
 
-		/* Make sure nextMXact/nextOffset are beyond what this record has */
-		MultiXactAdvanceNextMXact(xlrec->mid + 1, xlrec->moff + xlrec->nmembers);
+		/*
+		 * Make sure nextMXact/nextOffset are beyond what this record has.
+		 * We cannot compute a freezeXid from this.
+		 */
+		MultiXactAdvanceNextMXact(xlrec->mid + 1, xlrec->moff + xlrec->nmembers,
+								  InvalidTransactionId);
 
 		/*
 		 * Make sure nextXid is beyond any XID mentioned in the record. This

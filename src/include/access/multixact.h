@@ -89,9 +89,11 @@ extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 TransactionId *freezeXid);
 extern void CheckPointMultiXact(void);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti,
-					  MultiXactOffset nextMultiOffset);
+					  MultiXactOffset nextMultiOffset,
+					  TransactionId freezeXid);
 extern void MultiXactAdvanceNextMXact(MultiXactId minMulti,
-						  MultiXactOffset minMultiOffset);
+						  MultiXactOffset minMultiOffset,
+						  TransactionId minFreezeXid);
 
 extern void multixact_twophase_recover(TransactionId xid, uint16 info,
 						   void *recdata, uint32 len);
