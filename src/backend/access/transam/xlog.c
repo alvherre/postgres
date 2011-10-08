@@ -5159,7 +5159,6 @@ BootStrapXLOG(void)
 	checkPoint.nextOid = FirstBootstrapObjectId;
 	checkPoint.nextMulti = BoostrapInitialMultiXactId;
 	checkPoint.nextMultiOffset = 0;
-	checkPoint.mxactFreezeXid = InvalidTransactionId;
 	checkPoint.oldestXid = FirstNormalTransactionId;
 	checkPoint.oldestXidDB = TemplateDbOid;
 	checkPoint.time = (pg_time_t) time(NULL);
@@ -5168,8 +5167,7 @@ BootStrapXLOG(void)
 	ShmemVariableCache->nextXid = checkPoint.nextXid;
 	ShmemVariableCache->nextOid = checkPoint.nextOid;
 	ShmemVariableCache->oidCount = 0;
-	MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset,
-						  checkPoint.mxactFreezeXid);
+	MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset);
 	SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
 
 	/* Set up the XLOG page header */
@@ -6253,8 +6251,8 @@ StartupXLOG(void)
 					checkPoint.nextXidEpoch, checkPoint.nextXid,
 					checkPoint.nextOid)));
 	ereport(DEBUG1,
-			(errmsg("next MultiXactId: %u; next MultiXactOffset: %u; oldest freezeXid: %u",
-					checkPoint.nextMulti, checkPoint.nextMultiOffset, checkPoint.mxactFreezeXid)));
+			(errmsg("next MultiXactId: %u; next MultiXactOffset: %u",
+					checkPoint.nextMulti, checkPoint.nextMultiOffset)));
 	ereport(DEBUG1,
 			(errmsg("oldest unfrozen transaction ID: %u, in database %u",
 					checkPoint.oldestXid, checkPoint.oldestXidDB)));
@@ -6265,7 +6263,7 @@ StartupXLOG(void)
 	ShmemVariableCache->nextXid = checkPoint.nextXid;
 	ShmemVariableCache->nextOid = checkPoint.nextOid;
 	ShmemVariableCache->oidCount = 0;
-	MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset, checkPoint.mxactFreezeXid);
+	MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset);
 	SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
 
 	/*
@@ -7785,8 +7783,7 @@ CreateCheckPoint(int flags)
 
 	MultiXactGetCheckptMulti(shutdown,
 							 &checkPoint.nextMulti,
-							 &checkPoint.nextMultiOffset,
-							 &checkPoint.mxactFreezeXid);
+							 &checkPoint.nextMultiOffset);
 
 	/*
 	 * Having constructed the checkpoint record, ensure all shmem disk buffers
@@ -8412,8 +8409,7 @@ xlog_redo(XLogRecPtr lsn, XLogRecord *record)
 		ShmemVariableCache->nextOid = checkPoint.nextOid;
 		ShmemVariableCache->oidCount = 0;
 		MultiXactSetNextMXact(checkPoint.nextMulti,
-							  checkPoint.nextMultiOffset,
-							  checkPoint.mxactFreezeXid);
+							  checkPoint.nextMultiOffset);
 		SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
 
 		/*
@@ -8499,8 +8495,7 @@ xlog_redo(XLogRecPtr lsn, XLogRecord *record)
 			ShmemVariableCache->oidCount = 0;
 		}
 		MultiXactAdvanceNextMXact(checkPoint.nextMulti,
-								  checkPoint.nextMultiOffset,
-								  checkPoint.mxactFreezeXid);
+								  checkPoint.nextMultiOffset);
 		if (TransactionIdPrecedes(ShmemVariableCache->oldestXid,
 								  checkPoint.oldestXid))
 			SetTransactionIdLimit(checkPoint.oldestXid,
@@ -8605,7 +8600,7 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 		CheckPoint *checkpoint = (CheckPoint *) rec;
 
 		appendStringInfo(buf, "checkpoint: redo %X/%X; "
-						 "tli %u; xid %u/%u; oid %u; multi %u; offset %u; mxact freeze %u; "
+						 "tli %u; xid %u/%u; oid %u; multi %u; offset %u; "
 						 "oldest xid %u in DB %u; oldest running xid %u; %s",
 						 checkpoint->redo.xlogid, checkpoint->redo.xrecoff,
 						 checkpoint->ThisTimeLineID,
@@ -8613,7 +8608,6 @@ xlog_desc(StringInfo buf, uint8 xl_info, char *rec)
 						 checkpoint->nextOid,
 						 checkpoint->nextMulti,
 						 checkpoint->nextMultiOffset,
-						 checkpoint->mxactFreezeXid,
 						 checkpoint->oldestXid,
 						 checkpoint->oldestXidDB,
 						 checkpoint->oldestActiveXid,

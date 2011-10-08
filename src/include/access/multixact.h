@@ -85,15 +85,12 @@ extern void StartupMultiXact(void);
 extern void ShutdownMultiXact(void);
 extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset,
-						 TransactionId *freezeXid);
+						 MultiXactOffset *nextMultiOffset);
 extern void CheckPointMultiXact(void);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti,
-					  MultiXactOffset nextMultiOffset,
-					  TransactionId freezeXid);
+					  MultiXactOffset nextMultiOffset);
 extern void MultiXactAdvanceNextMXact(MultiXactId minMulti,
-						  MultiXactOffset minMultiOffset,
-						  TransactionId minFreezeXid);
+						  MultiXactOffset minMultiOffset);
 
 extern void multixact_twophase_recover(TransactionId xid, uint16 info,
 						   void *recdata, uint32 len);
