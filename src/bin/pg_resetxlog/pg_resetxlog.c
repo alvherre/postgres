@@ -350,8 +350,10 @@ main(int argc, char *argv[])
 	if (set_mxoff != -1)
 		ControlFile.checkPointCopy.nextMultiOffset = set_mxoff;
 
+	/*
 	if (set_mxfreeze != -1)
 		ControlFile.checkPointCopy.mxactFreezeXid = set_mxfreeze;
+		*/
 
 	if (minXlogTli > ControlFile.checkPointCopy.ThisTimeLineID)
 		ControlFile.checkPointCopy.ThisTimeLineID = minXlogTli;
@@ -599,8 +601,10 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.nextMulti);
 	printf(_("Latest checkpoint's NextMultiOffset:  %u\n"),
 		   ControlFile.checkPointCopy.nextMultiOffset);
+	/*
 	printf(_("Latest checkpoint's MultiXact freezeXid: %u\n"),
 		   ControlFile.checkPointCopy.mxactFreezeXid);
+		   */
 	printf(_("Latest checkpoint's oldestXID:        %u\n"),
 		   ControlFile.checkPointCopy.oldestXid);
 	printf(_("Latest checkpoint's oldestXID's DB:   %u\n"),

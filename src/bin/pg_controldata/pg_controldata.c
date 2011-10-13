@@ -218,8 +218,6 @@ main(int argc, char *argv[])
 		   ControlFile.checkPointCopy.nextMulti);
 	printf(_("Latest checkpoint's NextMultiOffset:  %u\n"),
 		   ControlFile.checkPointCopy.nextMultiOffset);
-	printf(_("Latest checkpoint's multixact freezeXid: %u\n"),
-		   ControlFile.checkPointCopy.mxactFreezeXid);
 	printf(_("Latest checkpoint's oldestXID:        %u\n"),
 		   ControlFile.checkPointCopy.oldestXid);
 	printf(_("Latest checkpoint's oldestXID's DB:   %u\n"),
