@@ -450,6 +450,20 @@ _outIndexScan(StringInfo str, IndexScan *node)
 }
 
 static void
+_outIndexOnlyScan(StringInfo str, IndexOnlyScan *node)
+{
+	WRITE_NODE_TYPE("INDEXONLYSCAN");
+
+	_outScanInfo(str, (Scan *) node);
+
+	WRITE_OID_FIELD(indexid);
+	WRITE_NODE_FIELD(indexqual);
+	WRITE_NODE_FIELD(indexorderby);
+	WRITE_NODE_FIELD(indextlist);
+	WRITE_ENUM_FIELD(indexorderdir, ScanDirection);
+}
+
+static void
 _outBitmapIndexScan(StringInfo str, BitmapIndexScan *node)
 {
 	WRITE_NODE_TYPE("BITMAPINDEXSCAN");
@@ -1750,8 +1764,9 @@ _outIndexOptInfo(StringInfo str, IndexOptInfo *node)
 	WRITE_FLOAT_FIELD(tuples, "%.0f");
 	WRITE_INT_FIELD(ncolumns);
 	WRITE_OID_FIELD(relam);
-	WRITE_NODE_FIELD(indexprs);
+	/* indexprs is redundant since we print indextlist */
 	WRITE_NODE_FIELD(indpred);
+	WRITE_NODE_FIELD(indextlist);
 	WRITE_BOOL_FIELD(predOK);
 	WRITE_BOOL_FIELD(unique);
 	WRITE_BOOL_FIELD(hypothetical);
@@ -2704,6 +2719,9 @@ _outNode(StringInfo str, void *obj)
 				break;
 			case T_IndexScan:
 				_outIndexScan(str, obj);
+				break;
+			case T_IndexOnlyScan:
+				_outIndexOnlyScan(str, obj);
 				break;
 			case T_BitmapIndexScan:
 				_outBitmapIndexScan(str, obj);

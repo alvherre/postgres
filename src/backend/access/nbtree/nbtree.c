@@ -385,6 +385,15 @@ btbeginscan(PG_FUNCTION_ARGS)
 		so->keyData = NULL;
 	so->killedItems = NULL;		/* until needed */
 	so->numKilled = 0;
+
+	/*
+	 * We don't know yet whether the scan will be index-only, so we do not
+	 * allocate the tuple workspace arrays until btrescan.
+	 */
+	so->currTuples = so->markTuples = NULL;
+	so->currPos.nextTupleOffset = 0;
+	so->markPos.nextTupleOffset = 0;
+
 	scan->opaque = so;
 
 	PG_RETURN_POINTER(scan);
@@ -418,6 +427,28 @@ btrescan(PG_FUNCTION_ARGS)
 		so->markPos.buf = InvalidBuffer;
 	}
 	so->markItemIndex = -1;
+
+	/*
+	 * Allocate tuple workspace arrays, if needed for an index-only scan and
+	 * not already done in a previous rescan call.  To save on palloc
+	 * overhead, both workspaces are allocated as one palloc block; only this
+	 * function and btendscan know that.
+	 *
+	 * NOTE: this data structure also makes it safe to return data from a
+	 * "name" column, even though btree name_ops uses an underlying storage
+	 * datatype of cstring.  The risk there is that "name" is supposed to be
+	 * padded to NAMEDATALEN, but the actual index tuple is probably shorter.
+	 * However, since we only return data out of tuples sitting in the
+	 * currTuples array, a fetch of NAMEDATALEN bytes can at worst pull some
+	 * data out of the markTuples array --- running off the end of memory for
+	 * a SIGSEGV is not possible.  Yeah, this is ugly as sin, but it beats
+	 * adding special-case treatment for name_ops elsewhere.
+	 */
+	if (scan->xs_want_itup && so->currTuples == NULL)
+	{
+		so->currTuples = (char *) palloc(BLCKSZ * 2);
+		so->markTuples = so->currTuples + BLCKSZ;
+	}
 
 	/*
 	 * Reset the scan keys. Note that keys ordering stuff moved to _bt_first.
@@ -458,10 +489,14 @@ btendscan(PG_FUNCTION_ARGS)
 	}
 	so->markItemIndex = -1;
 
+	/* Release storage */
 	if (so->killedItems != NULL)
 		pfree(so->killedItems);
 	if (so->keyData != NULL)
 		pfree(so->keyData);
+	if (so->currTuples != NULL)
+		pfree(so->currTuples);
+	/* so->markTuples should not be pfree'd, see btrescan */
 	pfree(so);
 
 	PG_RETURN_VOID();
@@ -534,6 +569,9 @@ btrestrpos(PG_FUNCTION_ARGS)
 			memcpy(&so->currPos, &so->markPos,
 				   offsetof(BTScanPosData, items[1]) +
 				   so->markPos.lastItem * sizeof(BTScanPosItem));
+			if (so->currTuples)
+				memcpy(so->currTuples, so->markTuples,
+					   so->markPos.nextTupleOffset);
 		}
 	}
 

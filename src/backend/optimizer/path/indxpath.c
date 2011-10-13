@@ -18,6 +18,7 @@
 #include <math.h>
 
 #include "access/skey.h"
+#include "access/sysattr.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_operator.h"
@@ -88,6 +89,7 @@ static PathClauseUsage *classify_index_clause_usage(Path *path,
 							List **clauselist);
 static void find_indexpath_quals(Path *bitmapqual, List **quals, List **preds);
 static int	find_list_position(Node *node, List **nodelist);
+static bool check_index_only(RelOptInfo *rel, IndexOptInfo *index);
 static List *group_clauses_by_indexkey(IndexOptInfo *index,
 						  List *clauses, List *outer_clauses,
 						  Relids outer_relids,
@@ -197,14 +199,15 @@ create_index_paths(PlannerInfo *root, RelOptInfo *rel)
 									 true, NULL, SAOP_FORBID, ST_ANYSCAN);
 
 	/*
-	 * Submit all the ones that can form plain IndexScan plans to add_path. (A
-	 * plain IndexPath always represents a plain IndexScan plan; however some
-	 * of the indexes might support only bitmap scans, and those we mustn't
-	 * submit to add_path here.)  Also, pick out the ones that might be useful
-	 * as bitmap scans.  For that, we must discard indexes that don't support
-	 * bitmap scans, and we also are only interested in paths that have some
-	 * selectivity; we should discard anything that was generated solely for
-	 * ordering purposes.
+	 * Submit all the ones that can form plain IndexScan plans to add_path.
+	 * (A plain IndexPath might represent either a plain IndexScan or an
+	 * IndexOnlyScan, but for our purposes here the distinction does not
+	 * matter.  However, some of the indexes might support only bitmap scans,
+	 * and those we mustn't submit to add_path here.)  Also, pick out the ones
+	 * that might be useful as bitmap scans.  For that, we must discard
+	 * indexes that don't support bitmap scans, and we also are only
+	 * interested in paths that have some selectivity; we should discard
+	 * anything that was generated solely for ordering purposes.
 	 */
 	bitindexpaths = NIL;
 	foreach(l, indexpaths)
@@ -314,6 +317,7 @@ find_usable_indexes(PlannerInfo *root, RelOptInfo *rel,
 		bool		useful_predicate;
 		bool		found_clause;
 		bool		index_is_ordered;
+		bool		index_only_scan;
 
 		/*
 		 * Check that index supports the desired scan type(s)
@@ -431,12 +435,19 @@ find_usable_indexes(PlannerInfo *root, RelOptInfo *rel,
 		}
 
 		/*
-		 * 3. Generate an indexscan path if there are relevant restriction
+		 * 3. Check if an index-only scan is possible.
+		 */
+		index_only_scan = check_index_only(rel, index);
+
+		/*
+		 * 4. Generate an indexscan path if there are relevant restriction
 		 * clauses in the current clauses, OR the index ordering is
 		 * potentially useful for later merging or final output ordering, OR
-		 * the index has a predicate that was proven by the current clauses.
+		 * the index has a predicate that was proven by the current clauses,
+		 * OR an index-only scan is possible.
 		 */
-		if (found_clause || useful_pathkeys != NIL || useful_predicate)
+		if (found_clause || useful_pathkeys != NIL || useful_predicate ||
+			index_only_scan)
 		{
 			ipath = create_index_path(root, index,
 									  restrictclauses,
@@ -445,12 +456,13 @@ find_usable_indexes(PlannerInfo *root, RelOptInfo *rel,
 									  index_is_ordered ?
 									  ForwardScanDirection :
 									  NoMovementScanDirection,
+									  index_only_scan,
 									  outer_rel);
 			result = lappend(result, ipath);
 		}
 
 		/*
-		 * 4. If the index is ordered, a backwards scan might be interesting.
+		 * 5. If the index is ordered, a backwards scan might be interesting.
 		 * Again, this is only interesting at top level.
 		 */
 		if (index_is_ordered && possibly_useful_pathkeys &&
@@ -467,6 +479,7 @@ find_usable_indexes(PlannerInfo *root, RelOptInfo *rel,
 										  NIL,
 										  useful_pathkeys,
 										  BackwardScanDirection,
+										  index_only_scan,
 										  outer_rel);
 				result = lappend(result, ipath);
 			}
@@ -1037,6 +1050,80 @@ find_list_position(Node *node, List **nodelist)
 	*nodelist = lappend(*nodelist, node);
 
 	return i;
+}
+
+
+/*
+ * check_index_only
+ *		Determine whether an index-only scan is possible for this index.
+ */
+static bool
+check_index_only(RelOptInfo *rel, IndexOptInfo *index)
+{
+	bool		result;
+	Bitmapset  *attrs_used = NULL;
+	Bitmapset  *index_attrs = NULL;
+	ListCell   *lc;
+	int			i;
+
+	/* Index-only scans must be enabled, and AM must be capable of it */
+	if (!enable_indexonlyscan)
+		return false;
+	if (!index->amcanreturn)
+		return false;
+
+	/*
+	 * Check that all needed attributes of the relation are available from
+	 * the index.
+	 *
+	 * XXX this is overly conservative for partial indexes, since we will
+	 * consider attributes involved in the index predicate as required even
+	 * though the predicate won't need to be checked at runtime.  (The same
+	 * is true for attributes used only in index quals, if we are certain
+	 * that the index is not lossy.)  However, it would be quite expensive
+	 * to determine that accurately at this point, so for now we take the
+	 * easy way out.
+	 */
+
+	/*
+	 * Add all the attributes needed for joins or final output.  Note: we must
+	 * look at reltargetlist, not the attr_needed data, because attr_needed
+	 * isn't computed for inheritance child rels.
+	 */
+	pull_varattnos((Node *) rel->reltargetlist, rel->relid, &attrs_used);
+
+	/* Add all the attributes used by restriction clauses. */
+	foreach(lc, rel->baserestrictinfo)
+	{
+		RestrictInfo   *rinfo = (RestrictInfo *) lfirst(lc);
+
+		pull_varattnos((Node *) rinfo->clause, rel->relid, &attrs_used);
+	}
+
+	/* Construct a bitmapset of columns stored in the index. */
+	for (i = 0; i < index->ncolumns; i++)
+	{
+		int		attno = index->indexkeys[i];
+
+		/*
+		 * For the moment, we just ignore index expressions.  It might be nice
+		 * to do something with them, later.
+		 */
+		if (attno == 0)
+			continue;
+
+		index_attrs =
+			bms_add_member(index_attrs,
+						   attno - FirstLowInvalidHeapAttributeNumber);
+	}
+
+	/* Do we have all the necessary attributes? */
+	result = bms_is_subset(attrs_used, index_attrs);
+
+	bms_free(attrs_used);
+	bms_free(index_attrs);
+
+	return result;
 }
 
 

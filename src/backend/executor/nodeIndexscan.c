@@ -14,8 +14,8 @@
  */
 /*
  * INTERFACE ROUTINES
- *		ExecIndexScan			scans a relation using indices
- *		ExecIndexNext			using index to retrieve next tuple
+ *		ExecIndexScan			scans a relation using an index
+ *		IndexNext				retrieve next tuple using index
  *		ExecInitIndexScan		creates and initializes state info.
  *		ExecReScanIndexScan		rescans the indexed relation.
  *		ExecEndIndexScan		releases all storage.
@@ -89,7 +89,7 @@ IndexNext(IndexScanState *node)
 
 		/*
 		 * If the index was lossy, we have to recheck the index quals using
-		 * the real tuple.
+		 * the fetched tuple.
 		 */
 		if (scandesc->xs_recheck)
 		{
@@ -558,7 +558,6 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	 */
 	ExecIndexBuildScanKeys((PlanState *) indexstate,
 						   indexstate->iss_RelationDesc,
-						   node->scan.scanrelid,
 						   node->indexqual,
 						   false,
 						   &indexstate->iss_ScanKeys,
@@ -573,7 +572,6 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
 	 */
 	ExecIndexBuildScanKeys((PlanState *) indexstate,
 						   indexstate->iss_RelationDesc,
-						   node->scan.scanrelid,
 						   node->indexorderby,
 						   true,
 						   &indexstate->iss_OrderByKeys,
@@ -667,7 +665,6 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
  *
  * planstate: executor state node we are working for
  * index: the index we are building scan keys for
- * scanrelid: varno of the index's relation within current query
  * quals: indexquals (or indexorderbys) expressions
  * isorderby: true if processing ORDER BY exprs, false if processing quals
  * *runtimeKeys: ptr to pre-existing IndexRuntimeKeyInfos, or NULL if none
@@ -686,7 +683,7 @@ ExecInitIndexScan(IndexScan *node, EState *estate, int eflags)
  * ScalarArrayOpExpr quals are not supported.
  */
 void
-ExecIndexBuildScanKeys(PlanState *planstate, Relation index, Index scanrelid,
+ExecIndexBuildScanKeys(PlanState *planstate, Relation index,
 					   List *quals, bool isorderby,
 					   ScanKey *scanKeys, int *numScanKeys,
 					   IndexRuntimeKeyInfo **runtimeKeys, int *numRuntimeKeys,
@@ -760,7 +757,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index, Index scanrelid,
 			Assert(leftop != NULL);
 
 			if (!(IsA(leftop, Var) &&
-				  ((Var *) leftop)->varno == scanrelid))
+				  ((Var *) leftop)->varno == INDEX_VAR))
 				elog(ERROR, "indexqual doesn't have key on left side");
 
 			varattno = ((Var *) leftop)->varattno;
@@ -874,7 +871,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index, Index scanrelid,
 				Assert(leftop != NULL);
 
 				if (!(IsA(leftop, Var) &&
-					  ((Var *) leftop)->varno == scanrelid))
+					  ((Var *) leftop)->varno == INDEX_VAR))
 					elog(ERROR, "indexqual doesn't have key on left side");
 
 				varattno = ((Var *) leftop)->varattno;
@@ -1002,7 +999,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index, Index scanrelid,
 			Assert(leftop != NULL);
 
 			if (!(IsA(leftop, Var) &&
-				  ((Var *) leftop)->varno == scanrelid))
+				  ((Var *) leftop)->varno == INDEX_VAR))
 				elog(ERROR, "indexqual doesn't have key on left side");
 
 			varattno = ((Var *) leftop)->varattno;
@@ -1067,7 +1064,7 @@ ExecIndexBuildScanKeys(PlanState *planstate, Relation index, Index scanrelid,
 			Assert(leftop != NULL);
 
 			if (!(IsA(leftop, Var) &&
-				  ((Var *) leftop)->varno == scanrelid))
+				  ((Var *) leftop)->varno == INDEX_VAR))
 				elog(ERROR, "NullTest indexqual has wrong key");
 
 			varattno = ((Var *) leftop)->varattno;

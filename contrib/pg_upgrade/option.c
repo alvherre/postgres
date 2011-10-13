@@ -39,6 +39,8 @@ parseCommandLine(int argc, char *argv[])
 		{"new-datadir", required_argument, NULL, 'D'},
 		{"old-bindir", required_argument, NULL, 'b'},
 		{"new-bindir", required_argument, NULL, 'B'},
+		{"old-options", required_argument, NULL, 'o'},
+		{"new-options", required_argument, NULL, 'O'},
 		{"old-port", required_argument, NULL, 'p'},
 		{"new-port", required_argument, NULL, 'P'},
 
@@ -93,7 +95,7 @@ parseCommandLine(int argc, char *argv[])
 
 	getcwd(os_info.cwd, MAXPGPATH);
 
-	while ((option = getopt_long(argc, argv, "d:D:b:B:cgG:kl:p:P:u:v",
+	while ((option = getopt_long(argc, argv, "d:D:b:B:cgG:kl:o:O:p:P:u:v",
 								 long_options, &optindex)) != -1)
 	{
 		switch (option)
@@ -112,10 +114,12 @@ parseCommandLine(int argc, char *argv[])
 
 			case 'd':
 				old_cluster.pgdata = pg_strdup(optarg);
+				old_cluster.pgconfig = pg_strdup(optarg);
 				break;
 
 			case 'D':
 				new_cluster.pgdata = pg_strdup(optarg);
+				new_cluster.pgconfig = pg_strdup(optarg);
 				break;
 
 			case 'g':
@@ -139,6 +143,19 @@ parseCommandLine(int argc, char *argv[])
 				log_opts.filename = pg_strdup(optarg);
 				break;
 
+			case 'o':
+				old_cluster.pgopts = pg_strdup(optarg);
+				break;
+
+			case 'O':
+				new_cluster.pgopts = pg_strdup(optarg);
+				break;
+
+			/*
+			 * Someday, the port number option could be removed and
+			 * passed using -o/-O, but that requires postmaster -C
+			 * to be supported on all old/new versions.
+			 */
 			case 'p':
 				if ((old_cluster.port = atoi(optarg)) <= 0)
 				{
@@ -240,6 +257,8 @@ Options:\n\
   -G, --debugfile=FILENAME      output debugging activity to file\n\
   -k, --link                    link instead of copying files to new cluster\n\
   -l, --logfile=FILENAME        log session activity to file\n\
+  -o, --old-options=OPTIONS     old cluster options to pass to the server\n\
+  -O, --new-options=OPTIONS     new cluster options to pass to the server\n\
   -p, --old-port=OLDPORT        old cluster port number (default %d)\n\
   -P, --new-port=NEWPORT        new cluster port number (default %d)\n\
   -u, --user=NAME               clusters superuser (default \"%s\")\n\
@@ -318,4 +337,62 @@ check_required_directory(char **dirpath, char *envVarName,
 		(*dirpath)[strlen(*dirpath) - 1] == '\\')
 #endif
 		(*dirpath)[strlen(*dirpath) - 1] = 0;
+}
+
+/*
+ * adjust_data_dir
+ *
+ * If a configuration-only directory was specified, find the real data dir
+ * by quering the running server.  This has limited checking because we
+ * can't check for a running server because we can't find postmaster.pid.
+ */
+void
+adjust_data_dir(ClusterInfo *cluster)
+{
+	char		filename[MAXPGPATH];
+	char		cmd[MAXPGPATH], cmd_output[MAX_STRING];
+	FILE	   *fd, *output;
+
+	/* If there is no postgresql.conf, it can't be a config-only dir */
+	snprintf(filename, sizeof(filename), "%s/postgresql.conf", cluster->pgconfig);
+	if ((fd = fopen(filename, "r")) == NULL)
+		return;
+	fclose(fd);
+
+	/* If PG_VERSION exists, it can't be a config-only dir */
+	snprintf(filename, sizeof(filename), "%s/PG_VERSION", cluster->pgconfig);
+	if ((fd = fopen(filename, "r")) != NULL)
+	{
+		fclose(fd);
+		return;
+	}
+
+	/* Must be a configuration directory, so find the real data directory. */
+
+	prep_status("Finding the real data directory for the %s cluster",
+				CLUSTER_NAME(cluster));
+
+	/*
+	 * We don't have a data directory yet, so we can't check the PG
+	 * version, so this might fail --- only works for PG 9.2+.   If this
+	 * fails, pg_upgrade will fail anyway because the data files will not
+	 * be found.
+	 */
+	snprintf(cmd, sizeof(cmd), "\"%s/postmaster\" -D \"%s\" -C data_directory",
+			 cluster->bindir, cluster->pgconfig);
+
+	if ((output = popen(cmd, "r")) == NULL ||
+		fgets(cmd_output, sizeof(cmd_output), output) == NULL)
+		pg_log(PG_FATAL, "Could not get data directory using %s: %s\n",
+		cmd, getErrorText(errno));
+
+	pclose(output);
+
+	/* Remove trailing newline */
+	if (strchr(cmd_output, '\n') != NULL)
+		*strchr(cmd_output, '\n') = '\0';
+
+	cluster->pgdata = pg_strdup(cmd_output);
+
+	check_ok();
 }
