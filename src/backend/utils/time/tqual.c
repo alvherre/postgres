@@ -1186,6 +1186,13 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsCurrentTransactionId(xmax))
+		{
+			if (HeapTupleHeaderGetCmax(tuple) >= snapshot->curcid)
+				return true;	/* deleted after scan started */
+			else
+				return false;	/* deleted before scan started */
+		}
 		if (TransactionIdIsInProgress(xmax))
 			return true;
 		if (TransactionIdDidCommit(xmax))
