@@ -118,9 +118,11 @@ HeapTupleHeaderGetCmax(HeapTupleHeader tup)
 {
 	CommandId	cid = HeapTupleHeaderGetRawCommandId(tup);
 
+	Assert(!(tup->t_infomask & HEAP_MOVED));
 	/* We do not store cmax when locking a tuple */
-	Assert(!(tup->t_infomask & (HEAP_MOVED | HEAP_IS_LOCKED)));
-	Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tup)));
+	Assert(!HeapTupleHeaderIsLocked(tup));
+	Assert((tup->t_infomask & HEAP_XMAX_IS_MULTI) ||
+		   TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tup)));
 
 	if (tup->t_infomask & HEAP_COMBOCID)
 		return GetRealCmax(cid);
