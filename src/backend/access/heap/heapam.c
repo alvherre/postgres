@@ -2729,7 +2729,7 @@ l2:
 	 * visible while we were busy locking the buffer, or during some subsequent
 	 * window during which we had it unlocked, we'll have to unlock and
 	 * re-lock, to avoid holding the buffer lock across an I/O.  That's a bit
-	 * unfortunate, esepecially since we'll now have to recheck whether the
+	 * unfortunate, especially since we'll now have to recheck whether the
 	 * tuple has been locked or updated under us, but hopefully it won't
 	 * happen very often.
 	 */
