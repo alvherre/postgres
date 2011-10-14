@@ -1762,7 +1762,8 @@ heap_get_latest_tid(Relation relation,
 		/*
 		 * If there's a valid t_ctid link, follow it, else we're done.
 		 */
-		if ((tp.t_data->t_infomask & (HEAP_XMAX_INVALID | HEAP_IS_LOCKED)) ||
+		if ((tp.t_data->t_infomask & HEAP_XMAX_INVALID) ||
+			HeapTupleHeaderIsLocked(tp.t_data) ||
 			ItemPointerEquals(&tp.t_self, &tp.t_data->t_ctid))
 		{
 			UnlockReleaseBuffer(buffer);
@@ -2235,8 +2236,8 @@ l1:
 		 * We may overwrite if previous xmax aborted, or if it committed but
 		 * only locked the tuple without updating it.
 		 */
-		if (tp.t_data->t_infomask & (HEAP_XMAX_INVALID |
-									 HEAP_IS_LOCKED))
+		if ((tp.t_data->t_infomask & HEAP_XMAX_INVALID) ||
+			HeapTupleHeaderIsLocked(tp.t_data))
 			result = HeapTupleMayBeUpdated;
 		else
 			result = HeapTupleUpdated;
@@ -2298,7 +2299,7 @@ l1:
 	tp.t_data->t_infomask &= ~(HEAP_XMAX_COMMITTED |
 							   HEAP_XMAX_INVALID |
 							   HEAP_XMAX_IS_MULTI |
-							   HEAP_IS_LOCKED |
+							   HEAP_LOCK_BITS |
 							   HEAP_MOVED);
 	HeapTupleHeaderClearHotUpdated(tp.t_data);
 	HeapTupleHeaderSetXmax(tp.t_data, xid);
@@ -2634,7 +2635,7 @@ l2:
 			 * subxact aborts.
 			 */
 			update_xact = InvalidTransactionId;
-			if (!(oldtup.t_data->t_infomask & HEAP_IS_LOCKED))
+			if (!(oldtup.t_data->t_infomask & HEAP_XMAX_IS_NOT_UPDATE))
 				update_xact = HeapTupleGetUpdateXid(oldtup.t_data);
 
 			/* there was no UPDATE in the MultiXact; or it aborted. */
@@ -2689,8 +2690,8 @@ l2:
 		 */
 		if (result == HeapTupleBeingUpdated)
 		{
-			if (oldtup.t_data->t_infomask & (HEAP_XMAX_INVALID |
-											 HEAP_IS_LOCKED))
+			if ((oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
+				HeapTupleHeaderIsLocked(oldtup.t_data))
 				result = HeapTupleMayBeUpdated;
 			else
 				result = HeapTupleUpdated;
@@ -2849,7 +2850,7 @@ l2:
 		oldtup.t_data->t_infomask &= ~(HEAP_XMAX_COMMITTED |
 									   HEAP_XMAX_INVALID |
 									   HEAP_XMAX_IS_MULTI |
-									   HEAP_IS_LOCKED |
+									   HEAP_LOCK_BITS |
 									   HEAP_MOVED);
 		HeapTupleClearHotUpdated(&oldtup);
 		/* ... and store info about transaction updating this tuple */
@@ -3013,7 +3014,7 @@ l2:
 		oldtup.t_data->t_infomask &= ~(HEAP_XMAX_COMMITTED |
 									   HEAP_XMAX_INVALID |
 									   HEAP_XMAX_IS_MULTI |
-									   HEAP_IS_LOCKED |
+									   HEAP_LOCK_BITS |
 									   HEAP_MOVED);
 		/* ... and store info about transaction updating this tuple */
 		if (TransactionIdIsValid(keep_xmax_old))
@@ -3536,15 +3537,16 @@ l3:
 		 */
 		require_sleep = true;
 		if ((mode == LockTupleKeyShare) &&
-			(infomask & HEAP_IS_LOCKED || infomask2 & HEAP_UPDATE_KEY_INTACT))
+			(HeapTupleHeaderInfomaskIsLocked(infomask) ||
+			 infomask2 & HEAP_UPDATE_KEY_INTACT))
 		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
 			 * Make sure it's still an appropriate lock, else start over.
 			 */
-			if (!((tuple->t_data->t_infomask & HEAP_IS_LOCKED) ||
-				  (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT)))
+			if (!HeapTupleHeaderIsLocked(tuple->t_data) ||
+				(tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT))
 				goto l3;
 			require_sleep = false;
 			/* acquire fresh values -- XXX do we need to restart if xmax changed? */
@@ -3740,8 +3742,8 @@ l3:
 		 * at all for whatever reason.
 		 */
 		if (!require_sleep ||
-			(tuple->t_data->t_infomask & (HEAP_XMAX_INVALID |
-										  HEAP_IS_LOCKED)))
+			(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
+			HeapTupleHeaderIsLocked(tuple->t_data))
 			result = HeapTupleMayBeUpdated;
 		else
 			result = HeapTupleUpdated;
@@ -5077,7 +5079,7 @@ heap_xlog_delete(XLogRecPtr lsn, XLogRecord *record)
 	htup->t_infomask &= ~(HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_INVALID |
 						  HEAP_XMAX_IS_MULTI |
-						  HEAP_IS_LOCKED |
+						  HEAP_LOCK_BITS |
 						  HEAP_MOVED);
 	HeapTupleHeaderClearHotUpdated(htup);
 	HeapTupleHeaderSetXmax(htup, record->xl_xid);
@@ -5284,7 +5286,7 @@ heap_xlog_update(XLogRecPtr lsn, XLogRecord *record, bool hot_update)
 	htup->t_infomask &= ~(HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_INVALID |
 						  HEAP_XMAX_IS_MULTI |
-						  HEAP_IS_LOCKED |
+						  HEAP_LOCK_BITS |
 						  HEAP_MOVED);
 	if (hot_update)
 		HeapTupleHeaderSetHotUpdated(htup);
@@ -5462,7 +5464,7 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 	htup->t_infomask &= ~(HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_INVALID |
 						  HEAP_XMAX_IS_MULTI |
-						  HEAP_IS_LOCKED |
+						  HEAP_LOCK_BITS |
 						  HEAP_MOVED);
 	if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
 		htup->t_infomask |= HEAP_XMAX_IS_MULTI;

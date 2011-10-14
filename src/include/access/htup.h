@@ -170,10 +170,8 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_IS_NOT_UPDATE	0x0080	/* xmax, if valid, is only a locker.
 										   Note this might be unset if
 										   XMAX_IS_MULTI is not also set. */
-/*
- * if any of these bits is set, xmax hasn't deleted the tuple, only locked it.
- */
-#define HEAP_IS_LOCKED	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_IS_NOT_UPDATE | \
+
+#define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_IS_NOT_UPDATE | \
 						 HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */
@@ -190,6 +188,21 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_MOVED (HEAP_MOVED_OFF | HEAP_MOVED_IN)
 
 #define HEAP_XACT_MASK			0xFFE0	/* visibility-related bits */
+
+/*
+ * A tuple is only locked (i.e. not updated by its Xmax) if it the Xmax is not
+ * a multixact and it has either the EXCL_LOCK or KEYSHR_LOCK bits set, or if
+ * the xmax is a multi that doesn't contain an update.
+ *
+ * Beware of multiple evaluation of arguments.
+ */
+#define HeapTupleHeaderInfomaskIsLocked(infomask) \
+	((!((infomask) & HEAP_XMAX_IS_MULTI) && \
+	  (infomask) & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) || \
+	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_IS_NOT_UPDATE)))
+
+#define HeapTupleHeaderIsLocked(tup) \
+	HeapTupleHeaderInfomaskIsLocked((tup)->t_infomask)
 
 /*
  * information stored in t_infomask2:
