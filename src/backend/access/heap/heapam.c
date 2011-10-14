@@ -2480,7 +2480,9 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	bool		all_visible_cleared_new = false;
 	bool			keep_xmax_multi = false;
 	TransactionId	keep_xmax = InvalidTransactionId;
+	TransactionId	keep_xmax_old = InvalidTransactionId;
 	uint16		keep_xmax_infomask = 0;
+	uint16		keep_xmax_old_infomask = 0;
 
 	Assert(ItemPointerIsValid(otid));
 
@@ -2772,12 +2774,18 @@ l2:
 	{
 		Assert(tuplock == LockTupleUpdate);
 		if (keep_xmax_multi)
-			keep_xmax = MultiXactIdExpand(keep_xmax,
-										  xid, MultiXactStatusUpdate);
+		{
+			keep_xmax_old = MultiXactIdExpand(keep_xmax,
+											  xid, MultiXactStatusUpdate);
+			keep_xmax_infomask = HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_MULTI;
+		}
 		else
-			keep_xmax = MultiXactIdCreate(keep_xmax, MultiXactStatusKeyShare,
-										  xid, MultiXactStatusUpdate);
-		keep_xmax_infomask = HEAP_XMAX_IS_MULTI | HEAP_XMAX_KEYSHR_LOCK;
+		{
+			keep_xmax_old = MultiXactIdCreate(keep_xmax, MultiXactStatusKeyShare,
+											  xid, MultiXactStatusUpdate);
+			keep_xmax_infomask = HEAP_XMAX_KEYSHR_LOCK;
+		}
+		keep_xmax_old_infomask = HEAP_XMAX_IS_MULTI | HEAP_XMAX_KEYSHR_LOCK;
 		/* FIXME -- need to set the other infomask bits as well ... what are they? */
 	}
 
@@ -2845,10 +2853,10 @@ l2:
 									   HEAP_MOVED);
 		HeapTupleClearHotUpdated(&oldtup);
 		/* ... and store info about transaction updating this tuple */
-		if (TransactionIdIsValid(keep_xmax))
+		if (TransactionIdIsValid(keep_xmax_old))
 		{
-			HeapTupleHeaderSetXmax(oldtup.t_data, keep_xmax);
-			oldtup.t_data->t_infomask |= keep_xmax_infomask;
+			HeapTupleHeaderSetXmax(oldtup.t_data, keep_xmax_old);
+			oldtup.t_data->t_infomask |= keep_xmax_old_infomask;
 		}
 		else
 			HeapTupleHeaderSetXmax(oldtup.t_data, xid);
@@ -3008,10 +3016,10 @@ l2:
 									   HEAP_IS_LOCKED |
 									   HEAP_MOVED);
 		/* ... and store info about transaction updating this tuple */
-		if (TransactionIdIsValid(keep_xmax))
+		if (TransactionIdIsValid(keep_xmax_old))
 		{
-			HeapTupleHeaderSetXmax(oldtup.t_data, keep_xmax);
-			oldtup.t_data->t_infomask |= keep_xmax_infomask;
+			HeapTupleHeaderSetXmax(oldtup.t_data, keep_xmax_old);
+			oldtup.t_data->t_infomask |= keep_xmax_old_infomask;
 		}
 		else
 			HeapTupleHeaderSetXmax(oldtup.t_data, xid);
