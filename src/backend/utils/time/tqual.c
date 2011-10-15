@@ -164,7 +164,7 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 			/*
 			 * SHARE lockers are okay, though since they normally conflict with
 			 * UPDATE, they are not expected unless they come from the same
-			 * xact as the update.  No way to verify that however.
+			 * xact as the update.  No way to verify that, however.
 			 */
 			if (members[i].status == MultiXactStatusShare)
 				continue;
@@ -316,6 +316,8 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 			return true;
 	
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsCurrentTransactionId(xmax))
+			return false;
 		if (TransactionIdIsInProgress(xmax))
 			return true;
 		if (TransactionIdDidCommit(xmax))
@@ -519,6 +521,13 @@ HeapTupleSatisfiesNow(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 			return true;
 	
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsCurrentTransactionId(xmax))
+		{
+			if (HeapTupleHeaderGetCmax(tuple) >= GetCurrentCommandId(false))
+				return true;	/* deleted after scan started */
+			else
+				return false;	/* deleted before scan started */
+		}
 		if (TransactionIdIsInProgress(xmax))
 			return true;
 		if (TransactionIdDidCommit(xmax))
@@ -994,10 +1003,15 @@ HeapTupleSatisfiesDirty(HeapTupleHeader tuple, Snapshot snapshot,
 	   
 		if (HeapTupleHeaderIsLocked(tuple))
 			return true;
-	
+
 		xmax = HeapTupleGetUpdateXid(tuple);
+		if (TransactionIdIsCurrentTransactionId(xmax))
+			return false;
 		if (TransactionIdIsInProgress(xmax))
+		{
+			snapshot->xmax = xmax;
 			return true;
+		}
 		if (TransactionIdDidCommit(xmax))
 		{
 			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
@@ -1391,6 +1405,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 		xmax = HeapTupleGetUpdateXid(tuple);
 
 		Assert(!TransactionIdIsInProgress(xmax));
+		Assert(!TransactionIdIsCurrentTransactionId(xmax));
 		/* FIXME -- can we do something to remove the multixactid? */
 		if (TransactionIdDidCommit(xmax))
 			return HEAPTUPLE_RECENTLY_DEAD;
