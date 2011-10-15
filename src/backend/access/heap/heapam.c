@@ -2477,6 +2477,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	bool		have_tuple_lock = false;
 	bool		iscombo;
 	bool		use_hot_update = false;
+	bool		key_intact;
 	bool		all_visible_cleared = false;
 	bool		all_visible_cleared_new = false;
 	bool			keep_xmax_multi = false;
@@ -2530,9 +2531,15 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	 * foreign key checks.
 	 */
 	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup))
+	{
 		tuplock = LockTupleUpdate;
+		key_intact = true;
+	}
 	else
+	{
 		tuplock = LockTupleKeyUpdate;
+		key_intact = false;
+	}
 
 	/*
 	 * Note: beyond this point, use oldtup not otid to refer to old tuple.
@@ -2655,7 +2662,7 @@ l2:
 			 * need to preserve it as locker.
 			 */
 			if ((oldtup.t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK) &&
-				(tuplock != LockTupleKeyUpdate))
+				key_intact)
 			{
 				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 				keep_xmax = xwait;
@@ -2852,6 +2859,7 @@ l2:
 									   HEAP_XMAX_IS_MULTI |
 									   HEAP_LOCK_BITS |
 									   HEAP_MOVED);
+		oldtup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_INTACT;
 		HeapTupleClearHotUpdated(&oldtup);
 		/* ... and store info about transaction updating this tuple */
 		if (TransactionIdIsValid(keep_xmax_old))
@@ -2861,6 +2869,8 @@ l2:
 		}
 		else
 			HeapTupleHeaderSetXmax(oldtup.t_data, xid);
+		if (key_intact)
+			oldtup.t_data->t_infomask2 |= HEAP_UPDATE_KEY_INTACT;
 		HeapTupleHeaderSetCmax(oldtup.t_data, cid, iscombo);
 		/* temporarily make it look not-updated */
 		oldtup.t_data->t_ctid = oldtup.t_self;
@@ -3016,6 +3026,7 @@ l2:
 									   HEAP_XMAX_IS_MULTI |
 									   HEAP_LOCK_BITS |
 									   HEAP_MOVED);
+		oldtup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_INTACT;
 		/* ... and store info about transaction updating this tuple */
 		if (TransactionIdIsValid(keep_xmax_old))
 		{
@@ -3024,6 +3035,8 @@ l2:
 		}
 		else
 			HeapTupleHeaderSetXmax(oldtup.t_data, xid);
+		if (key_intact)
+			oldtup.t_data->t_infomask2 |= HEAP_UPDATE_KEY_INTACT;
 		HeapTupleHeaderSetCmax(oldtup.t_data, cid, iscombo);
 	}
 
@@ -3545,8 +3558,8 @@ l3:
 			/*
 			 * Make sure it's still an appropriate lock, else start over.
 			 */
-			if (!HeapTupleHeaderIsLocked(tuple->t_data) ||
-				(tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT))
+			if (!(HeapTupleHeaderIsLocked(tuple->t_data) ||
+				  (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT)))
 				goto l3;
 			require_sleep = false;
 			/* acquire fresh values -- XXX do we need to restart if xmax changed? */
