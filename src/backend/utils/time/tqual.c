@@ -1402,14 +1402,34 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(tuple)))
 			return HEAPTUPLE_LIVE;
 	
-		xmax = HeapTupleGetUpdateXid(tuple);
+		if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
+		{
+			xmax = HeapTupleGetUpdateXid(tuple);
 
-		Assert(!TransactionIdIsInProgress(xmax));
-		Assert(!TransactionIdIsCurrentTransactionId(xmax));
-		/* FIXME -- can we do something to remove the multixactid? */
-		if (TransactionIdDidCommit(xmax))
+			Assert(!TransactionIdIsInProgress(xmax));
+			Assert(!TransactionIdIsCurrentTransactionId(xmax));
+			if (TransactionIdDidCommit(xmax))
+				SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
+			else
+			{
+				/*
+				 * Not in Progress, Not Committed, so either Aborted or crashed
+				 */
+				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
+							InvalidTransactionId);
+				return HEAPTUPLE_LIVE;
+			}
+		}
+
+		/*
+		 * Deleter committed, but perhaps it was recent enough that some open
+		 * transactions could still see the tuple.
+		 */
+		if (!TransactionIdPrecedes(xmax, OldestXmin))
 			return HEAPTUPLE_RECENTLY_DEAD;
-		return HEAPTUPLE_LIVE;	/* either aborted or crashed */
+
+		/* Otherwise, it's dead and removable */
+		return HEAPTUPLE_DEAD;
 	}
 
 	if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
