@@ -1090,6 +1090,7 @@ read_info(SeqTable elm, Relation rel, Buffer *buf)
 	 * bit update, ie, don't bother to WAL-log it, since we can certainly do
 	 * this again if the update gets lost.
 	 */
+	Assert(!(tuple.t_data->t_infomask & HEAP_XMAX_IS_MULTI));
 	if (HeapTupleHeaderGetXmax(tuple.t_data) != InvalidTransactionId)
 	{
 		HeapTupleHeaderSetXmax(tuple.t_data, InvalidTransactionId);

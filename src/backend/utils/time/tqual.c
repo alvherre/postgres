@@ -139,6 +139,8 @@ HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
  *
  * For a tuple marked XMAX_IS_MULTI and not XMAX_IS_NOT_UPDATED,
  * returns the update Xid.
+ *
+ * See also HeapTupleHeaderGetUpdateXid
  */
 TransactionId
 HeapTupleGetUpdateXid(HeapTupleHeader tuple)

@@ -168,8 +168,8 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
 #define HEAP_XMAX_IS_NOT_UPDATE	0x0080	/* xmax, if valid, is only a locker.
-										   Note this might be unset if
-										   XMAX_IS_MULTI is not also set. */
+										 * Note this is not set unless
+										 * XMAX_IS_MULTI is also set. */
 
 #define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_IS_NOT_UPDATE | \
 						 HEAP_XMAX_KEYSHR_LOCK)
@@ -238,6 +238,21 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HeapTupleHeaderSetXmin(tup, xid) \
 ( \
 	(tup)->t_choice.t_heap.t_xmin = (xid) \
+)
+
+/*
+ * HeapTupleHeaderGetXmax gets you the raw Xmax field.  To find out the Xid
+ * that updated a tuple, you might need to resolve the MultiXactId if certain
+ * bits are set.  HeapTupleHeaderGetUpdateXid does that.
+ */
+#define HeapTupleHeaderGetUpdateXid(tup) \
+( \
+ 	(!((tup)->t_infomask & HEAP_XMAX_INVALID) && \
+	 ((tup)->t_infomask & HEAP_XMAX_IS_MULTI) && \
+ 	 !((tup)->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)) ? \
+		HeapTupleGetUpdateXid(tup) \
+	: \
+ 		HeapTupleHeaderGetXmax(tup) \
 )
 
 #define HeapTupleHeaderGetXmax(tup) \

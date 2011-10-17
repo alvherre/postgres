@@ -360,7 +360,7 @@ rewrite_heap_tuple(RewriteState state,
 		OldToNewMapping mapping;
 
 		memset(&hashkey, 0, sizeof(hashkey));
-		hashkey.xmin = HeapTupleHeaderGetXmax(old_tuple->t_data);
+		hashkey.xmin = HeapTupleHeaderGetUpdateXid(old_tuple->t_data);
 		hashkey.tid = old_tuple->t_data->t_ctid;
 
 		mapping = (OldToNewMapping)
