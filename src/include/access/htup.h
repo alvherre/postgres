@@ -213,7 +213,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_HOT_UPDATED		0x4000	/* tuple was HOT-updated */
 #define HEAP_ONLY_TUPLE			0x8000	/* this is heap-only tuple */
 
-#define HEAP2_XACT_MASK			0xC000	/* visibility-related bits */
+#define HEAP2_XACT_MASK			0xE000	/* visibility-related bits */
 
 /*
  * HEAP_TUPLE_HAS_MATCH is a temporary flag used during hash joins.  It is
