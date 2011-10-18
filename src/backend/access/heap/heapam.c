@@ -2087,10 +2087,11 @@ simple_heap_insert(Relation relation, HeapTuple tup)
  * HeapTupleSelfUpdated, HeapTupleUpdated, or HeapTupleBeingUpdated
  * (the last only possible if wait == false).
  *
- * In the failure cases, the routine returns the tuple's t_ctid and t_xmax.
+ * In the failure cases, the routine returns the tuple's t_ctid and the
+ * updating Xid (resolving a possible MultiXact, if necessary).
  * If t_ctid is the same as tid, the tuple was deleted; if different, the
  * tuple was updated, and t_ctid is the location of the replacement tuple.
- * (t_xmax is needed to verify that the replacement tuple matches.)
+ * (xmax is needed to verify that the replacement tuple matches.)
  */
 HTSU_Result
 heap_delete(Relation relation, ItemPointer tid,
@@ -2257,8 +2258,7 @@ l1:
 			   result == HeapTupleBeingUpdated);
 		Assert(!(tp.t_data->t_infomask & HEAP_XMAX_INVALID));
 		*ctid = tp.t_data->t_ctid;
-		/* FIXME -- change this one? */
-		*update_xmax = HeapTupleHeaderGetXmax(tp.t_data);
+		*update_xmax = HeapTupleHeaderGetUpdateXid(tp.t_data);
 		UnlockReleaseBuffer(buffer);
 		if (have_tuple_lock)
 			UnlockTuple(relation, &(tp.t_self),
@@ -2447,10 +2447,11 @@ simple_heap_delete(Relation relation, ItemPointer tid)
  * update was done.  However, any TOAST changes in the new tuple's
  * data are not reflected into *newtup.
  *
- * In the failure cases, the routine returns the tuple's t_ctid and t_xmax.
+ * In the failure cases, the routine returns the tuple's t_ctid and the
+ * updating Xid (resolving a possible MultiXact, if necessary).
  * If t_ctid is the same as otid, the tuple was deleted; if different, the
  * tuple was updated, and t_ctid is the location of the replacement tuple.
- * (t_xmax is needed to verify that the replacement tuple matches.)
+ * (xmax is needed to verify that the replacement tuple matches.)
  */
 HTSU_Result
 heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
@@ -2720,8 +2721,7 @@ l2:
 			   result == HeapTupleBeingUpdated);
 		Assert(!(oldtup.t_data->t_infomask & HEAP_XMAX_INVALID));
 		*ctid = oldtup.t_data->t_ctid;
-		/* FIXME -- change this one? */
-		*update_xmax = HeapTupleHeaderGetXmax(oldtup.t_data);
+		*update_xmax = HeapTupleHeaderGetUpdateXid(oldtup.t_data);
 		UnlockReleaseBuffer(buffer);
 		if (have_tuple_lock)
 			UnlockTuple(relation, &(oldtup.t_self),
@@ -3373,10 +3373,11 @@ get_hintbit_for_tuplelock(LockTupleMode mode)
  *	HeapTupleSelfUpdated: lock failed because tuple updated by self
  *	HeapTupleUpdated: lock failed because tuple updated by other xact
  *
- * In the failure cases, the routine returns the tuple's t_ctid and t_xmax.
+ * In the failure cases, the routine returns the tuple's t_ctid and the
+ * updating Xid (resolving a possible MultiXact, if necessary).
  * If t_ctid is the same as t_self, the tuple was deleted; if different, the
  * tuple was updated, and t_ctid is the location of the replacement tuple.
- * (t_xmax is needed to verify that the replacement tuple matches.)
+ * (xmax is needed to verify that the replacement tuple matches.)
  *
  *
  * NOTES: because the shared-memory lock table is of finite size, but users
@@ -3770,8 +3771,7 @@ l3:
 		Assert(result == HeapTupleSelfUpdated || result == HeapTupleUpdated);
 		Assert(!(tuple->t_data->t_infomask & HEAP_XMAX_INVALID));
 		*ctid = tuple->t_data->t_ctid;
-		/* FIXME -- change this one? */
-		*update_xmax = HeapTupleHeaderGetXmax(tuple->t_data);
+		*update_xmax = HeapTupleHeaderGetUpdateXid(tuple->t_data);
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 		if (have_tuple_lock)
 			UnlockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
