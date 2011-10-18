@@ -133,49 +133,56 @@ pgrowlocks(PG_FUNCTION_ARGS)
 			i = 0;
 			values[i++] = (char *) DirectFunctionCall1(tidout, PointerGetDatum(&tuple->t_self));
 
-			if (tuple->t_data->t_infomask & HEAP_XMAX_SHARED_LOCK)
-				values[i++] = pstrdup("Shared");
-			else
-				values[i++] = pstrdup("Exclusive");
+			values[i] = palloc(36);
+			values[i][0] = '\0';
+			if (tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK)
+				strcat(values[i], "Key Share ");
+			if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
+				strcat(values[i], "Exclusive ");
+			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)
+				strcat(values[i], "IsNotUpdate ");
+			i++;
 			values[i] = palloc(NCHARS * sizeof(char));
 			snprintf(values[i++], NCHARS, "%d", HeapTupleHeaderGetXmax(tuple->t_data));
 			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI)
 			{
-				TransactionId *xids;
-				int			nxids;
+				MultiXactMember *members;
+				int			nmembers;
 				int			j;
-				int			isValidXid = 0;		/* any valid xid ever exists? */
+				bool		isValidXid = false;		/* any valid xid ever exists? */
 
 				values[i++] = pstrdup("true");
-				nxids = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple->t_data), &xids);
-				if (nxids == -1)
+				nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple->t_data), &members);
+				if (nmembers == -1)
 				{
 					elog(ERROR, "GetMultiXactIdMembers returns error");
 				}
 
-				values[i] = palloc(NCHARS * nxids);
-				values[i + 1] = palloc(NCHARS * nxids);
+				values[i] = palloc(NCHARS * nmembers);
+				values[i + 1] = palloc(NCHARS * nmembers);
 				strcpy(values[i], "{");
 				strcpy(values[i + 1], "{");
 
-				for (j = 0; j < nxids; j++)
+				for (j = 0; j < nmembers; j++)
 				{
 					char		buf[NCHARS];
 
-					if (TransactionIdIsInProgress(xids[j]))
+					if (isValidXid)
 					{
-						if (isValidXid)
-						{
-							strcat(values[i], ",");
-							strcat(values[i + 1], ",");
-						}
-						snprintf(buf, NCHARS, "%d", xids[j]);
-						strcat(values[i], buf);
-						snprintf(buf, NCHARS, "%d", BackendXidGetPid(xids[j]));
-						strcat(values[i + 1], buf);
-
-						isValidXid = 1;
+						strcat(values[i], ",");
+						strcat(values[i + 1], ",");
 					}
+					snprintf(buf, NCHARS, "%d (%s)", members[j].xid,
+							 members[j].status == MultiXactStatusKeyUpdate ? "keyupd" :
+							 members[j].status == MultiXactStatusUpdate ? "upd" :
+							 members[j].status == MultiXactStatusShare ? "share" :
+							 members[j].status == MultiXactStatusKeyShare ? "keyshr" :
+							 "invalid");
+					strcat(values[i], buf);
+					snprintf(buf, NCHARS, "%d", BackendXidGetPid(members[j].xid));
+					strcat(values[i + 1], buf);
+
+					isValidXid = true;
 				}
 
 				strcat(values[i], "}");
