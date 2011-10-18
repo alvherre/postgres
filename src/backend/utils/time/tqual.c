@@ -831,7 +831,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tuple)))
 	{
 		if (HeapTupleHeaderIsLocked(tuple))
-			return HeapTupleMayBeUpdated;	/* FIXME -- ensure heap_lock_tuple agrees with this */
+			return HeapTupleBeingUpdated;
 		if (HeapTupleHeaderGetCmax(tuple) >= curcid)
 			return HeapTupleSelfUpdated;		/* updated after scan started */
 		else
@@ -839,10 +839,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	}
 
 	if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(tuple)))
-	{
-		/* FIXME -- if HeapTupleHeaderIsLocked(), could we do differently here? */
 		return HeapTupleBeingUpdated;
-	}
 
 	if (!TransactionIdDidCommit(HeapTupleHeaderGetXmax(tuple)))
 	{
