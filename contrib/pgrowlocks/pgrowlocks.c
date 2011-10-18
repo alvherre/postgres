@@ -58,7 +58,6 @@ typedef struct
 	Relation	rel;
 	HeapScanDesc scan;
 	int			ncolumns;
-	MemoryContext memcxt;
 } MyData;
 
 #define		Atnum_tid		0
@@ -109,17 +108,11 @@ pgrowlocks(PG_FUNCTION_ARGS)
 			aclcheck_error(aclresult, ACL_KIND_CLASS,
 						   RelationGetRelationName(rel));
 
-
 		scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
 		mydata = palloc(sizeof(*mydata));
 		mydata->rel = rel;
 		mydata->scan = scan;
 		mydata->ncolumns = tupdesc->natts;
-		mydata->memcxt = AllocSetContextCreate(CurrentMemoryContext,
-											   "pgrowlocks cxt",
-											   ALLOCSET_DEFAULT_MINSIZE,
-											   ALLOCSET_DEFAULT_INITSIZE,
-											   ALLOCSET_DEFAULT_MAXSIZE);
 		funcctx->user_fctx = mydata;
 
 		MemoryContextSwitchTo(oldcontext);
@@ -141,9 +134,7 @@ pgrowlocks(PG_FUNCTION_ARGS)
 									 scan->rs_cbuf) == HeapTupleBeingUpdated)
 		{
 			char	  **values;
-			MemoryContext	oldcxt;
 
-			oldcxt = MemoryContextSwitchTo(mydata->memcxt);
 			values = (char **) palloc(mydata->ncolumns * sizeof(char *));
 
 			values[Atnum_tid] = (char *) DirectFunctionCall1(tidout, PointerGetDatum(&tuple->t_self));
@@ -167,15 +158,15 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				bool		isValidXid = false;		/* any valid xid ever exists? */
 
 				values[Atnum_ismulti] = pstrdup("true");
+
 				nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple->t_data), &members);
 				if (nmembers == -1)
-				{
 					elog(ERROR, "GetMultiXactIdMembers returns error");
-				}
 
 				values[Atnum_xids] = palloc(NCHARS * nmembers);
 				values[Atnum_modes] = palloc(NCHARS * nmembers);
 				values[Atnum_pids] = palloc(NCHARS * nmembers);
+
 				strcpy(values[Atnum_xids], "{");
 				strcpy(values[Atnum_modes], "{");
 				strcpy(values[Atnum_pids], "{");
@@ -225,6 +216,8 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				values[Atnum_xids] = palloc(NCHARS * sizeof(char));
 				snprintf(values[Atnum_xids], NCHARS, "{%d}", HeapTupleHeaderGetXmax(tuple->t_data));
 
+				values[Atnum_modes] = NULL;
+
 				values[Atnum_pids] = palloc(NCHARS * sizeof(char));
 				snprintf(values[Atnum_pids], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetXmax(tuple->t_data)));
 			}
@@ -232,14 +225,15 @@ pgrowlocks(PG_FUNCTION_ARGS)
 			LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
 
 			/* build a tuple */
-			MemoryContextSwitchTo(oldcxt);
 			tuple = BuildTupleFromCStrings(attinmeta, values);
 
 			/* make the tuple into a datum */
 			result = HeapTupleGetDatum(tuple);
 
-			/* Clean up */
-			MemoryContextReset(mydata->memcxt);
+			/*
+			 * no need to pfree what we allocated; it's on a short-lived memory
+			 * context anyway
+			 */
 
 			SRF_RETURN_NEXT(funcctx, result);
 		}
