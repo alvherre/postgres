@@ -34,6 +34,7 @@
 #include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/tqual.h"
 
@@ -57,7 +58,16 @@ typedef struct
 	Relation	rel;
 	HeapScanDesc scan;
 	int			ncolumns;
+	MemoryContext memcxt;
 } MyData;
+
+#define		Atnum_tid		0
+#define		Atnum_type		1
+#define		Atnum_xmax		2
+#define		Atnum_ismulti	3
+#define		Atnum_xids		4
+#define		Atnum_modes		5
+#define		Atnum_pids		6
 
 Datum
 pgrowlocks(PG_FUNCTION_ARGS)
@@ -99,11 +109,17 @@ pgrowlocks(PG_FUNCTION_ARGS)
 			aclcheck_error(aclresult, ACL_KIND_CLASS,
 						   RelationGetRelationName(rel));
 
+
 		scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
 		mydata = palloc(sizeof(*mydata));
 		mydata->rel = rel;
 		mydata->scan = scan;
 		mydata->ncolumns = tupdesc->natts;
+		mydata->memcxt = AllocSetContextCreate(CurrentMemoryContext,
+											   "pgrowlocks cxt",
+											   ALLOCSET_DEFAULT_MINSIZE,
+											   ALLOCSET_DEFAULT_INITSIZE,
+											   ALLOCSET_DEFAULT_MAXSIZE);
 		funcctx->user_fctx = mydata;
 
 		MemoryContextSwitchTo(oldcontext);
@@ -124,26 +140,25 @@ pgrowlocks(PG_FUNCTION_ARGS)
 									 GetCurrentCommandId(false),
 									 scan->rs_cbuf) == HeapTupleBeingUpdated)
 		{
-
 			char	  **values;
-			int			i;
+			MemoryContext	oldcxt;
 
+			oldcxt = MemoryContextSwitchTo(mydata->memcxt);
 			values = (char **) palloc(mydata->ncolumns * sizeof(char *));
 
-			i = 0;
-			values[i++] = (char *) DirectFunctionCall1(tidout, PointerGetDatum(&tuple->t_self));
+			values[Atnum_tid] = (char *) DirectFunctionCall1(tidout, PointerGetDatum(&tuple->t_self));
 
-			values[i] = palloc(36);
-			values[i][0] = '\0';
+			values[Atnum_type] = palloc(36);
+			values[Atnum_type][0] = '\0';
 			if (tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK)
-				strcat(values[i], "Key Share ");
+				strcat(values[Atnum_type], "KeyShare ");
 			if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
-				strcat(values[i], "Exclusive ");
+				strcat(values[Atnum_type], "Exclusive ");
 			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)
-				strcat(values[i], "IsNotUpdate ");
-			i++;
-			values[i] = palloc(NCHARS * sizeof(char));
-			snprintf(values[i++], NCHARS, "%d", HeapTupleHeaderGetXmax(tuple->t_data));
+				strcat(values[Atnum_type], "IsNotUpdate ");
+
+			values[Atnum_xmax] = palloc(NCHARS * sizeof(char));
+			snprintf(values[Atnum_xmax], NCHARS, "%d", HeapTupleHeaderGetXmax(tuple->t_data));
 			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI)
 			{
 				MultiXactMember *members;
@@ -151,17 +166,19 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				int			j;
 				bool		isValidXid = false;		/* any valid xid ever exists? */
 
-				values[i++] = pstrdup("true");
+				values[Atnum_ismulti] = pstrdup("true");
 				nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple->t_data), &members);
 				if (nmembers == -1)
 				{
 					elog(ERROR, "GetMultiXactIdMembers returns error");
 				}
 
-				values[i] = palloc(NCHARS * nmembers);
-				values[i + 1] = palloc(NCHARS * nmembers);
-				strcpy(values[i], "{");
-				strcpy(values[i + 1], "{");
+				values[Atnum_xids] = palloc(NCHARS * nmembers);
+				values[Atnum_modes] = palloc(NCHARS * nmembers);
+				values[Atnum_pids] = palloc(NCHARS * nmembers);
+				strcpy(values[Atnum_xids], "{");
+				strcpy(values[Atnum_modes], "{");
+				strcpy(values[Atnum_pids], "{");
 
 				for (j = 0; j < nmembers; j++)
 				{
@@ -169,48 +186,60 @@ pgrowlocks(PG_FUNCTION_ARGS)
 
 					if (isValidXid)
 					{
-						strcat(values[i], ",");
-						strcat(values[i + 1], ",");
+						strcat(values[Atnum_xids], ",");
+						strcat(values[Atnum_modes], ",");
+						strcat(values[Atnum_pids], ",");
 					}
-					snprintf(buf, NCHARS, "%d (%s)", members[j].xid,
-							 members[j].status == MultiXactStatusKeyUpdate ? "keyupd" :
-							 members[j].status == MultiXactStatusUpdate ? "upd" :
-							 members[j].status == MultiXactStatusShare ? "share" :
-							 members[j].status == MultiXactStatusKeyShare ? "keyshr" :
-							 "invalid");
-					strcat(values[i], buf);
+					snprintf(buf, NCHARS, "%d", members[j].xid);
+					strcat(values[Atnum_xids], buf);
+					switch (members[j].status)
+					{
+						case MultiXactStatusKeyUpdate:
+							snprintf(buf, NCHARS, "keyupd");
+							break;
+						case MultiXactStatusUpdate:
+							snprintf(buf, NCHARS, "upd");
+							break;
+						case MultiXactStatusShare:
+							snprintf(buf, NCHARS, "shr");
+							break;
+						case MultiXactStatusKeyShare:
+							snprintf(buf, NCHARS, "keyshr");
+							break;
+					}
+					strcat(values[Atnum_modes], buf);
 					snprintf(buf, NCHARS, "%d", BackendXidGetPid(members[j].xid));
-					strcat(values[i + 1], buf);
+					strcat(values[Atnum_pids], buf);
 
 					isValidXid = true;
 				}
 
-				strcat(values[i], "}");
-				strcat(values[i + 1], "}");
-				i++;
+				strcat(values[Atnum_xids], "}");
+				strcat(values[Atnum_modes], "}");
+				strcat(values[Atnum_pids], "}");
 			}
 			else
 			{
-				values[i++] = pstrdup("false");
-				values[i] = palloc(NCHARS * sizeof(char));
-				snprintf(values[i++], NCHARS, "{%d}", HeapTupleHeaderGetXmax(tuple->t_data));
+				values[Atnum_ismulti] = pstrdup("false");
 
-				values[i] = palloc(NCHARS * sizeof(char));
-				snprintf(values[i++], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetXmax(tuple->t_data)));
+				values[Atnum_xids] = palloc(NCHARS * sizeof(char));
+				snprintf(values[Atnum_xids], NCHARS, "{%d}", HeapTupleHeaderGetXmax(tuple->t_data));
+
+				values[Atnum_pids] = palloc(NCHARS * sizeof(char));
+				snprintf(values[Atnum_pids], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetXmax(tuple->t_data)));
 			}
 
 			LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
 
 			/* build a tuple */
+			MemoryContextSwitchTo(oldcxt);
 			tuple = BuildTupleFromCStrings(attinmeta, values);
 
 			/* make the tuple into a datum */
 			result = HeapTupleGetDatum(tuple);
 
 			/* Clean up */
-			for (i = 0; i < mydata->ncolumns; i++)
-				pfree(values[i]);
-			pfree(values);
+			MemoryContextReset(mydata->memcxt);
 
 			SRF_RETURN_NEXT(funcctx, result);
 		}
@@ -222,6 +251,7 @@ pgrowlocks(PG_FUNCTION_ARGS)
 
 	heap_endscan(scan);
 	heap_close(mydata->rel, AccessShareLock);
+	/* no need to delete the memory context */
 
 	SRF_RETURN_DONE(funcctx);
 }
