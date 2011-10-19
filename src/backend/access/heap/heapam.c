@@ -85,6 +85,7 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 				bool all_visible_cleared, bool new_all_visible_cleared);
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 					   HeapTuple oldtup, HeapTuple newtup);
+static uint16 GetMultiXactIdHintBits(MultiXactId multi);
 
 
 /* ----------------------------------------------------------------
@@ -2468,6 +2469,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	Page		page;
 	BlockNumber	block;
 	LockTupleMode tuplock;
+	MultiXactStatus mxact_status;
 	Buffer		buffer,
 				newbuf,
 				vmbuffer = InvalidBuffer,
@@ -2535,11 +2537,13 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup))
 	{
 		tuplock = LockTupleUpdate;
+		mxact_status = MultiXactStatusUpdate;
 		key_intact = true;
 	}
 	else
 	{
 		tuplock = LockTupleKeyUpdate;
+		mxact_status = MultiXactStatusKeyUpdate;
 		key_intact = false;
 	}
 
@@ -2613,7 +2617,7 @@ l2:
 			TransactionId	update_xact;
 
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, tuplock);
+			MultiXactIdWait((MultiXactId) xwait, mxact_status);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2653,7 +2657,6 @@ l2:
 			{
 				keep_xmax = HeapTupleHeaderGetXmax(oldtup.t_data);
 				keep_xmax_multi = (oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
-				result = HeapTupleMayBeUpdated;
 			}
 		}
 		else
@@ -2669,7 +2672,6 @@ l2:
 				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 				keep_xmax = xwait;
 				keep_xmax_multi = false;
-				result = HeapTupleMayBeUpdated;
 			}
 			else
 			{
@@ -2694,17 +2696,15 @@ l2:
 
 		/*
 		 * We may overwrite if previous xmax aborted, or if it committed but
-		 * only locked the tuple without updating it.  We don't do this check
-		 * if we already handled one of the cases above.
+		 * only locked the tuple without updating it, or if we are going to
+		 * keep it around in Xmax.
 		 */
-		if (result == HeapTupleBeingUpdated)
-		{
-			if ((oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
-				HeapTupleHeaderIsLocked(oldtup.t_data))
-				result = HeapTupleMayBeUpdated;
-			else
-				result = HeapTupleUpdated;
-		}
+		if (TransactionIdIsValid(keep_xmax) ||
+			(oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
+			HeapTupleHeaderIsLocked(oldtup.t_data))
+			result = HeapTupleMayBeUpdated;
+		else
+			result = HeapTupleUpdated;
 	}
 
 	if (crosscheck != InvalidSnapshot && result == HeapTupleMayBeUpdated)
@@ -2782,7 +2782,8 @@ l2:
 	 */
 	if (TransactionIdIsValid(keep_xmax))
 	{
-		Assert(tuplock == LockTupleUpdate);
+		/* if we're updating key columns, keep_xmax shouldn't be set */
+		Assert(mxact_status == MultiXactStatusUpdate);
 		if (keep_xmax_multi)
 		{
 			keep_xmax_old = MultiXactIdExpand(keep_xmax,
@@ -2791,12 +2792,13 @@ l2:
 		}
 		else
 		{
-			keep_xmax_old = MultiXactIdCreate(keep_xmax, MultiXactStatusKeyShare,
+			/* not a multi? must be a KEY SHARE locker */
+			keep_xmax_old = MultiXactIdCreate(keep_xmax, MultiXactStatusForKeyShare,
 											  xid, MultiXactStatusUpdate);
 			keep_xmax_infomask = HEAP_XMAX_KEYSHR_LOCK;
 		}
 		keep_xmax_old_infomask = HEAP_XMAX_IS_MULTI | HEAP_XMAX_KEYSHR_LOCK;
-		/* FIXME -- need to set the other infomask bits as well ... what are they? */
+		/* FIXME -- need more infomask bits? */
 	}
 
 	/*
@@ -3317,35 +3319,16 @@ get_mxact_status_for_tuplelock(LockTupleMode mode)
 	switch (mode)
 	{
 		case LockTupleKeyShare:
-			return MultiXactStatusKeyShare;
+			return MultiXactStatusForKeyShare;
 		case LockTupleShare:
-			return MultiXactStatusShare;
+			return MultiXactStatusForShare;
 		case LockTupleUpdate:
-			return MultiXactStatusUpdate;
+			return MultiXactStatusForUpdate;
 		case LockTupleKeyUpdate:
-			return MultiXactStatusKeyUpdate;
+			return MultiXactStatusUpdate;
 		default:
 			elog(ERROR, "invalid lock tuple mode %d", mode);
 			return 0;	/* keep compiler quiet */
-	}
-}
-
-/*
- * Return the appropriate hint bit to set in t_infomask for a given tuple lock
- * mode.  We assume the caller knows how to handle locks for which we return
- * zero.
- */
-static uint16
-get_hintbit_for_tuplelock(LockTupleMode mode)
-{
-	switch (mode)
-	{
-		case LockTupleKeyShare:
-			return HEAP_XMAX_KEYSHR_LOCK;
-		case LockTupleUpdate:
-			return HEAP_XMAX_EXCL_LOCK;
-		default:
-			return 0;
 	}
 }
 
@@ -3424,7 +3407,6 @@ heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 	TransactionId xid;
 	TransactionId xmax;
 	TransactionId keep_xmax = InvalidTransactionId;
-	bool		was_only_locked;
 	bool		keep_xmax_multi = false;
 	uint16		old_infomask;
 	uint16		new_infomask;
@@ -3505,7 +3487,7 @@ l3:
 				{
 					if ((mode == LockTupleKeyShare) ||
 						((mode == LockTupleShare) &&
-						 (members[i].status >= MultiXactStatusShare)))
+						 (members[i].status >= MultiXactStatusForShare)))
 					{
 						if (have_tuple_lock)
 							UnlockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
@@ -3609,7 +3591,7 @@ l3:
 
 				/*
 				 * This needs to be done the slow way: there might be
-				 * MultiXactStatusShare locks hiding in there, and there's
+				 * MultiXactStatusForShare locks hiding in there, and there's
 				 * no way to tell from just the hint bits.
 				 */
 				nmembers = GetMultiXactIdMembers(xwait, &members);
@@ -3628,7 +3610,7 @@ l3:
 
 					for (i = 0; i < nmembers; i++)
 					{
-						if (members[i].status != MultiXactStatusKeyShare)
+						if (members[i].status != MultiXactStatusForKeyShare)
 						{
 							allowed = false;
 							break;
@@ -3679,8 +3661,9 @@ l3:
 			{
 				MultiXactStatus status = get_mxact_status_for_tuplelock(mode);
 
-				if (status == MultiXactStatusKeyUpdate)
-					elog(ERROR, "invalid KEY UPDATE lock mode in heap_tuple_lock");	
+				/* We only ever lock tuples, never update them */
+				if (status >= MultiXactStatusUpdate)
+					elog(ERROR, "invalid lock mode in heap_tuple_lock");	
 
 				/* wait for multixact to end */
 				if (nowait)
@@ -3816,13 +3799,11 @@ l3:
 	 */
 	xid = GetCurrentTransactionId();
 
-	was_only_locked = HeapTupleHeaderInfomaskIsLocked(old_infomask);
 	new_infomask = old_infomask & ~(HEAP_XMAX_COMMITTED |
 									HEAP_XMAX_INVALID |
 									HEAP_XMAX_IS_MULTI |
 									HEAP_LOCK_BITS |
 									HEAP_MOVED);
-	new_infomask |= get_hintbit_for_tuplelock(mode);
 
 	/*
 	 * if we have keep_xmax, this is easy to compute -- just create a new mxact
@@ -3832,37 +3813,13 @@ l3:
 	{
 		if (keep_xmax_multi)
 		{
-			int		nmembers;
-			MultiXactMember	*members;
-			int		i;
-
 			/*
 			 * MultiXactIdExpand takes care to remove members that are no
 			 * longer current.
 			 */
 			xid = MultiXactIdExpand((MultiXactId) keep_xmax, xid,
 									get_mxact_status_for_tuplelock(mode));
-
-			/*
-			 * Need to scan existing members to compute the right infomask bits
-			 * to set.  This is fast, because the multixact we just created is
-			 * in multixact.c's cache.  While we could just use the bits
-			 * previously set, doing it this way means we clear bits no longer
-			 * needed, which is particularly good if there was an update that's
-			 * now gone.
-			 */
-			nmembers = GetMultiXactIdMembers(xid, &members);
-			for (i = 0; i < nmembers; i++)
-			{
-				if (members[i].status == MultiXactStatusKeyShare)
-					new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-				/* MultiXactShare does not have a hint bit to set */
-				if (members[i].status == MultiXactStatusUpdate)
-					new_infomask |= HEAP_XMAX_EXCL_LOCK;
-			}
-			new_infomask |= HEAP_XMAX_IS_MULTI;
-			if (was_only_locked)
-				new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+			new_infomask |= GetMultiXactIdHintBits(xid);
 		}
 		else if (TransactionIdIsInProgress(keep_xmax))
 		{
@@ -3871,20 +3828,14 @@ l3:
 			if (old_infomask & HEAP_XMAX_EXCL_LOCK)
 				existing_lock_mode = MultiXactStatusUpdate;
 			else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
-				existing_lock_mode = MultiXactStatusKeyShare;
+				existing_lock_mode = MultiXactStatusForKeyShare;
 			else
 				/* must be a shared lock */
-				existing_lock_mode = MultiXactStatusShare;
+				existing_lock_mode = MultiXactStatusForShare;
 
 			xid = MultiXactIdCreate(keep_xmax, existing_lock_mode,
 									xid, get_mxact_status_for_tuplelock(mode));
-			/* keep existing lock bits */
-			new_infomask |= old_infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK);
-			new_infomask |= HEAP_XMAX_IS_MULTI;
-			if (was_only_locked)
-				new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
-			/* FIXME what if the new lock mode is SHARE? */
-			Assert(mode != LockTupleShare);
+			new_infomask |= GetMultiXactIdHintBits(xid);
 		}
 		else
 		{
@@ -3894,10 +3845,8 @@ l3:
 			 */
 			if (mode == LockTupleShare)
 			{
-				xid = MultiXactIdCreateSingleton(xid, MultiXactStatusShare);
-				new_infomask |= HEAP_XMAX_IS_MULTI;
-				if (was_only_locked)
-					new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+				xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
+				new_infomask |= GetMultiXactIdHintBits(xid);
 			}
 		}
 	}
@@ -3931,9 +3880,7 @@ l3:
 				 * expand it to include our own TransactionId.
 				 */
 				xid = MultiXactIdExpand((MultiXactId) xmax, xid, new_mxact_status);
-				new_infomask |= HEAP_XMAX_IS_MULTI;
-				if (was_only_locked)
-					new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+				new_infomask |= GetMultiXactIdHintBits(xid);
 				/* FIXME -- we need to add bits to the infomask here! */
 			}
 			else if (TransactionIdIsInProgress(xmax))
@@ -3948,7 +3895,7 @@ l3:
 				if (old_infomask & HEAP_XMAX_EXCL_LOCK)
 					status = MultiXactStatusUpdate;
 				else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
-					status = MultiXactStatusKeyShare;
+					status = MultiXactStatusForKeyShare;
 				else
 				{
 					status = 0;		/* keep compiler quiet */
@@ -3956,9 +3903,7 @@ l3:
 				}
 
 				xid = MultiXactIdCreate(xmax, status, xid, new_mxact_status);
-				new_infomask |= HEAP_XMAX_IS_MULTI;
-				if (was_only_locked)
-					new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+				new_infomask |= GetMultiXactIdHintBits(xid);
 				/* FIXME -- we need to add bits to the infomask here! */
 			}
 			else if (mode == LockTupleShare)
@@ -3968,7 +3913,7 @@ l3:
 				 * here no matter what.
 				 */
 				xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
-				new_infomask |= HEAP_XMAX_IS_MULTI | HEAP_XMAX_IS_NOT_UPDATE;
+				new_infomask |= GetMultiXactIdHintBits(xid);
 			}
 			else
 			{
@@ -3978,7 +3923,11 @@ l3:
 				 * TransactionIdIsInProgress() got to run.	Treat it like
 				 * there's no locker in the tuple.
 				 */
-				new_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+				if (mode == LockTupleShare)
+				{
+					xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
+					new_infomask |= GetMultiXactIdHintBits(xid);
+				}
 			}
 		}
 		else
@@ -3990,7 +3939,7 @@ l3:
 			if (mode == LockTupleShare)
 			{
 				xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
-				new_infomask |= HEAP_XMAX_IS_MULTI | HEAP_XMAX_IS_NOT_UPDATE;
+				new_infomask |= GetMultiXactIdHintBits(xid);
 			}
 		}
 	}
@@ -4293,6 +4242,8 @@ recheck_xmax:
 		 * extremely low-probability scenario with minimal downside even if
 		 * it does happen, so for now we don't do the extra bookkeeping that
 		 * would be needed to clean out MultiXactIds.
+		 *
+		 * FIXME -- today is that day.  Figure this out.
 		 *----------
 		 */
 	}
@@ -4343,6 +4294,103 @@ recheck_xvac:
 	}
 
 	return changed;
+}
+
+/*
+ * For a given MultiXactId, return the hint bits that should be set in the
+ * tuple's infomask.
+ *
+ * Normally this should be called for a multixact that was just created, and
+ * so is on our local cache, so the GetMembers call is fast.
+ */
+static uint16
+GetMultiXactIdHintBits(MultiXactId multi)
+{
+	int		nmembers;
+	MultiXactMember	*members;
+	int		i;
+	uint16	bits = HEAP_XMAX_IS_MULTI;
+	bool	has_update = false;
+
+	nmembers = GetMultiXactIdMembers(multi, &members);
+
+	for (i = 0; i < nmembers; i++)
+	{
+		Assert(members[i].status != MultiXactStatusKeyUpdate);
+		switch (members[i].status)
+		{
+			case MultiXactStatusForKeyShare:
+				bits |= HEAP_XMAX_KEYSHR_LOCK;
+				break;
+			case MultiXactStatusForShare:
+				break;
+			case MultiXactStatusForUpdate:
+				Assert(!has_update);
+				bits |= HEAP_XMAX_EXCL_LOCK;
+				break;
+			case MultiXactStatusUpdate:
+				Assert(!(bits & HEAP_XMAX_EXCL_LOCK));
+				has_update = true;
+				break;
+			case MultiXactStatusKeyUpdate:
+				elog(ERROR, "invalid multixact value");
+				break;
+		}
+	}
+	if (!has_update)
+		bits |= HEAP_XMAX_IS_NOT_UPDATE;
+
+	return bits;
+}
+
+/*
+ * FIXME -- fix function name and complete this comment
+ *
+ * For a tuple marked XMAX_IS_MULTI and not XMAX_IS_NOT_UPDATED,
+ * returns the update Xid.
+ *
+ * See also HeapTupleHeaderGetUpdateXid
+ */
+TransactionId
+HeapTupleGetUpdateXid(HeapTupleHeader tuple)
+{
+	TransactionId	update_xact = InvalidTransactionId;
+	MultiXactMember	*members;
+	int				nmembers;
+
+	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE));
+	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
+
+	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple), &members);
+
+	if (nmembers > 0)
+	{
+		int		i;
+
+		for (i = 0; i < nmembers; i++)
+		{
+			/* KEY SHARE lockers are okay -- ignore it */
+			if (members[i].status == MultiXactStatusForKeyShare)
+				continue;
+			/*
+			 * SHARE lockers are okay, though since they normally conflict with
+			 * UPDATE, they are not expected unless they come from the same
+			 * xact as the update.
+			 */
+			if (members[i].status == MultiXactStatusForShare ||
+				members[i].status == MultiXactStatusForUpdate)
+				continue;
+			/* there should be at most one updater */
+			Assert(update_xact == InvalidTransactionId);
+			Assert(members[i].status == MultiXactStatusUpdate);
+			update_xact = members[i].xid;
+#ifndef USE_ASSERT_CHECKING
+			break;
+#endif
+		}
+	}
+
+	return update_xact;
 }
 
 

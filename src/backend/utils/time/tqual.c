@@ -135,52 +135,6 @@ HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 }
 
 /*
- * FIXME -- fix function name and complete this comment
- *
- * For a tuple marked XMAX_IS_MULTI and not XMAX_IS_NOT_UPDATED,
- * returns the update Xid.
- *
- * See also HeapTupleHeaderGetUpdateXid
- */
-TransactionId
-HeapTupleGetUpdateXid(HeapTupleHeader tuple)
-{
-	TransactionId	update_xact = InvalidTransactionId;
-	MultiXactMember	*members;
-	int				nmembers;
-
-	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE));
-	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
-
-	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple), &members);
-
-	if (nmembers > 0)
-	{
-		int		i;
-
-		for (i = 0; i < nmembers; i++)
-		{
-			/* KEY SHARE lockers are okay -- ignore it */
-			if (members[i].status == MultiXactStatusKeyShare)
-				continue;
-			/*
-			 * SHARE lockers are okay, though since they normally conflict with
-			 * UPDATE, they are not expected unless they come from the same
-			 * xact as the update.  No way to verify that, however.
-			 */
-			if (members[i].status == MultiXactStatusShare)
-				continue;
-			/* there should be at most one updater */
-			Assert(update_xact == InvalidTransactionId);
-			Assert(members[i].status == MultiXactStatusUpdate);
-			update_xact = members[i].xid;
-		}
-	}
-
-	return update_xact;
-}
-
-/*
  * HeapTupleSatisfiesSelf
  *		True iff heap tuple is valid "for itself".
  *
@@ -1401,10 +1355,9 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(tuple)))
 			return HEAPTUPLE_LIVE;
 	
+		xmax = HeapTupleGetUpdateXid(tuple);
 		if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
 		{
-			xmax = HeapTupleGetUpdateXid(tuple);
-
 			Assert(!TransactionIdIsInProgress(xmax));
 			Assert(!TransactionIdIsCurrentTransactionId(xmax));
 			if (TransactionIdDidCommit(xmax))

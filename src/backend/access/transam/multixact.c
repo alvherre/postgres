@@ -230,21 +230,28 @@ static mXactCacheEnt *MXactCache = NULL;
 static MemoryContext MXactContext = NULL;
 
 /* status conflict table */
-static const int MultiXactConflicts[4][4] =
+static const bool MultiXactConflicts[5][5] =
 {
-	{	/* KEY_SHARE */
-		0, 0, 0, 1
+	{	/* ForKeyShare */
+		false, false, false, false, true
 	},
-	{	/* SHARE */
-		0, 0, 1, 1
+	{	/* ForShare */
+		false, false, true, true, true
 	},
-	{	/* UPDATE */
-		0, 1, 1, 1
+	{	/* ForUpdate */
+		false, true, true, true, true
 	},
-	{	/* KEY_UPDATE */
-		1, 1, 1, 1
+	{	/* Update */
+		false, true, true, true, true
+	},
+	{	/* KeyUpdate */
+		true, true, true, true, true
 	}
 };
+
+#define MultiXactStatusConflict(status1, status2) \
+	MultiXactConflicts[status1][status2]
+
 
 #define MULTIXACT_DEBUG
 #ifdef MULTIXACT_DEBUG
@@ -265,8 +272,6 @@ static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 				   int nmembers, MultiXactMember *members);
 static MultiXactId GetNewMultiXactId(int nmembers, MultiXactOffset *offset);
 static MultiXactId HandleMxactOffsetCornerCases(MultiXactId multi);
-static bool MultiXactStatusConflict(MultiXactStatus status1,
-						MultiXactStatus status2);
 
 /* MultiXact cache management */
 static int mxactMemberComparator(const void *arg1, const void *arg2);
@@ -563,12 +568,6 @@ MultiXactIdIsCurrent(MultiXactId multi)
 	return result;
 }
 
-static bool
-MultiXactStatusConflict(MultiXactStatus status1, MultiXactStatus status2)
-{
-	return MultiXactConflicts[status1][status2];
-}
-
 /*
  * MultiXactIdWait
  *		Sleep on a MultiXactId.
@@ -794,6 +793,9 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			bshift;
 		int			flagsoff;
 		int			memberoff;
+
+		/* this status value is not representable on disk */
+		Assert(members[i].status < MultiXactStatusKeyUpdate);
 
 		pageno = MXOffsetToMemberPage(offset);
 		memberoff = MXOffsetToMemberOffset(offset);
@@ -1299,10 +1301,12 @@ mxstatus_to_string(MultiXactStatus status)
 {
 	switch (status)
 	{
-		case MultiXactStatusKeyShare:
+		case MultiXactStatusForKeyShare:
 			return "keysh";
-		case MultiXactStatusShare:
+		case MultiXactStatusForShare:
 			return "sh";
+		case MultiXactStatusForUpdate:
+			return "forupd";
 		case MultiXactStatusUpdate:
 			return "upd";
 		case MultiXactStatusKeyUpdate:
