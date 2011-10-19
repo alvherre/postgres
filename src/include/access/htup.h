@@ -880,8 +880,6 @@ extern Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
  * ----------------
  */
 #define heap_getattr(tup, attnum, tupleDesc, isnull) \
-( \
-	AssertMacro((tup) != NULL), \
 	( \
 		((attnum) > 0) ? \
 		( \
@@ -895,8 +893,7 @@ extern Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
 		) \
 		: \
 			heap_getsysattr((tup), (attnum), (tupleDesc), (isnull)) \
-	) \
-)
+	)
 
 /* prototypes for functions in common/heaptuple.c */
 extern Size heap_compute_data_size(TupleDesc tupleDesc,
