@@ -3826,7 +3826,7 @@ l3:
 			MultiXactStatus		existing_lock_mode;
 
 			if (old_infomask & HEAP_XMAX_EXCL_LOCK)
-				existing_lock_mode = MultiXactStatusUpdate;
+				existing_lock_mode = MultiXactStatusForUpdate;
 			else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
 				existing_lock_mode = MultiXactStatusForKeyShare;
 			else
@@ -3840,13 +3840,23 @@ l3:
 		else
 		{
 			/*
-			 * Not multi, not in progress.  Use only our own Xid.  But beware:
-			 * if the new lock is Share, we need a multixact anyway.
+			 * Not multi, not in progress.  Use only our own Xid.
 			 */
-			if (mode == LockTupleShare)
+			switch (mode)
 			{
-				xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
-				new_infomask |= GetMultiXactIdHintBits(xid);
+				case LockTupleKeyShare:
+					new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
+					break;
+				case LockTupleShare:
+					/* need a multixact here in any case */
+					xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
+					new_infomask |= GetMultiXactIdHintBits(xid);
+					break;
+				case LockTupleUpdate:
+					new_infomask |= HEAP_XMAX_EXCL_LOCK;
+					break;
+				default:
+					elog(ERROR, "invalid lock mode");
 			}
 		}
 	}
@@ -3893,7 +3903,7 @@ l3:
 				MultiXactStatus status;
 
 				if (old_infomask & HEAP_XMAX_EXCL_LOCK)
-					status = MultiXactStatusUpdate;
+					status = MultiXactStatusForUpdate;
 				else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
 					status = MultiXactStatusForKeyShare;
 				else
@@ -3923,10 +3933,21 @@ l3:
 				 * TransactionIdIsInProgress() got to run.	Treat it like
 				 * there's no locker in the tuple.
 				 */
-				if (mode == LockTupleShare)
+				switch (mode)
 				{
-					xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
-					new_infomask |= GetMultiXactIdHintBits(xid);
+					case LockTupleKeyShare:
+						new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
+						break;
+					case LockTupleShare:
+						/* need a multixact here in any case */
+						xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
+						new_infomask |= GetMultiXactIdHintBits(xid);
+						break;
+					case LockTupleUpdate:
+						new_infomask |= HEAP_XMAX_EXCL_LOCK;
+						break;
+					default:
+						elog(ERROR, "invalid lock mode");
 				}
 			}
 		}
@@ -3936,10 +3957,21 @@ l3:
 			 * There was no previous locker, so just insert our own
 			 * TransactionId.
 			 */
-			if (mode == LockTupleShare)
+			switch (mode)
 			{
-				xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
-				new_infomask |= GetMultiXactIdHintBits(xid);
+				case LockTupleKeyShare:
+					new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
+					break;
+				case LockTupleShare:
+					/* need a multixact here in any case */
+					xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
+					new_infomask |= GetMultiXactIdHintBits(xid);
+					break;
+				case LockTupleUpdate:
+					new_infomask |= HEAP_XMAX_EXCL_LOCK;
+					break;
+				default:
+					elog(ERROR, "invalid lock mode");
 			}
 		}
 	}
