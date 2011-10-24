@@ -332,7 +332,7 @@ MultiXactIdCreateSingleton(TransactionId xid, MultiXactStatus status)
  * MultiXactIdCreate
  *		Construct a MultiXactId representing two TransactionIds.
  *
- * The two XIDs must be different.
+ * The two XIDs must be different, or be requesting different lock modes.
  *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
@@ -347,7 +347,7 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
 	AssertArg(TransactionIdIsValid(xid1));
 	AssertArg(TransactionIdIsValid(xid2));
 
-	Assert(!TransactionIdEquals(xid1, xid2));
+	Assert(!TransactionIdEquals(xid1, xid2) || (status1 != status2));
 
 	/*
 	 * Note: unlike MultiXactIdExpand, we don't bother to check that both XIDs
