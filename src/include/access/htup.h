@@ -895,6 +895,9 @@ extern Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
 			heap_getsysattr((tup), (attnum), (tupleDesc), (isnull)) \
 	)
 
+/* Prototype for HeapTupleHeader accessor in heapam.c */
+extern TransactionId HeapTupleGetUpdateXid(HeapTupleHeader tuple);
+
 /* prototypes for functions in common/heaptuple.c */
 extern Size heap_compute_data_size(TupleDesc tupleDesc,
 					   Datum *values, bool *isnull);
