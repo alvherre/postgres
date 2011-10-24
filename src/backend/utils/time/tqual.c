@@ -785,7 +785,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tuple)))
 	{
 		if (HeapTupleHeaderIsLocked(tuple))
-			return HeapTupleBeingUpdated;
+			return HeapTupleMayBeUpdated;	/* FIXME might need rethinking */
 		if (HeapTupleHeaderGetCmax(tuple) >= curcid)
 			return HeapTupleSelfUpdated;		/* updated after scan started */
 		else
