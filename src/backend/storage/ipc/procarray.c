@@ -997,22 +997,32 @@ TransactionIdIsActive(TransactionId xid)
  * This is also used to determine where to truncate pg_subtrans.  allDbs
  * must be TRUE for that case, and ignoreVacuum FALSE.
  *
- * Note: it's possible for the calculated value to move backwards on repeated
- * calls. The calculated value is conservative, so that anything older is
- * definitely not considered as running by anyone anymore, but the exact
- * value calculated depends on a number of things. For example, if allDbs is
- * TRUE and there are no transactions running in the current database,
- * GetOldestXmin() returns latestCompletedXid. If a transaction begins after
- * that, its xmin will include in-progress transactions in other databases
- * that started earlier, so another call will return an lower value. The
- * return value is also adjusted with vacuum_defer_cleanup_age, so increasing
- * that setting on the fly is an easy way to have GetOldestXmin() move
- * backwards.
- *
  * Note: we include all currently running xids in the set of considered xids.
  * This ensures that if a just-started xact has not yet set its snapshot,
  * when it does set the snapshot it cannot set xmin less than what we compute.
  * See notes in src/backend/access/transam/README.
+ *
+ * Note: despite the above, it's possible for the calculated value to move
+ * backwards on repeated calls. The calculated value is conservative, so that
+ * anything older is definitely not considered as running by anyone anymore,
+ * but the exact value calculated depends on a number of things. For example,
+ * if allDbs is FALSE and there are no transactions running in the current
+ * database, GetOldestXmin() returns latestCompletedXid. If a transaction
+ * begins after that, its xmin will include in-progress transactions in other
+ * databases that started earlier, so another call will return a lower value.
+ * Nonetheless it is safe to vacuum a table in the current database with the
+ * first result.  There are also replication-related effects: a walsender
+ * process can set its xmin based on transactions that are no longer running
+ * in the master but are still being replayed on the standby, thus possibly
+ * making the GetOldestXmin reading go backwards.  In this case there is a
+ * possibility that we lose data that the standby would like to have, but
+ * there is little we can do about that --- data is only protected if the
+ * walsender runs continuously while queries are executed on the standby.
+ * (The Hot Standby code deals with such cases by failing standby queries
+ * that needed to access already-removed data, so there's no integrity bug.)
+ * The return value is also adjusted with vacuum_defer_cleanup_age, so
+ * increasing that setting on the fly is another easy way to make
+ * GetOldestXmin() move backwards, with no consequences for data integrity.
  */
 TransactionId
 GetOldestXmin(bool allDbs, bool ignoreVacuum)
@@ -1045,7 +1055,7 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum)
 
 		if (allDbs ||
 			proc->databaseId == MyDatabaseId ||
-			proc->databaseId == 0)		/* include WalSender */
+			proc->databaseId == 0)		/* always include WalSender */
 		{
 			/* Fetch xid just once - see GetNewTransactionId */
 			TransactionId xid = proc->xid;
@@ -1091,16 +1101,18 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum)
 		LWLockRelease(ProcArrayLock);
 
 		/*
-		 * Compute the cutoff XID, being careful not to generate a "permanent"
-		 * XID. We need do this only on the primary, never on standby.
+		 * Compute the cutoff XID by subtracting vacuum_defer_cleanup_age,
+		 * being careful not to generate a "permanent" XID.
 		 *
 		 * vacuum_defer_cleanup_age provides some additional "slop" for the
 		 * benefit of hot standby queries on slave servers.  This is quick and
 		 * dirty, and perhaps not all that useful unless the master has a
-		 * predictable transaction rate, but it's what we've got.  Note that
-		 * we are assuming vacuum_defer_cleanup_age isn't large enough to
-		 * cause wraparound --- so guc.c should limit it to no more than the
-		 * xidStopLimit threshold in varsup.c.
+		 * predictable transaction rate, but it offers some protection when
+		 * there's no walsender connection.  Note that we are assuming
+		 * vacuum_defer_cleanup_age isn't large enough to cause wraparound ---
+		 * so guc.c should limit it to no more than the xidStopLimit threshold
+		 * in varsup.c.  Also note that we intentionally don't apply
+		 * vacuum_defer_cleanup_age on standby servers.
 		 */
 		result -= vacuum_defer_cleanup_age;
 		if (!TransactionIdIsNormal(result))
@@ -1108,6 +1120,28 @@ GetOldestXmin(bool allDbs, bool ignoreVacuum)
 	}
 
 	return result;
+}
+
+/*
+ * GetMaxSnapshotXidCount -- get max size for snapshot XID array
+ *
+ * We have to export this for use by snapmgr.c.
+ */
+int
+GetMaxSnapshotXidCount(void)
+{
+	return procArray->maxProcs;
+}
+
+/*
+ * GetMaxSnapshotSubxidCount -- get max size for snapshot sub-XID array
+ *
+ * We have to export this for use by snapmgr.c.
+ */
+int
+GetMaxSnapshotSubxidCount(void)
+{
+	return TOTAL_MAX_CACHED_SUBXIDS;
 }
 
 /*
@@ -1175,14 +1209,14 @@ GetSnapshotData(Snapshot snapshot)
 		 * we are in recovery, see later comments.
 		 */
 		snapshot->xip = (TransactionId *)
-			malloc(arrayP->maxProcs * sizeof(TransactionId));
+			malloc(GetMaxSnapshotXidCount() * sizeof(TransactionId));
 		if (snapshot->xip == NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
 					 errmsg("out of memory")));
 		Assert(snapshot->subxip == NULL);
 		snapshot->subxip = (TransactionId *)
-			malloc(TOTAL_MAX_CACHED_SUBXIDS * sizeof(TransactionId));
+			malloc(GetMaxSnapshotSubxidCount() * sizeof(TransactionId));
 		if (snapshot->subxip == NULL)
 			ereport(ERROR,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
@@ -1362,6 +1396,77 @@ GetSnapshotData(Snapshot snapshot)
 	snapshot->copied = false;
 
 	return snapshot;
+}
+
+/*
+ * ProcArrayInstallImportedXmin -- install imported xmin into MyProc->xmin
+ *
+ * This is called when installing a snapshot imported from another
+ * transaction.  To ensure that OldestXmin doesn't go backwards, we must
+ * check that the source transaction is still running, and we'd better do
+ * that atomically with installing the new xmin.
+ *
+ * Returns TRUE if successful, FALSE if source xact is no longer running.
+ */
+bool
+ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid)
+{
+	bool		result = false;
+	ProcArrayStruct *arrayP = procArray;
+	int			index;
+
+	Assert(TransactionIdIsNormal(xmin));
+	if (!TransactionIdIsNormal(sourcexid))
+		return false;
+
+	/* Get lock so source xact can't end while we're doing this */
+	LWLockAcquire(ProcArrayLock, LW_SHARED);
+
+	for (index = 0; index < arrayP->numProcs; index++)
+	{
+		volatile PGPROC *proc = arrayP->procs[index];
+		TransactionId xid;
+
+		/* Ignore procs running LAZY VACUUM */
+		if (proc->vacuumFlags & PROC_IN_VACUUM)
+			continue;
+
+		xid = proc->xid;	/* fetch just once */
+		if (xid != sourcexid)
+			continue;
+
+		/*
+		 * We check the transaction's database ID for paranoia's sake: if
+		 * it's in another DB then its xmin does not cover us.  Caller should
+		 * have detected this already, so we just treat any funny cases as
+		 * "transaction not found".
+		 */
+		if (proc->databaseId != MyDatabaseId)
+			continue;
+
+		/*
+		 * Likewise, let's just make real sure its xmin does cover us.
+		 */
+		xid = proc->xmin;	/* fetch just once */
+		if (!TransactionIdIsNormal(xid) ||
+			!TransactionIdPrecedesOrEquals(xid, xmin))
+			continue;
+
+		/*
+		 * We're good.  Install the new xmin.  As in GetSnapshotData, set
+		 * TransactionXmin too.  (Note that because snapmgr.c called
+		 * GetSnapshotData first, we'll be overwriting a valid xmin here,
+		 * so we don't check that.)
+		 */
+		MyProc->xmin = TransactionXmin = xmin;
+
+		result = true;
+		break;
+	}
+
+	LWLockRelease(ProcArrayLock);
+
+	return result;
 }
 
 /*
