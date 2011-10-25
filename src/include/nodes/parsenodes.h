@@ -74,7 +74,7 @@ typedef uint32 AclMode;			/* a bitmask of privilege bits */
 #define ACL_CONNECT		(1<<11) /* for databases */
 #define N_ACL_RIGHTS	12		/* 1 plus the last 1<<x */
 #define ACL_NO_RIGHTS	0
-/* Currently, SELECT ... FOR UPDATE/FOR SHARE requires UPDATE privileges */
+/* Currently, SELECT ... FOR UPDATE/SHARE/KEY SHARE requires UPDATE privileges */
 #define ACL_SELECT_FOR_UPDATE	ACL_UPDATE
 
 
@@ -119,7 +119,7 @@ typedef struct Query
 	bool		hasDistinctOn;	/* distinctClause is from DISTINCT ON */
 	bool		hasRecursive;	/* WITH RECURSIVE was specified */
 	bool		hasModifyingCTE;	/* has INSERT/UPDATE/DELETE in WITH */
-	bool		hasForUpdate;	/* FOR UPDATE/SHARE/KEY LOCK was specified */
+	bool		hasForUpdate;	/* FOR UPDATE/SHARE/KEY SHARE was specified */
 
 	List	   *cteList;		/* WITH list (of CommonTableExpr's) */
 
@@ -869,15 +869,15 @@ typedef struct WindowClause
 
 /*
  * RowMarkClause -
- *	   parser output representation of FOR UPDATE/SHARE clauses
+ *	   parser output representation of FOR UPDATE/SHARE/KEY SHARE clauses
  *
  * Query.rowMarks contains a separate RowMarkClause node for each relation
- * identified as a FOR UPDATE/SHARE/KEY LOCK target.  If one of these clauses
+ * identified as a FOR UPDATE/SHARE/KEY SHARE target.  If one of these clauses
  * is applied to a subquery, we generate RowMarkClauses for all normal and
  * subquery rels in the subquery, but they are marked pushedDown = true to
  * distinguish them from clauses that were explicitly written at this query
  * level.  Also, Query.hasForUpdate tells whether there were explicit FOR
- * UPDATE/SHARE/KEY LOCK clauses in the current query level.
+ * UPDATE/SHARE/KEY SHARE clauses in the current query level.
  */
 typedef struct RowMarkClause
 {
