@@ -34,7 +34,6 @@
 #include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
-#include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/tqual.h"
 
@@ -191,10 +190,13 @@ pgrowlocks(PG_FUNCTION_ARGS)
 						case MultiXactStatusUpdate:
 							snprintf(buf, NCHARS, "upd");
 							break;
-						case MultiXactStatusShare:
+						case MultiXactStatusForUpdate:
+							snprintf(buf, NCHARS, "forupd");
+							break;
+						case MultiXactStatusForShare:
 							snprintf(buf, NCHARS, "shr");
 							break;
-						case MultiXactStatusKeyShare:
+						case MultiXactStatusForKeyShare:
 							snprintf(buf, NCHARS, "keyshr");
 							break;
 					}
@@ -245,7 +247,6 @@ pgrowlocks(PG_FUNCTION_ARGS)
 
 	heap_endscan(scan);
 	heap_close(mydata->rel, AccessShareLock);
-	/* no need to delete the memory context */
 
 	SRF_RETURN_DONE(funcctx);
 }
