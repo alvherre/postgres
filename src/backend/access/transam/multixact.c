@@ -1749,7 +1749,6 @@ static void
 ExtendMultiXactOffset(MultiXactId multi)
 {
 	int			pageno;
-	int			segpage;
 	TransactionId truncateXid;
 	uint32		truncateXidEpoch;
 
@@ -1765,10 +1764,9 @@ ExtendMultiXactOffset(MultiXactId multi)
 
 	/*
 	 * Determine the truncateXid and epoch that the new segment needs, if
-	 * necessary.
+	 * this is the first page of the segment.
 	 */
-	segpage = pageno % SLRU_PAGES_PER_SEGMENT;
-	if (segpage == 0)
+	if (pageno % SLRU_PAGES_PER_SEGMENT == 0)
 	{
 		TransactionId	nextXid;
 
