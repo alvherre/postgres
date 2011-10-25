@@ -30,14 +30,20 @@
 typedef struct BulkInsertStateData *BulkInsertState;
 
 /*
- * Possible lock modes for a tuple.  Note that this parallels MultiXactStatus,
- * but since these are rather separate modules, we define them separately.
+ * Possible lock modes for a tuple.
  */
 typedef enum
 {
+	/* SELECT FOR KEY SHARE */
 	LockTupleKeyShare,
+	/* SELECT FOR SHARE */
 	LockTupleShare,
+	/*
+	 * SELECT FOR UPDATE, and also plain UPDATE when the "key" columns are
+	 * not modified
+	 */
 	LockTupleUpdate,
+	/* other UPDATEs, and DELETE */
 	LockTupleKeyUpdate
 } LockTupleMode;
 
