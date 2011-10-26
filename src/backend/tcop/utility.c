@@ -130,7 +130,7 @@ CommandIsReadOnly(Node *parsetree)
 				if (stmt->intoClause != NULL)
 					return false;		/* SELECT INTO */
 				else if (stmt->rowMarks != NIL)
-					return false;		/* SELECT FOR UPDATE/SHARE/KEY LOCK */
+					return false;		/* SELECT FOR UPDATE/SHARE/KEY SHARE */
 				else if (stmt->hasModifyingCTE)
 					return false;		/* data-modifying CTE */
 				else

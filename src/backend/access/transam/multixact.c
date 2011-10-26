@@ -827,7 +827,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		flagsval &= ~(((1 << MXACT_MEMBER_BITS_PER_XACT) - 1) << bshift);
 		flagsval |= (members[i].status << bshift);
 		*flagsptr = flagsval;
-		
+
 		MultiXactMemberCtl->shared->page_dirty[slotno] = true;
 	}
 
@@ -938,7 +938,6 @@ HandleMxactOffsetCornerCases(MultiXactId multi)
 
 	return multi;
 }
-
 
 /*
  * GetMultiXactIdMembers
@@ -1989,7 +1988,7 @@ compareTruncateXidEpoch(const void *a, const void *b)
 	uint32	epochb = segb->truncateXidEpoch;
 	TransactionId	xida = sega->truncateXid;
 	TransactionId	xidb = segb->truncateXid;
-	
+
 	if (epocha < epochb)
 		return -1;
 	if (epocha > epochb)

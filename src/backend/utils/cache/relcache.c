@@ -3697,7 +3697,7 @@ RelationGetIndexAttrBitmap(Relation relation, bool keyAttrs)
 							   attrnum - FirstLowInvalidHeapAttributeNumber);
 				if (isKey)
 					uindexattrs = bms_add_member(uindexattrs,
-											   	 attrnum - FirstLowInvalidHeapAttributeNumber);
+												 attrnum - FirstLowInvalidHeapAttributeNumber);
 			}
 		}
 

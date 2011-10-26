@@ -3663,7 +3663,7 @@ l3:
 
 				/* We only ever lock tuples, never update them */
 				if (status >= MultiXactStatusUpdate)
-					elog(ERROR, "invalid lock mode in heap_tuple_lock");	
+					elog(ERROR, "invalid lock mode in heap_tuple_lock");
 
 				/* wait for multixact to end */
 				if (nowait)
@@ -4376,12 +4376,14 @@ GetMultiXactIdHintBits(MultiXactId multi)
 }
 
 /*
- * FIXME -- fix function name and complete this comment
+ * HeapTupleGetUpdateXid
  *
- * For a tuple marked XMAX_IS_MULTI and not XMAX_IS_NOT_UPDATED,
- * returns the update Xid.
+ * Given a tuple with a multixact Xmax, and which does not have the
+ * HEAP_XMAX_IS_NOT_UPDATE bit set, obtain and return the Xid of the updating
+ * transaction.
  *
- * See also HeapTupleHeaderGetUpdateXid
+ * See also HeapTupleHeaderGetUpdateXid, which can be used without previously
+ * checking the hint bits.
  */
 TransactionId
 HeapTupleGetUpdateXid(HeapTupleHeader tuple)

@@ -249,12 +249,12 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
  */
 #define HeapTupleHeaderGetUpdateXid(tup) \
 ( \
- 	(!((tup)->t_infomask & HEAP_XMAX_INVALID) && \
+	(!((tup)->t_infomask & HEAP_XMAX_INVALID) && \
 	 ((tup)->t_infomask & HEAP_XMAX_IS_MULTI) && \
- 	 !((tup)->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)) ? \
+	 !((tup)->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)) ? \
 		HeapTupleGetUpdateXid(tup) \
 	: \
- 		HeapTupleHeaderGetXmax(tup) \
+		HeapTupleHeaderGetXmax(tup) \
 )
 
 #define HeapTupleHeaderGetXmax(tup) \

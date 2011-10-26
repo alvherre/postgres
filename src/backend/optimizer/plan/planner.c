@@ -1927,7 +1927,7 @@ preprocess_rowmarks(PlannerInfo *root)
 	if (parse->rowMarks)
 	{
 		/*
-		 * We've got trouble if FOR UPDATE/SHARE/KEY LOCK appears inside grouping,
+		 * We've got trouble if FOR UPDATE/SHARE/KEY SHARE appears inside grouping,
 		 * since grouping renders a reference to individual tuple CTIDs
 		 * invalid.  This is also checked at parse time, but that's
 		 * insufficient because of rule substitution, query pullup, etc.
@@ -1937,7 +1937,7 @@ preprocess_rowmarks(PlannerInfo *root)
 	else
 	{
 		/*
-		 * We only need rowmarks for UPDATE, DELETE, or FOR UPDATE/SHARE/KEY LOCK.
+		 * We only need rowmarks for UPDATE, DELETE, or FOR UPDATE/SHARE/KEY SHARE.
 		 */
 		if (parse->commandType != CMD_UPDATE &&
 			parse->commandType != CMD_DELETE)
@@ -1947,7 +1947,7 @@ preprocess_rowmarks(PlannerInfo *root)
 	/*
 	 * We need to have rowmarks for all base relations except the target. We
 	 * make a bitmapset of all base rels and then remove the items we don't
-	 * need or have FOR UPDATE/SHARE/KEY LOCK marks for.
+	 * need or have FOR UPDATE/SHARE/KEY SHARE marks for.
 	 */
 	rels = get_base_rel_indexes((Node *) parse->jointree);
 	if (parse->resultRelation)

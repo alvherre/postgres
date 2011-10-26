@@ -134,6 +134,7 @@ HeapTupleSetHintBits(HeapTupleHeader tuple, Buffer buffer,
 	SetHintBits(tuple, buffer, infomask, xid);
 }
 
+
 /*
  * HeapTupleSatisfiesSelf
  *		True iff heap tuple is valid "for itself".
@@ -267,10 +268,10 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 	{
 		TransactionId	xmax;
-	   
+
 		if (HeapTupleHeaderIsLocked(tuple))
 			return true;
-	
+
 		xmax = HeapTupleGetUpdateXid(tuple);
 		if (TransactionIdIsCurrentTransactionId(xmax))
 			return false;
@@ -472,10 +473,10 @@ HeapTupleSatisfiesNow(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 	{
 		TransactionId	xmax;
-	   
+
 		if (HeapTupleHeaderIsLocked(tuple))
 			return true;
-	
+
 		xmax = HeapTupleGetUpdateXid(tuple);
 		if (TransactionIdIsCurrentTransactionId(xmax))
 		{
@@ -953,7 +954,7 @@ HeapTupleSatisfiesDirty(HeapTupleHeader tuple, Snapshot snapshot,
 	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 	{
 		TransactionId	xmax;
-	   
+
 		if (HeapTupleHeaderIsLocked(tuple))
 			return true;
 
@@ -1351,10 +1352,10 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 	{
 		TransactionId xmax;
-	   
+
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(tuple)))
 			return HEAPTUPLE_LIVE;
-	
+
 		xmax = HeapTupleGetUpdateXid(tuple);
 		if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
 		{

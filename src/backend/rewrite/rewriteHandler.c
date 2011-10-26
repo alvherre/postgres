@@ -1401,8 +1401,8 @@ ApplyRetrieveRule(Query *parsetree,
 	rte->modifiedCols = NULL;
 
 	/*
-	 * If FOR UPDATE/SHARE/KEY LOCK of view, mark all the contained tables as implicit
-	 * FOR UPDATE/SHARE/KEY LOCK, the same as the parser would have done if the view's
+	 * If FOR UPDATE/SHARE/KEY SHARE of view, mark all the contained tables as implicit
+	 * FOR UPDATE/SHARE/KEY SHARE, the same as the parser would have done if the view's
 	 * subquery had been written out explicitly.
 	 *
 	 * Note: we don't consider forUpdatePushedDown here; such marks will be
@@ -1416,7 +1416,7 @@ ApplyRetrieveRule(Query *parsetree,
 }
 
 /*
- * Recursively mark all relations used by a view as FOR UPDATE/SHARE/KEY LOCK.
+ * Recursively mark all relations used by a view as FOR UPDATE/SHARE/KEY SHARE.
  *
  * This may generate an invalid query, eg if some sub-query uses an
  * aggregate.  We leave it to the planner to detect that.
@@ -1449,7 +1449,7 @@ markQueryForLocking(Query *qry, Node *jtnode,
 		else if (rte->rtekind == RTE_SUBQUERY)
 		{
 			applyLockingClause(qry, rti, strength, noWait, pushedDown);
-			/* FOR UPDATE/SHARE/KEY LOCK of subquery is propagated to subquery's rels */
+			/* FOR UPDATE/SHARE/KEY SHARE of subquery is propagated to subquery's rels */
 			markQueryForLocking(rte->subquery, (Node *) rte->subquery->jointree,
 								strength, noWait, true);
 		}
