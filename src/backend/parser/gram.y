@@ -8791,7 +8791,7 @@ for_locking_item:
 					n->noWait = $4;
 					$$ = (Node *) n;
 				}
-			| FOR KEY LOCK_P locked_rels_list opt_nowait
+			| FOR KEY SHARE locked_rels_list opt_nowait
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $4;

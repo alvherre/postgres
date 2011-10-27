@@ -531,8 +531,8 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 
 		if (!PQsendQuery(conn, step->sql))
 		{
-			fprintf(stdout, "failed to send query: %s\n",
-					PQerrorMessage(conn));
+			fprintf(stdout, "failed to send query for step %s: %s\n",
+					step->name, PQerrorMessage(conns[1 + step->session]));
 			exit_nicely();
 		}
 

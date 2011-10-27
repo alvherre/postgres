@@ -13,9 +13,14 @@
 
 #include "access/xlog.h"
 
+
+/*
+ * The first two MultiXactId values are reserved to store the truncation Xid
+ * and epoch of the first segment, so we start assigning multixact values from
+ * 2.
+ */
 #define InvalidMultiXactId	((MultiXactId) 0)
-#define FirstMultiXactId	((MultiXactId) 1)
-#define BoostrapInitialMultiXactId	((MultiXactId) 2)
+#define FirstMultiXactId	((MultiXactId) 2)
 
 #define MultiXactIdIsValid(multi) ((multi) != InvalidMultiXactId)
 

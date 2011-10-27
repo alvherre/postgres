@@ -160,6 +160,12 @@ typedef struct MultiXactStateData
 	TransactionId	truncateXid;
 	uint32			truncateXidEpoch;
 	int				truncateSegno;
+
+	/*
+	 * oldest multixact that is still on disk.  Anything older than this should
+	 * not be consulted.
+	 */
+	MultiXactId		oldestMultiXactId;
 } MultiXactStateData;
 
 /* Pointers to the state data in shared memory */
@@ -173,10 +179,11 @@ static MultiXactStateData *MultiXactState;
 typedef struct SegmentInfo
 {
 	int				segno;			/* segment number */
-	MultiXactId		firstOffset;	/* first valid offset in segment */
 	TransactionId	truncateXid;	/* after this Xid is frozen, the previous
 									 * segment can be removed */
 	uint32			truncateXidEpoch;	/* epoch of above Xid */
+	MultiXactId		firstMulti;		/* first valid value in segment */
+	MultiXactOffset	firstOffset;	/* first valid offset in segment */
 } SegmentInfo;
 
 /*
@@ -953,6 +960,7 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	int			length;
 	int			truelength;
 	int			i;
+	MultiXactId oldestMXact;
 	MultiXactId nextMXact;
 	MultiXactId tmpMXact;
 	MultiXactOffset nextOffset;
@@ -974,31 +982,34 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	/*
 	 * We check known limits on MultiXact before resorting to the SLRU area.
 	 *
-	 * An ID older than ... ?? FIXME -- fill this in
+	 * An ID older than MultiXactState->oldestMultiXactId cannot possibly be
+	 * useful; it should have already been frozen by vacuum.  We've truncated
+	 * the on-disk structures anyway, so we return empty if such a value is
+	 * queried.
 	 *
 	 * Conversely, an ID >= nextMXact shouldn't ever be seen here; if it is
 	 * seen, it implies undetected ID wraparound has occurred.	We just
 	 * silently assume that such an ID is no longer running.
 	 *
 	 * Shared lock is enough here since we aren't modifying any global state.
-	 */
-	if (MultiXactIdPrecedes(multi, InvalidTransactionId))
-	{
-		debug_elog2(DEBUG2, "GetMembers: it's too old");
-		*members = NULL;
-		return -1;
-	}
-
-	/*
+	 *
 	 * Acquire the shared lock just long enough to grab the current counter
 	 * values.	We may need both nextMXact and nextOffset; see below.
 	 */
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
 
+	oldestMXact = MultiXactState->oldestMultiXactId;
 	nextMXact = MultiXactState->nextMXact;
 	nextOffset = MultiXactState->nextOffset;
 
 	LWLockRelease(MultiXactGenLock);
+
+	if (MultiXactIdPrecedes(multi, oldestMXact))
+	{
+		debug_elog2(DEBUG2, "GetMembers: it's too old");
+		*members = NULL;
+		return -1;
+	}
 
 	if (!MultiXactIdPrecedes(multi, nextMXact))
 	{
@@ -1749,7 +1760,6 @@ static void
 ExtendMultiXactOffset(MultiXactId multi)
 {
 	int			pageno;
-	int			segpage;
 	TransactionId truncateXid;
 	uint32		truncateXidEpoch;
 
@@ -1765,10 +1775,9 @@ ExtendMultiXactOffset(MultiXactId multi)
 
 	/*
 	 * Determine the truncateXid and epoch that the new segment needs, if
-	 * necessary.
+	 * this is the first page of the segment.
 	 */
-	segpage = pageno % SLRU_PAGES_PER_SEGMENT;
-	if (segpage == 0)
+	if (pageno % SLRU_PAGES_PER_SEGMENT == 0)
 	{
 		TransactionId	nextXid;
 
@@ -1867,6 +1876,9 @@ fillSegmentInfoData(SlruCtl ctl, SegmentInfo *segment)
 {
 	int			slotno;
 	MultiXactId *offptr;
+
+	segment->firstMulti = segment->segno * SLRU_PAGES_PER_SEGMENT *
+		MULTIXACT_OFFSETS_PER_PAGE;
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
 	/* FIXME it'd be nice not to trash the entire SLRU cache while at this */
@@ -2061,6 +2073,7 @@ TruncateMultiXact(void)
 		MultiXactState->truncateXid = InvalidTransactionId;
 		MultiXactState->truncateXidEpoch = 0;
 		MultiXactState->truncateSegno = -1;
+		MultiXactState->oldestMultiXactId = truncdata.current.firstMulti;
 		oldestOffset = truncdata.current.firstOffset;
 	}
 	else if (truncdata.remaining_used == 1)
@@ -2068,6 +2081,7 @@ TruncateMultiXact(void)
 		MultiXactState->truncateXid = truncdata.current.truncateXid;
 		MultiXactState->truncateXidEpoch = truncdata.current.truncateXidEpoch;
 		MultiXactState->truncateSegno = truncdata.current.segno;
+		MultiXactState->oldestMultiXactId = truncdata.remaining[0].firstMulti;
 		oldestOffset = truncdata.remaining[0].firstOffset;
 		pfree(truncdata.remaining);
 	}
@@ -2078,6 +2092,7 @@ TruncateMultiXact(void)
 		MultiXactState->truncateXid = truncdata.remaining[1].truncateXid;
 		MultiXactState->truncateXidEpoch = truncdata.remaining[1].truncateXidEpoch;
 		MultiXactState->truncateSegno = truncdata.remaining[1].segno;
+		MultiXactState->oldestMultiXactId = truncdata.remaining[1].firstMulti;
 		oldestOffset = truncdata.remaining[0].firstOffset;
 		pfree(truncdata.remaining);
 	}
