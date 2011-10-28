@@ -101,6 +101,7 @@ extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
 						 MultiXactOffset *nextMultiOffset);
 extern void CheckPointMultiXact(void);
+extern void TruncateMultiXact(TransactionId oldestXid);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti,
 					  MultiXactOffset nextMultiOffset);
 extern void MultiXactAdvanceNextMXact(MultiXactId minMulti,

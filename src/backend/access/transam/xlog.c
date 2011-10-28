@@ -7930,6 +7930,15 @@ CreateCheckPoint(int flags)
 	if (!RecoveryInProgress())
 		TruncateSUBTRANS(GetOldestXmin(true, false));
 
+	/*
+	 * Also truncate pg_multixact if possible.  We can throw away all data
+	 * before the oldestXid value used by the most recent vacuum.  As with
+	 * subtrans, skip doing this during recovery, because StartupMultiXact
+	 * hasn't been called yet.
+	 */
+	if (!RecoveryInProgress())
+		TruncateMultiXact(checkPoint.oldestXid);
+
 	/* All real work is done, but log before releasing lock. */
 	if (log_checkpoints)
 		LogCheckpointEnd(false);
