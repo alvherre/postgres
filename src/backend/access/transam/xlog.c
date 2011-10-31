@@ -7790,7 +7790,10 @@ CreateCheckPoint(int flags)
 
 	MultiXactGetCheckptMulti(shutdown,
 							 &checkPoint.nextMulti,
-							 &checkPoint.nextMultiOffset);
+							 &checkPoint.nextMultiOffset,
+							 &checkPoint.oldestSegTruncateXid,
+							 &checkPoint.oldestSegTruncateXidEpoch,
+							 &checkPoint.oldestMultiXactId);
 
 	/*
 	 * Having constructed the checkpoint record, ensure all shmem disk buffers

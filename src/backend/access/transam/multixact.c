@@ -159,7 +159,6 @@ typedef struct MultiXactStateData
 	/* truncation info for the oldest segment in the offset SLRU area */
 	TransactionId	truncateXid;
 	uint32			truncateXidEpoch;
-	int				truncateSegno;
 
 	/*
 	 * oldest multixact that is still on disk.  Anything older than this should
@@ -174,7 +173,7 @@ static MultiXactStateData *MultiXactState;
 #define firstPageOf(segment) ((segment) * SLRU_PAGES_PER_SEGMENT)
 
 /*
- * structs to pass data around in out private SlruScanDirectory callbacks for
+ * structs to pass data around in our private SlruScanDirectory callback for
  * the offset truncation support code.
  */
 typedef struct SegmentInfo
@@ -261,11 +260,13 @@ static const bool MultiXactConflicts[5][5] =
 #define debug_elog3(a,b,c) elog(a,b,c)
 #define debug_elog4(a,b,c,d) elog(a,b,c,d)
 #define debug_elog5(a,b,c,d,e) elog(a,b,c,d,e)
+#define debug_elog7(a,b,c,d,e,f,g) elog(a,b,c,d,e,f,g)
 #else
 #define debug_elog2(a,b)
 #define debug_elog3(a,b,c)
 #define debug_elog4(a,b,c,d)
 #define debug_elog5(a,b,c,d,e)
+#define debug_elog7(a,b,c,d,e,f,g)
 #endif
 
 /* internal MultiXactId management */
@@ -561,16 +562,14 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			TransactionId member = members[i].xid;
-
 			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
-						i, member);
-			if (TransactionIdIsCurrentTransactionId(member))
+						i, members[i].xid);
+			if (TransactionIdIsCurrentTransactionId(members[i].xid))
 				continue;
 			if (!MultiXactStatusConflict(members[i].status, status))
 				continue;
 
-			XactLockTableWait(member);
+			XactLockTableWait(members[i].xid);
 		}
 	}
 }
@@ -816,7 +815,8 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 
 	/* Handle corner cases of the nextMXact counter */
-	MultiXactState->nextMXact = HandleMxactOffsetCornerCases(MultiXactState->nextMXact);
+	MultiXactState->nextMXact =
+		HandleMxactOffsetCornerCases(MultiXactState->nextMXact);
 
 	/*
 	 * Assign the MXID, and make sure there is room for it in the file.
@@ -876,11 +876,9 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
  * 		Properly handle corner cases of MultiXactId enumeration
  *
  * This function takes a MultiXactId and returns a value that's actually a
- * valid multi.  In most cases it returns the value it was handed, with
- * two exceptions: (a) if one of the two reserved values in the very first page
- * is passed, return FirstMultiXactId; (b) if the first value of the first page
- * of any segment is passed, skip the two values used to hold the truncateXid
- * and truncateXidEpoch.
+ * valid multi, that is, it skips the first two values of any segment-
+ * beginning page, which are used to store the truncateXid and
+ * truncateXidEpoch.
  */
 static MultiXactId
 HandleMxactOffsetCornerCases(MultiXactId multi)
@@ -1494,7 +1492,7 @@ ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId truncateXid,
 }
 
 /*
- * Ditto, for MultiXactMember
+ * Ditto for MultiXactMember, except these don't worry about truncation info.
  */
 static int
 ZeroMultiXactMemberPage(int pageno, bool writeXlog)
@@ -1611,23 +1609,31 @@ ShutdownMultiXact(void)
 }
 
 /*
- * Get the next MultiXactId, offset and freeze point to save in a checkpoint
+ * Get the next MultiXactId, offset and truncate info to save in a checkpoint
  * record
  */
 void
 MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset)
+						 MultiXactOffset *nextMultiOffset,
+						 TransactionId *oldestTruncateXid,
+						 uint32 *oldestTruncateXidEpoch,
+						 MultiXactId *oldestMulti)
 {
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
 
 	*nextMulti = MultiXactState->nextMXact;
 	*nextMultiOffset = MultiXactState->nextOffset;
+	*oldestTruncateXid = MultiXactState->truncateXid;
+	*oldestTruncateXidEpoch = MultiXactState->truncateXidEpoch;
+	*oldestMulti = MultiXactState->oldestMultiXactId;
 
 	LWLockRelease(MultiXactGenLock);
 
-	debug_elog4(DEBUG2, "MultiXact: checkpoint is nextMulti %u, nextOffset %u",
-				*nextMulti, *nextMultiOffset);
+	debug_elog7(DEBUG2,
+				"MultiXact: checkpoint is nextMulti %u, nextOffset %u; truncate xid %u, epoch %u; oldest multi %u",
+				*nextMulti, *nextMultiOffset, *oldestTruncateXid,
+				*oldestTruncateXidEpoch, *oldestMulti);
 }
 
 /*
@@ -1757,7 +1763,6 @@ ExtendMultiXactOffset(MultiXactId multi)
 	{
 		MultiXactState->truncateXid = truncateXid;
 		MultiXactState->truncateXidEpoch = truncateXidEpoch;
-		MultiXactState->truncateSegno = pageno / SLRU_PAGES_PER_SEGMENT;
 	}
 }
 
@@ -1898,8 +1903,7 @@ mxactSlruGathererCb(SlruCtl ctl, char *segname, int segpage,
  *
  * The truncation rules for the Offset SLRU area are:
  *
- * 0. the current segment is never to be deleted.
- * 1. if the segment number is earlier than truncateSegno, delete it
+ * 1. the current segment is never to be deleted.
  * 2. for all the remaining segments, keep track of their respective number
  *    and truncate Xid info.  The caller is to determine the new truncation
  *    point from this data.
