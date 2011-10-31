@@ -156,7 +156,7 @@ typedef struct MultiXactStateData
 	/* next-to-be-assigned offset */
 	MultiXactOffset nextOffset;
 
-	/* truncation info for the offset SLRU area */
+	/* truncation info for the oldest segment in the offset SLRU area */
 	TransactionId	truncateXid;
 	uint32			truncateXidEpoch;
 	int				truncateSegno;
@@ -168,13 +168,14 @@ typedef struct MultiXactStateData
 	MultiXactId		oldestMultiXactId;
 } MultiXactStateData;
 
-/* Pointers to the state data in shared memory */
+/* Pointer to the state data in shared memory */
 static MultiXactStateData *MultiXactState;
 
 #define firstPageOf(segment) ((segment) * SLRU_PAGES_PER_SEGMENT)
 
 /*
- * A struct to pass data around in the offset SLRU truncate support code
+ * structs to pass data around in out private SlruScanDirectory callbacks for
+ * the offset truncation support code.
  */
 typedef struct SegmentInfo
 {
@@ -185,9 +186,6 @@ typedef struct SegmentInfo
 	MultiXactOffset	firstOffset;	/* first valid offset in segment */
 } SegmentInfo;
 
-/*
- * Data for our private SlruScanDirectory callback.
- */
 typedef struct TruncateCbData
 {
 	int				remaining_alloc;
@@ -216,7 +214,8 @@ typedef struct MxactZeroOffPg
  * so they will be uninteresting by the time our next transaction starts.
  * (XXX not clear that this is correct --- other members of the MultiXact
  * could hang around longer than we did.  However, it's not clear what a
- * better policy for flushing old cache entries would be.)
+ * better policy for flushing old cache entries would be.)  FIXME actually
+ * this is plain wrong now that multixact's may contain update Xids.
  *
  * We allocate the cache entries in a memory context that is deleted at
  * transaction end, so we don't need to do retail freeing of entries.
@@ -530,44 +529,6 @@ MultiXactIdIsRunning(MultiXactId multi)
 	debug_elog3(DEBUG2, "IsRunning: %u is not running", multi);
 
 	return false;
-}
-
-/*
- * MultiXactIdIsCurrent
- *		Returns true if the current transaction is a member of the MultiXactId.
- *
- * We return true if any live subtransaction of the current top-level
- * transaction is a member.  This is appropriate for the same reason that a
- * lock held by any such subtransaction is globally equivalent to a lock
- * held by the current subtransaction: no such lock could be released without
- * aborting this subtransaction, and hence releasing its locks.  So it's not
- * necessary to add the current subxact to the MultiXact separately.
- */
-bool
-MultiXactIdIsCurrent(MultiXactId multi)
-{
-	bool		result = false;
-	MultiXactMember *members;
-	int			nmembers;
-	int			i;
-
-	nmembers = GetMultiXactIdMembers(multi, &members);
-
-	if (nmembers < 0)
-		return false;
-
-	for (i = 0; i < nmembers; i++)
-	{
-		if (TransactionIdIsCurrentTransactionId(members[i].xid))
-		{
-			result = true;
-			break;
-		}
-	}
-
-	pfree(members);
-
-	return result;
 }
 
 /*
