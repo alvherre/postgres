@@ -545,14 +545,20 @@ MultiXactIdIsRunning(MultiXactId multi)
  * been added, since it is not legal to add members to an existing
  * MultiXactId).
  *
+ * We return the number of members that we did not test for.  This is dubbed
+ * "remaining" as in "the number of members that remaing running", but this is
+ * slightly incorrect, because lockers whose status did not conflict with ours
+ * are not even considered and so might have gone away anyway.
+ *
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
  */
 void
-MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
+MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
 {
 	MultiXactMember *members;
 	int			nmembers;
+	int			remain = 0;
 
 	nmembers = GetMultiXactIdMembers(multi, &members);
 
@@ -564,26 +570,35 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 		{
 			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
 						i, members[i].xid);
-			if (TransactionIdIsCurrentTransactionId(members[i].xid))
+			if (TransactionIdIsCurrentTransactionId(members[i].xid) ||
+				!MultiXactStatusConflict(members[i].status, status))
+			{
+				remain++;
 				continue;
-			if (!MultiXactStatusConflict(members[i].status, status))
-				continue;
+			}
 
 			XactLockTableWait(members[i].xid);
 		}
 	}
+
+	*remaining = remain;
 }
 
 /*
  * ConditionalMultiXactIdWait
  *		As above, but only lock if we can get the lock without blocking.
+ *
+ * Note that in case we return false, the number of remaining members is
+ * not to be trusted.
  */
 bool
-ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status)
+ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+						   int *remaining)
 {
 	bool		result = true;
 	MultiXactMember *members;
 	int			nmembers;
+	int			remain = 0;
 
 	nmembers = GetMultiXactIdMembers(multi, &members);
 
@@ -597,10 +612,12 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 
 			debug_elog4(DEBUG2, "ConditionalMultiXactIdWait: trying %d (%u)",
 						i, member);
-			if (TransactionIdIsCurrentTransactionId(member))
+			if (TransactionIdIsCurrentTransactionId(member) ||
+				!MultiXactStatusConflict(members[i].status, status))
+			{
+				remain++;
 				continue;
-			if (!MultiXactStatusConflict(members[i].status, status))
-				continue;
+			}
 			result = ConditionalXactLockTableWait(member);
 			if (!result)
 				break;
@@ -608,6 +625,8 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status)
 
 		pfree(members);
 	}
+
+	*remaining = remain;
 
 	return result;
 }

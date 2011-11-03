@@ -2190,8 +2190,10 @@ l1:
 
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
+			int		remain;
+
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate);
+			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate, &remain);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2569,6 +2571,7 @@ l2:
 	{
 		TransactionId	xwait;
 		uint16		infomask;
+		bool		none_remain = false;
 
 		/*
 		 * XXX note that we don't consider the "no wait" case here.  This
@@ -2615,9 +2618,10 @@ l2:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			TransactionId	update_xact;
+			int				remain;
 
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, mxact_status);
+			MultiXactIdWait((MultiXactId) xwait, mxact_status, &remain);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2639,8 +2643,9 @@ l2:
 			 * with the surviving members in Xmax.
 			 *
 			 * Note that there could have been another update in the MultiXact.
-			 * In that case, we need to check whether it committed or aborted,
-			 * and make sure we fix up the return value appropriately.
+			 * In that case, we need to check whether it committed or aborted.
+			 * If it aborted we are safe to update it again; otherwise there is
+			 * an update conflict that must be handled below.
 			 *
 			 * In the LockTupleKeyUpdate case, we still need to preserve the
 			 * surviving members: those would include the tuple locks we had
@@ -2652,11 +2657,30 @@ l2:
 				update_xact = HeapTupleGetUpdateXid(oldtup.t_data);
 
 			/* there was no UPDATE in the MultiXact; or it aborted. */
-			if ((update_xact == InvalidTransactionId) ||
-				(TransactionIdDidAbort(update_xact)))
+			if (update_xact == InvalidTransactionId ||
+				TransactionIdDidAbort(update_xact))
 			{
-				keep_xmax = HeapTupleHeaderGetXmax(oldtup.t_data);
-				keep_xmax_multi = (oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
+				/*
+				 * if the multixact still has live members, we need to preserve
+				 * it by creating a new multixact.  If all members are gone, we
+				 * can simply update the tuple by setting ourselves in Xmax.
+				 */
+				if (remain > 0)
+				{
+					keep_xmax = HeapTupleHeaderGetXmax(oldtup.t_data);
+					keep_xmax_multi =
+						(oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
+				}
+				else
+				{
+					/*
+					 * We could set the HEAP_XMAX_INVALID bit here instead of
+					 * using a separate boolean flag.  However, since we're going
+					 * to set up a new xmax below, this would waste time
+					 * setting up the buffer's dirty bit.
+					 */
+					none_remain = false;
+				}
 			}
 		}
 		else
@@ -2700,6 +2724,7 @@ l2:
 		 * keep it around in Xmax.
 		 */
 		if (TransactionIdIsValid(keep_xmax) ||
+			none_remain ||
 			(oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
 			HeapTupleHeaderIsLocked(oldtup.t_data))
 			result = HeapTupleMayBeUpdated;
@@ -2782,8 +2807,6 @@ l2:
 	 */
 	if (TransactionIdIsValid(keep_xmax))
 	{
-		/* if we're updating key columns, keep_xmax shouldn't be set */
-		Assert(mxact_status == MultiXactStatusUpdate);
 		if (keep_xmax_multi)
 		{
 			keep_xmax_old = MultiXactIdExpand(keep_xmax,
@@ -3408,6 +3431,7 @@ heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 	TransactionId xmax;
 	TransactionId keep_xmax = InvalidTransactionId;
 	bool		keep_xmax_multi = false;
+	bool		none_remains = false;
 	uint16		old_infomask;
 	uint16		new_infomask;
 	bool		have_tuple_lock = false;
@@ -3660,6 +3684,7 @@ l3:
 			if (infomask & HEAP_XMAX_IS_MULTI)
 			{
 				MultiXactStatus status = get_mxact_status_for_tuplelock(mode);
+				int		remain;
 
 				/* We only ever lock tuples, never update them */
 				if (status >= MultiXactStatusUpdate)
@@ -3668,14 +3693,14 @@ l3:
 				/* wait for multixact to end */
 				if (nowait)
 				{
-					if (!ConditionalMultiXactIdWait((MultiXactId) xwait, status))
+					if (!ConditionalMultiXactIdWait((MultiXactId) xwait, status, &remain))
 						ereport(ERROR,
 								(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 								 errmsg("could not obtain lock on row in relation \"%s\"",
 										RelationGetRelationName(relation))));
 				}
 				else
-					MultiXactIdWait((MultiXactId) xwait, status);
+					MultiXactIdWait((MultiXactId) xwait, status, &remain);
 
 				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -3697,8 +3722,13 @@ l3:
 				 * MultiXact members.  Note that it isn't absolutely necessary
 				 * in the latter case, but doing so is simpler.
 				 */
-				keep_xmax = xwait;
-				keep_xmax_multi = true;
+				if (remain > 0)
+				{
+					keep_xmax = xwait;
+					keep_xmax_multi = true;
+				}
+				else
+					none_remains = true;
 			}
 			else
 			{
@@ -3743,7 +3773,8 @@ l3:
 		 */
 		if (!require_sleep ||
 			(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderIsLocked(tuple->t_data))
+			HeapTupleHeaderIsLocked(tuple->t_data) ||
+			none_remains)
 			result = HeapTupleMayBeUpdated;
 		else
 			result = HeapTupleUpdated;
