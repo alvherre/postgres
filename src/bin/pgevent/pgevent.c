@@ -29,7 +29,7 @@ HANDLE		g_module = NULL;	/* hModule of DLL */
 char		event_source[256] = "PostgreSQL";
 
 /* Prototypes */
-HRESULT		DllInstall(BOOL bInstall, __in_opt LPCWSTR pszCmdLine);
+HRESULT		DllInstall(BOOL bInstall, LPCWSTR pszCmdLine);
 STDAPI		DllRegisterServer(void);
 STDAPI		DllUnregisterServer(void);
 BOOL WINAPI DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved);
@@ -40,13 +40,12 @@ BOOL WINAPI DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 
 HRESULT
 DllInstall(BOOL bInstall,
-		   __in_opt LPCWSTR pszCmdLine)
+		   LPCWSTR pszCmdLine)
 {
 	size_t		ret;
 
 	if (pszCmdLine && *pszCmdLine != '\0')
-		wcstombs_s(&ret, event_source, sizeof(event_source),
-				   pszCmdLine, sizeof(event_source));
+		wcstombs(event_source, pszCmdLine, sizeof(event_source));
 
 	/*
 	 * This is an ugly hack due to the strange behavior of "regsvr32 /i".

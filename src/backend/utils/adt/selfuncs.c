@@ -5666,6 +5666,19 @@ pattern_selectivity(Const *patt, Pattern_Type ptype)
 
 
 /*
+ * For bytea, the increment function need only increment the current byte
+ * (there are no multibyte characters to worry about).
+ */
+static bool
+byte_increment(unsigned char *ptr, int len)
+{
+	if (*ptr >= 255)
+		return false;
+	(*ptr)++;
+	return true;
+}
+
+/*
  * Try to generate a string greater than the given string or any
  * string it is a prefix of.  If successful, return a palloc'd string
  * in the form of a Const node; else return NULL.
@@ -5688,13 +5701,23 @@ pattern_selectivity(Const *patt, Pattern_Type ptype)
  * and "9" is seen as largest by the collation, and append that to the given
  * prefix before trying to find a string that compares as larger.
  *
- * If we max out the righthand byte, truncate off the last character
- * and start incrementing the next.  For example, if "z" were the last
- * character in the sort order, then we could produce "foo" as a
- * string greater than "fonz".
+ * To search for a greater string, we repeatedly "increment" the rightmost
+ * character, using an encoding-specific character incrementer function.
+ * When it's no longer possible to increment the last character, we truncate
+ * off that character and start incrementing the next-to-rightmost.
+ * For example, if "z" were the last character in the sort order, then we
+ * could produce "foo" as a string greater than "fonz".
  *
  * This could be rather slow in the worst case, but in most cases we
  * won't have to try more than one or two strings before succeeding.
+ *
+ * Note that it's important for the character incrementer not to be too anal
+ * about producing every possible character code, since in some cases the only
+ * way to get a larger string is to increment a previous character position.
+ * So we don't want to spend too much time trying every possible character
+ * code at the last position.  A good rule of thumb is to be sure that we
+ * don't try more than 256*K values for a K-byte character (and definitely
+ * not 256^K, which is what an exhaustive search would approach).
  */
 Const *
 make_greater_string(const Const *str_const, FmgrInfo *ltproc, Oid collation)
@@ -5704,6 +5727,7 @@ make_greater_string(const Const *str_const, FmgrInfo *ltproc, Oid collation)
 	int			len;
 	Datum		cmpstr;
 	text	   *cmptxt = NULL;
+	mbcharacter_incrementer charinc;
 
 	/*
 	 * Get a modifiable copy of the prefix string in C-string format, and set
@@ -5765,29 +5789,41 @@ make_greater_string(const Const *str_const, FmgrInfo *ltproc, Oid collation)
 		}
 	}
 
+	/* Select appropriate character-incrementer function */
+	if (datatype == BYTEAOID)
+		charinc = byte_increment;
+	else
+		charinc = pg_database_encoding_character_incrementer();
+
+	/* And search ... */
 	while (len > 0)
 	{
-		unsigned char *lastchar = (unsigned char *) (workstr + len - 1);
-		unsigned char savelastchar = *lastchar;
+		int			charlen;
+		unsigned char *lastchar;
+
+		/* Identify the last character --- for bytea, just the last byte */
+		if (datatype == BYTEAOID)
+			charlen = 1;
+		else
+			charlen = len - pg_mbcliplen(workstr, len, len - 1);
+		lastchar = (unsigned char *) (workstr + len - charlen);
 
 		/*
-		 * Try to generate a larger string by incrementing the last byte.
+		 * Try to generate a larger string by incrementing the last character
+		 * (for BYTEA, we treat each byte as a character).
+		 *
+		 * Note: the incrementer function is expected to return true if it's
+		 * generated a valid-per-the-encoding new character, otherwise false.
+		 * The contents of the character on false return are unspecified.
 		 */
-		while (*lastchar < (unsigned char) 255)
+		while (charinc(lastchar, charlen))
 		{
 			Const	   *workstr_const;
 
-			(*lastchar)++;
-
-			if (datatype != BYTEAOID)
-			{
-				/* do not generate invalid encoding sequences */
-				if (!pg_verifymbstr(workstr, len, true))
-					continue;
-				workstr_const = string_to_const(workstr, datatype);
-			}
-			else
+			if (datatype == BYTEAOID)
 				workstr_const = string_to_bytea_const(workstr, len);
+			else
+				workstr_const = string_to_const(workstr, datatype);
 
 			if (DatumGetBool(FunctionCall2Coll(ltproc,
 											   collation,
@@ -5806,20 +5842,12 @@ make_greater_string(const Const *str_const, FmgrInfo *ltproc, Oid collation)
 			pfree(workstr_const);
 		}
 
-		/* restore last byte so we don't confuse pg_mbcliplen */
-		*lastchar = savelastchar;
-
 		/*
-		 * Truncate off the last character, which might be more than 1 byte,
-		 * depending on the character encoding.
+		 * No luck here, so truncate off the last character and try to
+		 * increment the next one.
 		 */
-		if (datatype != BYTEAOID && pg_database_encoding_max_length() > 1)
-			len = pg_mbcliplen(workstr, len, len - 1);
-		else
-			len -= 1;
-
-		if (datatype != BYTEAOID)
-			workstr[len] = '\0';
+		len -= charlen;
+		workstr[len] = '\0';
 	}
 
 	/* Failed... */

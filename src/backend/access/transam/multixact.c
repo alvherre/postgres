@@ -1586,7 +1586,7 @@ StartupMultiXact(void)
 
 	/*
 	 * Zero out the remainder of the current members page.	See notes in
-	 * StartupCLOG() for motivation.
+	 * TrimCLOG() for motivation.
 	 */
 	flagsoff = MXOffsetToFlagsOffset(offset);
 	if (flagsoff != 0)

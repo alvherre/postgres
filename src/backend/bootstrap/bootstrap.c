@@ -29,6 +29,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/startup.h"
 #include "postmaster/walwriter.h"
 #include "replication/walreceiver.h"
 #include "storage/bufmgr.h"
@@ -315,6 +316,9 @@ AuxiliaryProcessMain(int argc, char *argv[])
 			case BgWriterProcess:
 				statmsg = "writer process";
 				break;
+			case CheckpointerProcess:
+				statmsg = "checkpointer process";
+				break;
 			case WalWriterProcess:
 				statmsg = "wal writer process";
 				break;
@@ -413,6 +417,11 @@ AuxiliaryProcessMain(int argc, char *argv[])
 		case BgWriterProcess:
 			/* don't set signals, bgwriter has its own agenda */
 			BackgroundWriterMain();
+			proc_exit(1);		/* should never return */
+
+		case CheckpointerProcess:
+			/* don't set signals, checkpointer has its own agenda */
+			CheckpointerMain();
 			proc_exit(1);		/* should never return */
 
 		case WalWriterProcess:

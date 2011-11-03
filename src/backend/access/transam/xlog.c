@@ -41,6 +41,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/startup.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "storage/bufmgr.h"
@@ -325,7 +326,7 @@ static XLogRecPtr RedoStartLSN = {0, 0};
  *
  * CheckpointLock: must be held to do a checkpoint or restartpoint (ensures
  * only one checkpointer at a time; currently, with all checkpoints done by
- * the bgwriter, this is just pro forma).
+ * the checkpointer, this is just pro forma).
  *
  *----------
  */
@@ -410,7 +411,7 @@ typedef struct XLogCtlData
 
 	/*
 	 * archiveCleanupCommand is read from recovery.conf but needs to be in
-	 * shared memory so that the bgwriter process can access it.
+	 * shared memory so that the checkpointer process can access it.
 	 */
 	char		archiveCleanupCommand[MAXPGPATH];
 
@@ -583,19 +584,6 @@ typedef struct xl_restore_point
 	TimestampTz rp_time;
 	char		rp_name[MAXFNAMELEN];
 } xl_restore_point;
-
-/*
- * Flags set by interrupt handlers for later service in the redo loop.
- */
-static volatile sig_atomic_t got_SIGHUP = false;
-static volatile sig_atomic_t shutdown_requested = false;
-static volatile sig_atomic_t promote_triggered = false;
-
-/*
- * Flag set when executing a restore command, to tell SIGTERM signal handler
- * that it's safe to just proc_exit.
- */
-static volatile sig_atomic_t in_restore_command = false;
 
 
 static void XLogArchiveNotify(const char *xlog);
@@ -1849,7 +1837,7 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible, bool xlog_switch)
 				Write->lastSegSwitchTime = (pg_time_t) time(NULL);
 
 				/*
-				 * Signal bgwriter to start a checkpoint if we've consumed too
+				 * Request a checkpoint if we've consumed too
 				 * much xlog since the last one.  For speed, we first check
 				 * using the local copy of RedoRecPtr, which might be out of
 				 * date; if it looks like a checkpoint is needed, forcibly
@@ -2035,8 +2023,8 @@ XLogFlush(XLogRecPtr record)
 	/*
 	 * During REDO, we are reading not writing WAL.  Therefore, instead of
 	 * trying to flush the WAL, we should update minRecoveryPoint instead. We
-	 * test XLogInsertAllowed(), not InRecovery, because we need the bgwriter
-	 * to act this way too, and because when the bgwriter tries to write the
+	 * test XLogInsertAllowed(), not InRecovery, because we need checkpointer
+	 * to act this way too, and because when it tries to write the
 	 * end-of-recovery checkpoint, it should indeed flush.
 	 */
 	if (!XLogInsertAllowed())
@@ -3068,21 +3056,16 @@ RestoreArchivedFile(char *path, const char *xlogfname,
 							 xlogRestoreCmd)));
 
 	/*
-	 * Set in_restore_command to tell the signal handler that we should exit
-	 * right away on SIGTERM. We know that we're at a safe point to do that.
-	 * Check if we had already received the signal, so that we don't miss a
-	 * shutdown request received just before this.
+	 * Check signals before restore command and reset afterwards.
 	 */
-	in_restore_command = true;
-	if (shutdown_requested)
-		proc_exit(1);
+	PreRestoreCommand();
 
 	/*
 	 * Copy xlog from archival storage to XLOGDIR
 	 */
 	rc = system(xlogRestoreCmd);
 
-	in_restore_command = false;
+	PostRestoreCommand();
 
 	if (rc == 0)
 	{
@@ -5873,7 +5856,7 @@ pg_is_xlog_replay_paused(PG_FUNCTION_ARGS)
  *
  * We keep this in XLogCtl, not a simple static variable, so that it can be
  * seen by processes other than the startup process.  Note in particular
- * that CreateRestartPoint is executed in the bgwriter.
+ * that CreateRestartPoint is executed in the checkpointer.
  */
 static void
 SetLatestXTime(TimestampTz xtime)
@@ -6410,10 +6393,12 @@ StartupXLOG(void)
 				oldestActiveXID = checkPoint.oldestActiveXid;
 			Assert(TransactionIdIsValid(oldestActiveXID));
 
-			/* Startup commit log and related stuff */
+			/*
+			 * Startup commit log and subtrans only. Other SLRUs are not
+			 * maintained during recovery and need not be started yet.
+			 */
 			StartupCLOG();
 			StartupSUBTRANS(oldestActiveXID);
-			StartupMultiXact();
 
 			/*
 			 * If we're beginning at a shutdown checkpoint, we know that
@@ -6479,14 +6464,14 @@ StartupXLOG(void)
 
 		/*
 		 * Let postmaster know we've started redo now, so that it can launch
-		 * bgwriter to perform restartpoints.  We don't bother during crash
+		 * checkpointer to perform restartpoints.  We don't bother during crash
 		 * recovery as restartpoints can only be performed during archive
 		 * recovery.  And we'd like to keep crash recovery simple, to avoid
 		 * introducing bugs that could affect you when recovering after crash.
 		 *
 		 * After this point, we can no longer assume that we're the only
 		 * process in addition to postmaster!  Also, fsync requests are
-		 * subsequently to be handled by the bgwriter, not locally.
+		 * subsequently to be handled by the checkpointer, not locally.
 		 */
 		if (InArchiveRecovery && IsUnderPostmaster)
 		{
@@ -6914,15 +6899,20 @@ StartupXLOG(void)
 	TransactionIdRetreat(ShmemVariableCache->latestCompletedXid);
 
 	/*
-	 * Start up the commit log and related stuff, too. In hot standby mode we
-	 * did this already before WAL replay.
+	 * Start up the commit log and subtrans, if not already done for
+	 * hot standby.
 	 */
 	if (standbyState == STANDBY_DISABLED)
 	{
 		StartupCLOG();
 		StartupSUBTRANS(oldestActiveXID);
-		StartupMultiXact();
 	}
+
+	/*
+	 * Perform end of recovery actions for any SLRUs that need it.
+	 */
+	StartupMultiXact();
+	TrimCLOG();
 
 	/* Reload shared-memory state for prepared transactions */
 	RecoverPreparedTransactions();
@@ -7570,6 +7560,10 @@ CreateCheckPoint(int flags)
 	uint32		freespace;
 	uint32		_logId;
 	uint32		_logSeg;
+	uint32		redo_logId;
+	uint32		redo_logSeg;
+	uint32		insert_logId;
+	uint32		insert_logSeg;
 	TransactionId *inCommitXids;
 	int			nInCommit;
 
@@ -7630,14 +7624,24 @@ CreateCheckPoint(int flags)
 	checkPoint.time = (pg_time_t) time(NULL);
 
 	/*
+	 * For Hot Standby, derive the oldestActiveXid before we fix the redo pointer.
+	 * This allows us to begin accumulating changes to assemble our starting
+	 * snapshot of locks and transactions.
+	 */
+	if (!shutdown && XLogStandbyInfoActive())
+		checkPoint.oldestActiveXid = GetOldestActiveTransactionId();
+	else
+		checkPoint.oldestActiveXid = InvalidTransactionId;
+
+	/*
 	 * We must hold WALInsertLock while examining insert state to determine
 	 * the checkpoint REDO pointer.
 	 */
 	LWLockAcquire(WALInsertLock, LW_EXCLUSIVE);
 
 	/*
-	 * If this isn't a shutdown or forced checkpoint, and we have not inserted
-	 * any XLOG records since the start of the last checkpoint, skip the
+	 * If this isn't a shutdown or forced checkpoint, and we have not switched
+	 * to the next WAL file since the start of the last checkpoint, skip the
 	 * checkpoint.	The idea here is to avoid inserting duplicate checkpoints
 	 * when the system is idle. That wastes log space, and more importantly it
 	 * exposes us to possible loss of both current and previous checkpoint
@@ -7645,10 +7649,11 @@ CreateCheckPoint(int flags)
 	 * (Perhaps it'd make even more sense to checkpoint only when the previous
 	 * checkpoint record is in a different xlog page?)
 	 *
-	 * We have to make two tests to determine that nothing has happened since
-	 * the start of the last checkpoint: current insertion point must match
-	 * the end of the last checkpoint record, and its redo pointer must point
-	 * to itself.
+	 * While holding the WALInsertLock we find the current WAL insertion point
+	 * and compare that with the starting point of the last checkpoint, which
+	 * is the redo pointer. We use the redo pointer because the start and end
+	 * points of a checkpoint can be hundreds of files apart on large systems
+	 * when checkpoint writes are spread out over time.
 	 */
 	if ((flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY |
 				  CHECKPOINT_FORCE)) == 0)
@@ -7656,13 +7661,10 @@ CreateCheckPoint(int flags)
 		XLogRecPtr	curInsert;
 
 		INSERT_RECPTR(curInsert, Insert, Insert->curridx);
-		if (curInsert.xlogid == ControlFile->checkPoint.xlogid &&
-			curInsert.xrecoff == ControlFile->checkPoint.xrecoff +
-			MAXALIGN(SizeOfXLogRecord + sizeof(CheckPoint)) &&
-			ControlFile->checkPoint.xlogid ==
-			ControlFile->checkPointCopy.redo.xlogid &&
-			ControlFile->checkPoint.xrecoff ==
-			ControlFile->checkPointCopy.redo.xrecoff)
+		XLByteToSeg(curInsert, insert_logId, insert_logSeg);
+		XLByteToSeg(ControlFile->checkPointCopy.redo, redo_logId, redo_logSeg);
+		if (insert_logId == redo_logId &&
+			insert_logSeg == redo_logSeg)
 		{
 			LWLockRelease(WALInsertLock);
 			LWLockRelease(CheckpointLock);
@@ -7818,9 +7820,7 @@ CreateCheckPoint(int flags)
 	 * Update checkPoint.nextXid since we have a later value
 	 */
 	if (!shutdown && XLogStandbyInfoActive())
-		LogStandbySnapshot(&checkPoint.oldestActiveXid, &checkPoint.nextXid);
-	else
-		checkPoint.oldestActiveXid = InvalidTransactionId;
+		LogStandbySnapshot(&checkPoint.nextXid);
 
 	START_CRIT_SECTION();
 
@@ -7981,8 +7981,8 @@ CheckPointGuts(XLogRecPtr checkPointRedo, int flags)
  * It must determine whether the checkpoint represents a safe restartpoint or
  * not.  If so, the checkpoint record is stashed in shared memory so that
  * CreateRestartPoint can consult it.  (Note that the latter function is
- * executed by the bgwriter, while this one will be executed by the startup
- * process.)
+ * executed by the checkpointer, while this one will be executed by the
+ * startup process.)
  */
 static void
 RecoveryRestartPoint(const CheckPoint *checkPoint)
@@ -8013,8 +8013,8 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 	}
 
 	/*
-	 * Copy the checkpoint record to shared memory, so that bgwriter can use
-	 * it the next time it wants to perform a restartpoint.
+	 * Copy the checkpoint record to shared memory, so that checkpointer
+	 * can work out the next time it wants to perform a restartpoint.
 	 */
 	SpinLockAcquire(&xlogctl->info_lck);
 	XLogCtl->lastCheckPointRecPtr = ReadRecPtr;
@@ -9943,177 +9943,6 @@ CancelBackup(void)
 	}
 }
 
-/* ------------------------------------------------------
- *	Startup Process main entry point and signal handlers
- * ------------------------------------------------------
- */
-
-/*
- * startupproc_quickdie() occurs when signalled SIGQUIT by the postmaster.
- *
- * Some backend has bought the farm,
- * so we need to stop what we're doing and exit.
- */
-static void
-startupproc_quickdie(SIGNAL_ARGS)
-{
-	PG_SETMASK(&BlockSig);
-
-	/*
-	 * We DO NOT want to run proc_exit() callbacks -- we're here because
-	 * shared memory may be corrupted, so we don't want to try to clean up our
-	 * transaction.  Just nail the windows shut and get out of town.  Now that
-	 * there's an atexit callback to prevent third-party code from breaking
-	 * things by calling exit() directly, we have to reset the callbacks
-	 * explicitly to make this work as intended.
-	 */
-	on_exit_reset();
-
-	/*
-	 * Note we do exit(2) not exit(0).	This is to force the postmaster into a
-	 * system reset cycle if some idiot DBA sends a manual SIGQUIT to a random
-	 * backend.  This is necessary precisely because we don't clean up our
-	 * shared memory state.  (The "dead man switch" mechanism in pmsignal.c
-	 * should ensure the postmaster sees this as a crash, too, but no harm in
-	 * being doubly sure.)
-	 */
-	exit(2);
-}
-
-
-/* SIGUSR1: let latch facility handle the signal */
-static void
-StartupProcSigUsr1Handler(SIGNAL_ARGS)
-{
-	int			save_errno = errno;
-
-	latch_sigusr1_handler();
-
-	errno = save_errno;
-}
-
-/* SIGUSR2: set flag to finish recovery */
-static void
-StartupProcTriggerHandler(SIGNAL_ARGS)
-{
-	int			save_errno = errno;
-
-	promote_triggered = true;
-	WakeupRecovery();
-
-	errno = save_errno;
-}
-
-/* SIGHUP: set flag to re-read config file at next convenient time */
-static void
-StartupProcSigHupHandler(SIGNAL_ARGS)
-{
-	int			save_errno = errno;
-
-	got_SIGHUP = true;
-	WakeupRecovery();
-
-	errno = save_errno;
-}
-
-/* SIGTERM: set flag to abort redo and exit */
-static void
-StartupProcShutdownHandler(SIGNAL_ARGS)
-{
-	int			save_errno = errno;
-
-	if (in_restore_command)
-		proc_exit(1);
-	else
-		shutdown_requested = true;
-	WakeupRecovery();
-
-	errno = save_errno;
-}
-
-/* Handle SIGHUP and SIGTERM signals of startup process */
-void
-HandleStartupProcInterrupts(void)
-{
-	/*
-	 * Check if we were requested to re-read config file.
-	 */
-	if (got_SIGHUP)
-	{
-		got_SIGHUP = false;
-		ProcessConfigFile(PGC_SIGHUP);
-	}
-
-	/*
-	 * Check if we were requested to exit without finishing recovery.
-	 */
-	if (shutdown_requested)
-		proc_exit(1);
-
-	/*
-	 * Emergency bailout if postmaster has died.  This is to avoid the
-	 * necessity for manual cleanup of all postmaster children.
-	 */
-	if (IsUnderPostmaster && !PostmasterIsAlive())
-		exit(1);
-}
-
-/* Main entry point for startup process */
-void
-StartupProcessMain(void)
-{
-	/*
-	 * If possible, make this process a group leader, so that the postmaster
-	 * can signal any child processes too.
-	 */
-#ifdef HAVE_SETSID
-	if (setsid() < 0)
-		elog(FATAL, "setsid() failed: %m");
-#endif
-
-	/*
-	 * Properly accept or ignore signals the postmaster might send us.
-	 *
-	 * Note: ideally we'd not enable handle_standby_sig_alarm unless actually
-	 * doing hot standby, but we don't know that yet.  Rely on it to not do
-	 * anything if it shouldn't.
-	 */
-	pqsignal(SIGHUP, StartupProcSigHupHandler); /* reload config file */
-	pqsignal(SIGINT, SIG_IGN);	/* ignore query cancel */
-	pqsignal(SIGTERM, StartupProcShutdownHandler);		/* request shutdown */
-	pqsignal(SIGQUIT, startupproc_quickdie);	/* hard crash time */
-	if (EnableHotStandby)
-		pqsignal(SIGALRM, handle_standby_sig_alarm);	/* ignored unless
-														 * InHotStandby */
-	else
-		pqsignal(SIGALRM, SIG_IGN);
-	pqsignal(SIGPIPE, SIG_IGN);
-	pqsignal(SIGUSR1, StartupProcSigUsr1Handler);
-	pqsignal(SIGUSR2, StartupProcTriggerHandler);
-
-	/*
-	 * Reset some signals that are accepted by postmaster but not here
-	 */
-	pqsignal(SIGCHLD, SIG_DFL);
-	pqsignal(SIGTTIN, SIG_DFL);
-	pqsignal(SIGTTOU, SIG_DFL);
-	pqsignal(SIGCONT, SIG_DFL);
-	pqsignal(SIGWINCH, SIG_DFL);
-
-	/*
-	 * Unblock signals (they were blocked when the postmaster forked us)
-	 */
-	PG_SETMASK(&UnBlockSig);
-
-	StartupXLOG();
-
-	/*
-	 * Exit normally. Exit code 0 tells postmaster that we completed recovery
-	 * successfully.
-	 */
-	proc_exit(0);
-}
-
 /*
  * Read the XLOG page containing RecPtr into readBuf (if not read already).
  * Returns true if the page is read successfully.
@@ -10163,7 +9992,7 @@ XLogPageRead(XLogRecPtr *RecPtr, int emode, bool fetching_ckpt,
 	if (readFile >= 0 && !XLByteInSeg(*RecPtr, readId, readSeg))
 	{
 		/*
-		 * Signal bgwriter to start a restartpoint if we've replayed too much
+		 * Request a restartpoint if we've replayed too much
 		 * xlog since the last one.
 		 */
 		if (StandbyMode && bgwriterLaunched)
@@ -10561,12 +10390,12 @@ CheckForStandbyTrigger(void)
 	if (triggered)
 		return true;
 
-	if (promote_triggered)
+	if (IsPromoteTriggered())
 	{
 		ereport(LOG,
 				(errmsg("received promote request")));
 		ShutdownWalRcv();
-		promote_triggered = false;
+		ResetPromoteTriggered();
 		triggered = true;
 		return true;
 	}
