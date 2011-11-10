@@ -63,19 +63,30 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
 	int2		attlen;
 
 	/*
-	 * attnum is the "attribute number" for the attribute:	A value that
-	 * uniquely identifies this attribute within its class. For user
-	 * attributes, Attribute numbers are greater than 0 and not greater than
-	 * the number of attributes in the class. I.e. if the Class pg_class says
-	 * that Class XYZ has 10 attributes, then the user attribute numbers in
-	 * Class pg_attribute must be 1-10.
+	 * We previously had a single "attnum" attribute here, which has been
+	 * broken up in three parts:
 	 *
-	 * System attributes have attribute numbers less than 0 that are unique
-	 * within the class, but not constrained to any particular range.
+	 * attnum uniquely identifies the column within its class, throughout its
+	 * lifetime.  For user attributes, Attribute numbers are greater than 0 and
+	 * not greater than the number of attributes in the class. I.e. if the
+	 * Class pg_class says that Class XYZ has 10 attributes, then the user
+	 * attribute numbers in Class pg_attribute must be 1-10.  System attributes
+	 * have attribute numbers less than 0 that are unique within the class, but
+	 * not constrained to any particular range.
+	 *
+	 * attphysnum (physical position) specifies the position in which the
+	 * column is stored in physical tuples.  This might differ from attnum if
+	 * there are useful optimizations in storage space, for example alignment
+	 * considerations.
+	 *
+	 * attlognum (logical position) specifies the position in which the column
+	 * is expanded in "SELECT * FROM rel" type queries.
 	 *
 	 * Note that (attnum - 1) is often used as the index to an array.
 	 */
 	int2		attnum;
+	int2		attphysnum;
+	int2		attlognum;
 
 	/*
 	 * attndims is the declared number of dimensions, if an array type,
@@ -182,28 +193,30 @@ typedef FormData_pg_attribute *Form_pg_attribute;
  * ----------------
  */
 
-#define Natts_pg_attribute				21
+#define Natts_pg_attribute				23
 #define Anum_pg_attribute_attrelid		1
 #define Anum_pg_attribute_attname		2
 #define Anum_pg_attribute_atttypid		3
 #define Anum_pg_attribute_attstattarget 4
 #define Anum_pg_attribute_attlen		5
 #define Anum_pg_attribute_attnum		6
-#define Anum_pg_attribute_attndims		7
-#define Anum_pg_attribute_attcacheoff	8
-#define Anum_pg_attribute_atttypmod		9
-#define Anum_pg_attribute_attbyval		10
-#define Anum_pg_attribute_attstorage	11
-#define Anum_pg_attribute_attalign		12
-#define Anum_pg_attribute_attnotnull	13
-#define Anum_pg_attribute_atthasdef		14
-#define Anum_pg_attribute_attisdropped	15
-#define Anum_pg_attribute_attislocal	16
-#define Anum_pg_attribute_attinhcount	17
-#define Anum_pg_attribute_attcollation	18
-#define Anum_pg_attribute_attacl		19
-#define Anum_pg_attribute_attoptions	20
-#define Anum_pg_attribute_attfdwoptions	21
+#define Anum_pg_attribute_attphysnum	7
+#define Anum_pg_attribute_attlognum		8
+#define Anum_pg_attribute_attndims		9
+#define Anum_pg_attribute_attcacheoff	10
+#define Anum_pg_attribute_atttypmod		11
+#define Anum_pg_attribute_attbyval		12
+#define Anum_pg_attribute_attstorage	13
+#define Anum_pg_attribute_attalign		14
+#define Anum_pg_attribute_attnotnull	15
+#define Anum_pg_attribute_atthasdef		16
+#define Anum_pg_attribute_attisdropped	17
+#define Anum_pg_attribute_attislocal	18
+#define Anum_pg_attribute_attinhcount	19
+#define Anum_pg_attribute_attcollation	20
+#define Anum_pg_attribute_attacl		21
+#define Anum_pg_attribute_attoptions	22
+#define Anum_pg_attribute_attfdwoptions	23
 
 
 /* ----------------

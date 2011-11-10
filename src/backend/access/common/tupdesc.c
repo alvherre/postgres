@@ -341,6 +341,10 @@ equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
 			return false;
 		if (attr1->attlen != attr2->attlen)
 			return false;
+		if (attr1->attphysnum != attr2->attphysnum)
+			return false;
+		if (attr1->attlognum != attr2->attlognum)
+			return false;
 		if (attr1->attndims != attr2->attndims)
 			return false;
 		if (attr1->atttypmod != attr2->atttypmod)
@@ -476,6 +480,8 @@ TupleDescInitEntry(TupleDesc desc,
 	att->atttypmod = typmod;
 
 	att->attnum = attributeNumber;
+	att->attphysnum = attributeNumber;
+	att->attlognum = attributeNumber;
 	att->attndims = attdim;
 
 	att->attnotnull = false;

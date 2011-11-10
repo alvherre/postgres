@@ -127,37 +127,49 @@ static List *insert_ordered_unique_oid(List *list, Oid datum);
 
 static FormData_pg_attribute a1 = {
 	0, {"ctid"}, TIDOID, 0, sizeof(ItemPointerData),
-	SelfItemPointerAttributeNumber, 0, -1, -1,
+	SelfItemPointerAttributeNumber, SelfItemPointerAttributeNumber,
+	SelfItemPointerAttributeNumber,
+	0, -1, -1,
 	false, 'p', 's', true, false, false, true, 0
 };
 
 static FormData_pg_attribute a2 = {
 	0, {"oid"}, OIDOID, 0, sizeof(Oid),
-	ObjectIdAttributeNumber, 0, -1, -1,
+	ObjectIdAttributeNumber, ObjectIdAttributeNumber,
+	ObjectIdAttributeNumber,
+	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
 static FormData_pg_attribute a3 = {
 	0, {"xmin"}, XIDOID, 0, sizeof(TransactionId),
-	MinTransactionIdAttributeNumber, 0, -1, -1,
+	MinTransactionIdAttributeNumber, MinTransactionIdAttributeNumber,
+	MinTransactionIdAttributeNumber,
+	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
 static FormData_pg_attribute a4 = {
 	0, {"cmin"}, CIDOID, 0, sizeof(CommandId),
-	MinCommandIdAttributeNumber, 0, -1, -1,
+	MinCommandIdAttributeNumber, MinCommandIdAttributeNumber,
+	MinCommandIdAttributeNumber,
+	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
 static FormData_pg_attribute a5 = {
 	0, {"xmax"}, XIDOID, 0, sizeof(TransactionId),
-	MaxTransactionIdAttributeNumber, 0, -1, -1,
+	MaxTransactionIdAttributeNumber, MaxTransactionIdAttributeNumber,
+	MaxTransactionIdAttributeNumber,
+	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
 static FormData_pg_attribute a6 = {
 	0, {"cmax"}, CIDOID, 0, sizeof(CommandId),
-	MaxCommandIdAttributeNumber, 0, -1, -1,
+	MaxCommandIdAttributeNumber, MaxCommandIdAttributeNumber,
+	MaxCommandIdAttributeNumber,
+	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
@@ -169,7 +181,9 @@ static FormData_pg_attribute a6 = {
  */
 static FormData_pg_attribute a7 = {
 	0, {"tableoid"}, OIDOID, 0, sizeof(Oid),
-	TableOidAttributeNumber, 0, -1, -1,
+	TableOidAttributeNumber, TableOidAttributeNumber,
+	TableOidAttributeNumber,
+   	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
@@ -598,6 +612,8 @@ InsertPgAttributeTuple(Relation pg_attribute_rel,
 	values[Anum_pg_attribute_attstattarget - 1] = Int32GetDatum(new_attribute->attstattarget);
 	values[Anum_pg_attribute_attlen - 1] = Int16GetDatum(new_attribute->attlen);
 	values[Anum_pg_attribute_attnum - 1] = Int16GetDatum(new_attribute->attnum);
+	values[Anum_pg_attribute_attphysnum - 1] = Int16GetDatum(new_attribute->attphysnum);
+	values[Anum_pg_attribute_attlognum - 1] = Int16GetDatum(new_attribute->attlognum);
 	values[Anum_pg_attribute_attndims - 1] = Int32GetDatum(new_attribute->attndims);
 	values[Anum_pg_attribute_attcacheoff - 1] = Int32GetDatum(new_attribute->attcacheoff);
 	values[Anum_pg_attribute_atttypmod - 1] = Int32GetDatum(new_attribute->atttypmod);
