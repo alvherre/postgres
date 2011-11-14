@@ -84,6 +84,7 @@ CreateTemplateTupleDesc(int natts, bool hasoid)
 	 * Initialize other fields of the tupdesc.
 	 */
 	desc->natts = natts;
+	desc->logattrs = NULL;
 	desc->constr = NULL;
 	desc->tdtypeid = RECORDOID;
 	desc->tdtypmod = -1;
@@ -117,6 +118,7 @@ CreateTupleDesc(int natts, bool hasoid, Form_pg_attribute *attrs)
 	desc = (TupleDesc) palloc(sizeof(struct tupleDesc));
 	desc->attrs = attrs;
 	desc->natts = natts;
+	desc->logattrs = NULL;
 	desc->constr = NULL;
 	desc->tdtypeid = RECORDOID;
 	desc->tdtypmod = -1;
@@ -150,6 +152,8 @@ CreateTupleDescCopy(TupleDesc tupdesc)
 
 	desc->tdtypeid = tupdesc->tdtypeid;
 	desc->tdtypmod = tupdesc->tdtypmod;
+
+	Assert(desc->logattrs == NULL);
 
 	return desc;
 }
@@ -256,6 +260,9 @@ FreeTupleDesc(TupleDesc tupdesc)
 		pfree(tupdesc->constr);
 	}
 
+	if (tupdesc->logattrs)
+		pfree(tupdesc->logattrs);
+
 	pfree(tupdesc);
 }
 
@@ -300,7 +307,7 @@ DecrTupleDescRefCount(TupleDesc tupdesc)
  * Note: we deliberately do not check the attrelid and tdtypmod fields.
  * This allows typcache.c to use this routine to see if a cached record type
  * matches a requested type, and is harmless for relcache.c's uses.
- * We don't compare tdrefcount, either.
+ * We don't compare tdrefcount nor logattrs, either.
  */
 bool
 equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
@@ -613,6 +620,8 @@ BuildDescForRelation(List *schema)
 		desc->constr = NULL;
 	}
 
+	Assert(desc->logattrs == NULL);
+
 	return desc;
 }
 
@@ -673,5 +682,51 @@ BuildDescFromLists(List *names, List *types, List *typmods, List *collations)
 		TupleDescInitEntryCollation(desc, attnum, attcollation);
 	}
 
+	Assert(desc->logattrs == NULL);
 	return desc;
+}
+
+/*
+ * qsort callback for TupleDescGetSortedAttrs
+ */
+static int
+cmplognum(const void *attr1, const void *attr2)
+{
+	Form_pg_attribute	att1 = *(Form_pg_attribute *) attr1;
+	Form_pg_attribute	att2 = *(Form_pg_attribute *) attr2;
+
+	if (att1->attlognum < att2->attlognum)
+		return -1;
+	if (att1->attlognum > att2->attlognum)
+		return 1;
+	return 0;
+}
+
+#include "utils/memutils.h"
+
+/*
+ * Return the array of attrs sorted by logical position
+ */
+Form_pg_attribute *
+TupleDescGetSortedAttrs(TupleDesc desc)
+{
+	if (desc->logattrs == NULL)
+	{
+		Form_pg_attribute *attrs;
+
+		/*
+		 * logattrs must be allocated in the same memcxt as the tupdesc it
+		 * belongs to, so that it isn't reset ahead of time.
+		 */
+		attrs = MemoryContextAlloc(GetMemoryChunkContext(desc),
+								   sizeof(Form_pg_attribute) * desc->natts);
+		memcpy(attrs, desc->attrs,
+			   sizeof(Form_pg_attribute) * desc->natts);
+
+		qsort(attrs, desc->natts, sizeof(Form_pg_attribute), cmplognum);
+
+		desc->logattrs = attrs;
+	}
+
+	return desc->logattrs;
 }

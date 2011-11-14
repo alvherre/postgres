@@ -706,6 +706,7 @@ buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
 	int			maxattrs = tupdesc->natts;
 	ListCell   *aliaslc;
 	int			numaliases;
+	Form_pg_attribute *attrs;
 	int			varattno;
 	int			numdropped = 0;
 
@@ -724,9 +725,11 @@ buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
 		numaliases = 0;
 	}
 
+	attrs = TupleDescGetSortedAttrs(tupdesc);
+
 	for (varattno = 0; varattno < maxattrs; varattno++)
 	{
-		Form_pg_attribute attr = tupdesc->attrs[varattno];
+		Form_pg_attribute attr = attrs[varattno];
 		Value	   *attrname;
 
 		if (attr->attisdropped)
@@ -1869,10 +1872,13 @@ expandTupleDesc(TupleDesc tupdesc, Alias *eref,
 	int			maxattrs = tupdesc->natts;
 	int			numaliases = list_length(eref->colnames);
 	int			varattno;
+	Form_pg_attribute *logattrs;
+
+	logattrs = TupleDescGetSortedAttrs(tupdesc);
 
 	for (varattno = 0; varattno < maxattrs; varattno++)
 	{
-		Form_pg_attribute attr = tupdesc->attrs[varattno];
+		Form_pg_attribute attr = logattrs[varattno];
 
 		if (attr->attisdropped)
 		{
