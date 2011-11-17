@@ -84,7 +84,7 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 				ItemPointerData from, Buffer newbuf, HeapTuple newtup,
 				bool all_visible_cleared, bool new_all_visible_cleared);
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
-					   HeapTuple oldtup, HeapTuple newtup);
+					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay);
 static uint16 GetMultiXactIdHintBits(MultiXactId multi);
 
 
@@ -2534,7 +2534,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	 * This allows for more concurrency when we are running simultaneously with
 	 * foreign key checks.
 	 */
-	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup))
+	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup, false))
 	{
 		tuplock = LockTupleUpdate;
 		mxact_status = MultiXactStatusUpdate;
@@ -2977,7 +2977,8 @@ l2:
 		 * to do a HOT update.	Check if any of the index columns have been
 		 * changed.  If not, then HOT update is possible.
 		 */
-		if (HeapSatisfiesHOTUpdate(relation, hot_attrs, &oldtup, heaptup))
+		if (HeapSatisfiesHOTUpdate(relation, hot_attrs, &oldtup, heaptup,
+								   true))
 			use_hot_update = true;
 	}
 	else
@@ -3226,9 +3227,12 @@ heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum,
  */
 static bool
 HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
-					   HeapTuple oldtup, HeapTuple newtup)
+					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay)
 {
 	int			attrnum;
+
+	if (!empty_okay && bms_is_empty(hot_attrs))
+		return false;
 
 	while ((attrnum = bms_first_member(hot_attrs)) >= 0)
 	{
