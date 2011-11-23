@@ -635,7 +635,7 @@ transformInsertStmt(ParseState *pstate, InsertStmt *stmt)
 		/*
 		 * Generate list of Vars referencing the RTE
 		 */
-		expandRTE(rte, rtr->rtindex, 0, -1, false, NULL, &exprList);
+		expandRTE(rte, rtr->rtindex, 0, -1, false, false, NULL, &exprList);
 	}
 	else
 	{

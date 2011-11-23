@@ -1196,7 +1196,7 @@ ExpandSingleTable(ParseState *pstate, RangeTblEntry *rte,
 		List	   *vars;
 		ListCell   *l;
 
-		expandRTE(rte, rtindex, sublevels_up, location, false,
+		expandRTE(rte, rtindex, sublevels_up, location, false, false,
 				  NULL, &vars);
 
 		/*
@@ -1350,7 +1350,7 @@ expandRecordVariable(ParseState *pstate, Var *var, int levelsup)
 				   *lvar;
 		int			i;
 
-		expandRTE(rte, var->varno, 0, var->location, false,
+		expandRTE(rte, var->varno, 0, var->location, false, false,
 				  &names, &vars);
 
 		tupleDesc = CreateTemplateTupleDesc(list_length(vars), false);

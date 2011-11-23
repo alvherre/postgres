@@ -1263,7 +1263,7 @@ ResolveNew_callback(Var *var,
 		 */
 		expandRTE(rcon->target_rte,
 				  var->varno, var->varlevelsup, var->location,
-				  (var->vartype != RECORDOID),
+				  (var->vartype != RECORDOID), false,
 				  &colnames, &fields);
 		/* Adjust the generated per-field Vars... */
 		fields = (List *) replace_rte_variables_mutator((Node *) fields,

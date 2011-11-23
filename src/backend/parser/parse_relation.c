@@ -40,11 +40,11 @@ static void markRTEForSelectPriv(ParseState *pstate, RangeTblEntry *rte,
 					 int rtindex, AttrNumber col);
 static void expandRelation(Oid relid, Alias *eref,
 			   int rtindex, int sublevels_up,
-			   int location, bool include_dropped,
+			   int location, bool include_dropped, bool logical_sort,
 			   List **colnames, List **colvars);
 static void expandTupleDesc(TupleDesc tupdesc, Alias *eref,
 				int rtindex, int sublevels_up,
-				int location, bool include_dropped,
+				int location, bool include_dropped, bool logical_sort,
 				List **colnames, List **colvars);
 static int	specialAttNum(const char *attname);
 
@@ -725,7 +725,8 @@ buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
 		numaliases = 0;
 	}
 
-	attrs = TupleDescGetSortedAttrs(tupdesc);
+	// attrs = TupleDescGetSortedAttrs(tupdesc);
+	attrs = tupdesc->attrs;
 
 	for (varattno = 0; varattno < maxattrs; varattno++)
 	{
@@ -1555,13 +1556,16 @@ addRTEtoQuery(ParseState *pstate, RangeTblEntry *rte,
  * values to use in the created Vars.  Ordinarily rtindex should match the
  * actual position of the RTE in its rangetable.
  *
+ * If logical_sort is true, then the resulting lists should be sorted by logical
+ * column number; otherwise use regular attnum.
+ *
  * The output lists go into *colnames and *colvars.
  * If only one of the two kinds of output list is needed, pass NULL for the
  * output pointer for the unwanted one.
  */
 void
 expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
-		  int location, bool include_dropped,
+		  int location, bool include_dropped, bool logical_sort,
 		  List **colnames, List **colvars)
 {
 	int			varattno;
@@ -1576,7 +1580,7 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 		case RTE_RELATION:
 			/* Ordinary relation RTE */
 			expandRelation(rte->relid, rte->eref,
-						   rtindex, sublevels_up, location,
+						   rtindex, sublevels_up, location, logical_sort,
 						   include_dropped, colnames, colvars);
 			break;
 		case RTE_SUBQUERY:
@@ -1635,7 +1639,7 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 					/* Composite data type, e.g. a table's row type */
 					Assert(tupdesc);
 					expandTupleDesc(tupdesc, rte->eref,
-									rtindex, sublevels_up, location,
+									rtindex, sublevels_up, location, false,
 									include_dropped, colnames, colvars);
 				}
 				else if (functypclass == TYPEFUNC_SCALAR)
@@ -1847,7 +1851,7 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
  */
 static void
 expandRelation(Oid relid, Alias *eref, int rtindex, int sublevels_up,
-			   int location, bool include_dropped,
+			   int location, bool include_dropped, bool logical_sort,
 			   List **colnames, List **colvars)
 {
 	Relation	rel;
@@ -1855,7 +1859,7 @@ expandRelation(Oid relid, Alias *eref, int rtindex, int sublevels_up,
 	/* Get the tupledesc and turn it over to expandTupleDesc */
 	rel = relation_open(relid, AccessShareLock);
 	expandTupleDesc(rel->rd_att, eref, rtindex, sublevels_up,
-					location, include_dropped,
+					location, include_dropped, logical_sort,
 					colnames, colvars);
 	relation_close(rel, AccessShareLock);
 }
@@ -1866,19 +1870,24 @@ expandRelation(Oid relid, Alias *eref, int rtindex, int sublevels_up,
 static void
 expandTupleDesc(TupleDesc tupdesc, Alias *eref,
 				int rtindex, int sublevels_up,
-				int location, bool include_dropped,
+				int location, bool include_dropped, bool logical_sort,
 				List **colnames, List **colvars)
 {
 	int			maxattrs = tupdesc->natts;
 	int			numaliases = list_length(eref->colnames);
 	int			varattno;
-	Form_pg_attribute *logattrs;
+	Form_pg_attribute *attrs;
 
-	logattrs = TupleDescGetSortedAttrs(tupdesc);
+	Assert(!logical_sort);
+
+	if (logical_sort)
+		attrs = TupleDescGetSortedAttrs(tupdesc);
+	else
+		attrs = tupdesc->attrs;
 
 	for (varattno = 0; varattno < maxattrs; varattno++)
 	{
-		Form_pg_attribute attr = logattrs[varattno];
+		Form_pg_attribute attr = attrs[varattno];
 
 		if (attr->attisdropped)
 		{
@@ -1945,7 +1954,7 @@ expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
 			   *var;
 	List	   *te_list = NIL;
 
-	expandRTE(rte, rtindex, sublevels_up, location, false,
+	expandRTE(rte, rtindex, sublevels_up, location, false, false,
 			  &names, &vars);
 
 	/*

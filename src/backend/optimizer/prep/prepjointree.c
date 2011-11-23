@@ -1343,7 +1343,7 @@ pullup_replace_vars_callback(Var *var,
 		 * expansion with varlevelsup = 0, and then adjust if needed.
 		 */
 		expandRTE(rcon->target_rte,
-				  var->varno, 0 /* not varlevelsup */ , var->location,
+				  var->varno, 0 /* not varlevelsup */ , var->location, false,
 				  (var->vartype != RECORDOID),
 				  &colnames, &fields);
 		/* Adjust the generated per-field Vars, but don't insert PHVs */

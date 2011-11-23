@@ -899,7 +899,7 @@ build_physical_tlist(PlannerInfo *root, RelOptInfo *rel)
 		case RTE_VALUES:
 		case RTE_CTE:
 			/* Not all of these can have dropped cols, but share code anyway */
-			expandRTE(rte, varno, 0, -1, true /* include dropped */ ,
+			expandRTE(rte, varno, 0, -1, true /* include dropped */ , false,
 					  NULL, &colvars);
 			foreach(l, colvars)
 			{

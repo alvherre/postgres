@@ -897,7 +897,7 @@ coerce_record_to_complex(ParseState *pstate, Node *node,
 		RangeTblEntry *rte;
 
 		rte = GetRTEByRangeTablePosn(pstate, rtindex, sublevels_up);
-		expandRTE(rte, rtindex, sublevels_up, vlocation, false,
+		expandRTE(rte, rtindex, sublevels_up, vlocation, false, false,
 				  NULL, &args);
 	}
 	else

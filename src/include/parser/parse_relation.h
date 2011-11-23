@@ -83,7 +83,7 @@ extern void addRTEtoQuery(ParseState *pstate, RangeTblEntry *rte,
 			  bool addToRelNameSpace, bool addToVarNameSpace);
 extern void errorMissingRTE(ParseState *pstate, RangeVar *relation);
 extern void expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
-		  int location, bool include_dropped,
+		  int location, bool include_dropped, bool logical_sort,
 		  List **colnames, List **colvars);
 extern List *expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
 			   int rtindex, int sublevels_up, int location);
