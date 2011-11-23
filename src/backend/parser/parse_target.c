@@ -1196,7 +1196,7 @@ ExpandSingleTable(ParseState *pstate, RangeTblEntry *rte,
 		List	   *vars;
 		ListCell   *l;
 
-		expandRTE(rte, rtindex, sublevels_up, location, false, false,
+		expandRTE(rte, rtindex, sublevels_up, location, false, true,
 				  NULL, &vars);
 
 		/*

@@ -1580,8 +1580,8 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 		case RTE_RELATION:
 			/* Ordinary relation RTE */
 			expandRelation(rte->relid, rte->eref,
-						   rtindex, sublevels_up, location, logical_sort,
-						   include_dropped, colnames, colvars);
+						   rtindex, sublevels_up, location, include_dropped,
+						   logical_sort, colnames, colvars);
 			break;
 		case RTE_SUBQUERY:
 			{
@@ -1878,8 +1878,6 @@ expandTupleDesc(TupleDesc tupdesc, Alias *eref,
 	int			varattno;
 	Form_pg_attribute *attrs;
 
-	Assert(!logical_sort);
-
 	if (logical_sort)
 		attrs = TupleDescGetSortedAttrs(tupdesc);
 	else
@@ -1954,7 +1952,7 @@ expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
 			   *var;
 	List	   *te_list = NIL;
 
-	expandRTE(rte, rtindex, sublevels_up, location, false, false,
+	expandRTE(rte, rtindex, sublevels_up, location, false, true,
 			  &names, &vars);
 
 	/*
