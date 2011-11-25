@@ -876,8 +876,7 @@ objectDescription(const char *pattern, bool showSystem)
 						  "pg_catalog.pg_table_is_visible(c.oid)");
 
 	/*
-	 * pg_opclass.opcmethod only available in 8.3+, and comment on operator
-	 * family only available in 8.3+
+	 * pg_opclass.opcmethod only available in 8.3+
 	 */
 	if (pset.sversion >= 80300)
 	{
@@ -902,7 +901,14 @@ objectDescription(const char *pattern, bool showSystem)
 		processSQLNamePattern(pset.db, &buf, pattern, true, false,
 							  "n.nspname", "o.opcname", NULL,
 							  "pg_catalog.pg_opclass_is_visible(o.oid)");
+	}
 
+	/*
+	 * although operator family comments have been around since 8.3,
+	 * pg_opfamily_is_visible is only available in 9.2+
+	 */
+	if (pset.sversion >= 90200)
+	{
 		/* Operator family descriptions */
 		appendPQExpBuffer(&buf,
 						  "UNION ALL\n"
@@ -1253,7 +1259,7 @@ describeOneTableDetails(const char *schemaname,
 	/*
 	 * Get column info
 	 *
-	 * You need to modify value of "firstvcol" which willbe defined below if
+	 * You need to modify value of "firstvcol" which will be defined below if
 	 * you are adding column(s) preceding to verbose-only columns.
 	 */
 	printfPQExpBuffer(&buf, "SELECT a.attname,");
@@ -1280,6 +1286,7 @@ describeOneTableDetails(const char *schemaname,
 	if (verbose)
 	{
 		appendPQExpBuffer(&buf, ",\n  a.attstorage");
+		appendPQExpBuffer(&buf, ",\n  CASE WHEN a.attstattarget=-1 THEN NULL ELSE a.attstattarget END AS attstattarget");
 		/*
 		 * In 9.0+, we have column comments for: relations, views, composite
 		 * types, and foreign tables (c.f. CommentObject() in comment.c).
@@ -1374,6 +1381,8 @@ describeOneTableDetails(const char *schemaname,
 	if (verbose)
 	{
 		headers[cols++] = gettext_noop("Storage");
+		if (tableinfo.relkind == 'r')
+			headers[cols++] = gettext_noop("Stats target");
 		/* Column comments, if the relkind supports this feature. */
 		if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' ||
 			tableinfo.relkind == 'c' || tableinfo.relkind == 'f')
@@ -1473,10 +1482,18 @@ describeOneTableDetails(const char *schemaname,
 										(storage[0] == 'e' ? "external" :
 										 "???")))),
 							  false, false);
+
+			/* Statistics target, if the relkind supports this feature */
+			if (tableinfo.relkind == 'r')
+			{
+				printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 1),
+								  false, false);
+			}
+
 			/* Column comments, if the relkind supports this feature. */
 			if (tableinfo.relkind == 'r' || tableinfo.relkind == 'v' ||
 				tableinfo.relkind == 'c' || tableinfo.relkind == 'f')
-				printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 1),
+				printTableAddCell(&cont, PQgetvalue(res, i, firstvcol + 2),
 								  false, false);
 		}
 	}
@@ -1608,6 +1625,43 @@ describeOneTableDetails(const char *schemaname,
 			}
 			PQclear(result);
 		}
+	}
+	else if (tableinfo.relkind == 'S')
+	{
+		/* Footer information about a sequence */
+		PGresult   *result = NULL;
+
+		/* Get the column that owns this sequence */
+		printfPQExpBuffer(&buf, "SELECT pg_catalog.quote_ident(nspname) || '.' ||"
+						  "\n   pg_catalog.quote_ident(relname) || '.' ||"
+						  "\n   pg_catalog.quote_ident(attname)"
+						  "\nFROM pg_catalog.pg_class c"
+						  "\nINNER JOIN pg_catalog.pg_depend d ON c.oid=d.refobjid"
+						  "\nINNER JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace"
+						  "\nINNER JOIN pg_catalog.pg_attribute a ON ("
+						  "\n a.attrelid=c.oid AND"
+						  "\n a.attnum=d.refobjsubid)"
+						  "\nWHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass"
+						  "\n AND d.refclassid='pg_catalog.pg_class'::pg_catalog.regclass"
+						  "\n AND d.objid=%s"
+						  "\n AND d.deptype='a'",
+						  oid);
+
+		result = PSQLexec(buf.data, false);
+		if (!result)
+			goto error_return;
+		else if (PQntuples(result) == 1)
+		{
+			printfPQExpBuffer(&buf, _("Owned by: %s"),
+							  PQgetvalue(result, 0, 0));
+			printTableAddFooter(&cont, buf.data);
+		}
+		/*
+		 * If we get no rows back, don't show anything (obviously).
+		 * We should never get more than one row back, but if we do,
+		 * just ignore it and don't print anything.
+		 */
+		PQclear(result);
 	}
 	else if (tableinfo.relkind == 'r' || tableinfo.relkind == 'f')
 	{
