@@ -3865,8 +3865,8 @@ l3:
 			else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
 				existing_lock_mode = MultiXactStatusForKeyShare;
 			else
-				/* must be a shared lock */
-				existing_lock_mode = MultiXactStatusForShare;
+				/* it must be an update */
+				existing_lock_mode = MultiXactStatusUpdate;
 
 			xid = MultiXactIdCreate(keep_xmax, existing_lock_mode,
 									xid, get_mxact_status_for_tuplelock(mode));
