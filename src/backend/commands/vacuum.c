@@ -214,6 +214,9 @@ vacuum(VacuumStmt *vacstmt, Oid relid, bool do_toast,
 
 		VacuumCostActive = (VacuumCostDelay > 0);
 		VacuumCostBalance = 0;
+		VacuumPageHit = 0;
+		VacuumPageMiss = 0;
+		VacuumPageDirty = 0;
 
 		/*
 		 * Loop to process each selected relation.
@@ -327,7 +330,7 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
 		 * alternative, since we're going to commit this transaction and
 		 * begin a new one between now and then.
 		 */
-		relid = RangeVarGetRelid(vacrel, NoLock, false, false);
+		relid = RangeVarGetRelid(vacrel, NoLock, false);
 
 		/* Make a relation list entry for this guy */
 		oldcontext = MemoryContextSwitchTo(vac_context);

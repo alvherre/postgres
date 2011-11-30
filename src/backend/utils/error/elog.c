@@ -343,6 +343,15 @@ errstart(int elevel, const char *filename, int lineno,
 	edata->elevel = elevel;
 	edata->output_to_server = output_to_server;
 	edata->output_to_client = output_to_client;
+	if (filename)
+	{
+		const char *slash;
+
+		/* keep only base name, useful especially for vpath builds */
+		slash = strrchr(filename, '/');
+		if (slash)
+			filename = slash + 1;
+	}
 	edata->filename = filename;
 	edata->lineno = lineno;
 	edata->funcname = funcname;
@@ -1142,6 +1151,15 @@ elog_start(const char *filename, int lineno, const char *funcname)
 	}
 
 	edata = &errordata[errordata_stack_depth];
+	if (filename)
+	{
+		const char *slash;
+
+		/* keep only base name, useful especially for vpath builds */
+		slash = strrchr(filename, '/');
+		if (slash)
+			filename = slash + 1;
+	}
 	edata->filename = filename;
 	edata->lineno = lineno;
 	edata->funcname = funcname;

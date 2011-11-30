@@ -1,10 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * common.c
- *	  common routines between pg_dump and pg4_dump
- *
- * Since pg4_dump is long-dead code, there is no longer any useful distinction
- * between this file and pg_dump.c.
+ *	Catalog routines used by pg_dump; long ago these were shared
+ *	by another dump tool, but not anymore.  
  *
  * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -15,13 +13,13 @@
  *
  *-------------------------------------------------------------------------
  */
-#include "postgres_fe.h"
+#include "pg_backup_archiver.h"
 
 #include <ctype.h>
 
 #include "catalog/pg_class.h"
-
-#include "pg_backup_archiver.h"
+#include "dumpmem.h"
+#include "dumputils.h"
 
 
 /*
@@ -370,16 +368,16 @@ flagInhAttrs(TableInfo *tblinfo, int numTables)
 						 */
 						if (attrDef == NULL)
 						{
-							attrDef = (AttrDefInfo *) malloc(sizeof(AttrDefInfo));
+							attrDef = (AttrDefInfo *) pg_malloc(sizeof(AttrDefInfo));
 							attrDef->dobj.objType = DO_ATTRDEF;
 							attrDef->dobj.catId.tableoid = 0;
 							attrDef->dobj.catId.oid = 0;
 							AssignDumpId(&attrDef->dobj);
 							attrDef->adtable = tbinfo;
 							attrDef->adnum = j + 1;
-							attrDef->adef_expr = strdup("NULL");
+							attrDef->adef_expr = pg_strdup("NULL");
 
-							attrDef->dobj.name = strdup(tbinfo->dobj.name);
+							attrDef->dobj.name = pg_strdup(tbinfo->dobj.name);
 							attrDef->dobj.namespace = tbinfo->dobj.namespace;
 
 							attrDef->dobj.dump = tbinfo->dobj.dump;
@@ -632,7 +630,7 @@ buildIndexArray(void *objArray, int numObjs, Size objSize)
 	DumpableObject **ptrs;
 	int			i;
 
-	ptrs = (DumpableObject **) malloc(numObjs * sizeof(DumpableObject *));
+	ptrs = (DumpableObject **) pg_malloc(numObjs * sizeof(DumpableObject *));
 	for (i = 0; i < numObjs; i++)
 		ptrs[i] = (DumpableObject *) ((char *) objArray + i * objSize);
 
@@ -977,60 +975,4 @@ simple_string_list_member(SimpleStringList *list, const char *val)
 			return true;
 	}
 	return false;
-}
-
-
-/*
- * Safer versions of some standard C library functions. If an
- * out-of-memory condition occurs, these functions will bail out
- * safely; therefore, their return value is guaranteed to be non-NULL.
- *
- * XXX need to refactor things so that these can be in a file that can be
- * shared by pg_dumpall and pg_restore as well as pg_dump.
- */
-
-char *
-pg_strdup(const char *string)
-{
-	char	   *tmp;
-
-	if (!string)
-		exit_horribly(NULL, NULL, "cannot duplicate null pointer\n");
-	tmp = strdup(string);
-	if (!tmp)
-		exit_horribly(NULL, NULL, "out of memory\n");
-	return tmp;
-}
-
-void *
-pg_malloc(size_t size)
-{
-	void	   *tmp;
-
-	tmp = malloc(size);
-	if (!tmp)
-		exit_horribly(NULL, NULL, "out of memory\n");
-	return tmp;
-}
-
-void *
-pg_calloc(size_t nmemb, size_t size)
-{
-	void	   *tmp;
-
-	tmp = calloc(nmemb, size);
-	if (!tmp)
-		exit_horribly(NULL, NULL, "out of memory\n");
-	return tmp;
-}
-
-void *
-pg_realloc(void *ptr, size_t size)
-{
-	void	   *tmp;
-
-	tmp = realloc(ptr, size);
-	if (!tmp)
-		exit_horribly(NULL, NULL, "out of memory\n");
-	return tmp;
 }

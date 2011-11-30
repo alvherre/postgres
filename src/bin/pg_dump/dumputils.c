@@ -21,7 +21,9 @@
 #include "parser/keywords.h"
 
 
+/* Globals exported by this file */
 int			quote_all_identifiers = 0;
+const char *progname = NULL;
 
 
 #define supports_grant_options(version) ((version) >= 70400)
@@ -1209,4 +1211,54 @@ emitShSecLabels(PGconn *conn, PGresult *res, PQExpBuffer buffer,
 		appendStringLiteralConn(buffer, label, conn);
         appendPQExpBuffer(buffer, ";\n");
 	}
+}
+
+
+/*
+ * Write a printf-style message to stderr.
+ *
+ * The program name is prepended, if "progname" has been set.
+ * Also, if modulename isn't NULL, that's included too.
+ * Note that we'll try to translate the modulename and the fmt string.
+ */
+void
+write_msg(const char *modulename, const char *fmt,...)
+{
+	va_list		ap;
+
+	va_start(ap, fmt);
+	vwrite_msg(modulename, fmt, ap);
+	va_end(ap);
+}
+
+/*
+ * As write_msg, but pass a va_list not variable arguments.
+ */
+void
+vwrite_msg(const char *modulename, const char *fmt, va_list ap)
+{
+	if (progname)
+	{
+		if (modulename)
+			fprintf(stderr, "%s: [%s] ", progname, _(modulename));
+		else
+			fprintf(stderr, "%s: ", progname);
+	}
+	vfprintf(stderr, _(fmt), ap);
+}
+
+
+/*
+ * Fail and die, with a message to stderr.  Parameters as for write_msg.
+ */
+void
+exit_horribly(const char *modulename, const char *fmt,...)
+{
+	va_list		ap;
+
+	va_start(ap, fmt);
+	vwrite_msg(modulename, fmt, ap);
+	va_end(ap);
+
+	exit(1);
 }
