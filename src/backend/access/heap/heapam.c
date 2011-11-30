@@ -4019,9 +4019,12 @@ l3:
 	 * Note: Cmax is meaningless in this context, so don't set it; this avoids
 	 * possibly generating a useless combo CID.  FIXME -- it's not useless
 	 * if a multixact contains an update.
+	 *
+	 * Note: do not touch the HOT_UPDATED bit; this might not be the most
+	 * recent version of the tuple.
 	 */
 	tuple->t_data->t_infomask = new_infomask;
-	HeapTupleHeaderClearHotUpdated(tuple->t_data);
+	// HeapTupleHeaderClearHotUpdated(tuple->t_data);
 	HeapTupleHeaderSetXmax(tuple->t_data, xid);
 
 	/*
