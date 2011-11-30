@@ -16,6 +16,7 @@
 #include "datatype/timestamp.h"
 #include "lib/stringinfo.h"
 #include "storage/buf.h"
+#include "storage/latch.h"
 #include "utils/pg_crc.h"
 
 /*
@@ -293,6 +294,11 @@ extern bool XLogInsertAllowed(void);
 extern void GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream);
 extern XLogRecPtr GetXLogReplayRecPtr(XLogRecPtr *restoreLastRecPtr);
 extern XLogRecPtr GetStandbyFlushRecPtr(void);
+extern XLogRecPtr GetXLogInsertRecPtr(bool needlock);
+extern XLogRecPtr GetXLogWriteRecPtr(void);
+extern bool RecoveryIsPaused(void);
+extern void SetRecoveryPause(bool recoveryPause);
+extern TimestampTz GetLatestXTime(void);
 
 extern void UpdateControlFile(void);
 extern uint64 GetSystemIdentifier(void);
@@ -314,6 +320,7 @@ extern TimeLineID GetRecoveryTargetTLI(void);
 
 extern bool CheckPromoteSignal(void);
 extern void WakeupRecovery(void);
+extern Latch *WALWriterLatch(void);
 
 /*
  * Starting/stopping a base backup

@@ -583,7 +583,13 @@ exec_command(const char *cmd,
 	{
 		int			lineno = -1;
 
-		if (!query_buf)
+		if (pset.sversion < 80400)
+		{
+			psql_error("The server (version %d.%d) does not support editing function source.\n",
+					   pset.sversion / 10000, (pset.sversion / 100) % 100);
+			status = PSQL_CMD_ERROR;
+		}
+		else if (!query_buf)
 		{
 			psql_error("no query buffer\n");
 			status = PSQL_CMD_ERROR;
@@ -1115,7 +1121,13 @@ exec_command(const char *cmd,
 		func_buf = createPQExpBuffer();
 		func = psql_scan_slash_option(scan_state,
 									  OT_WHOLE_LINE, NULL, true);
-		if (!func)
+		if (pset.sversion < 80400)
+		{
+			psql_error("The server (version %d.%d) does not support showing function source.\n",
+					   pset.sversion / 10000, (pset.sversion / 100) % 100);
+			status = PSQL_CMD_ERROR;
+		}
+		else if (!func)
 		{
 			psql_error("function name is required\n");
 			status = PSQL_CMD_ERROR;
@@ -1343,7 +1355,7 @@ exec_command(const char *cmd,
 		free(fname);
 	}
 
-	/* \x -- toggle expanded table representation */
+	/* \x -- set or toggle expanded table representation */
 	else if (strcmp(cmd, "x") == 0)
 	{
 		char	   *opt = psql_scan_slash_option(scan_state,
@@ -2177,14 +2189,21 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	/* set expanded/vertical mode */
 	else if (strcmp(param, "x") == 0 || strcmp(param, "expanded") == 0 || strcmp(param, "vertical") == 0)
 	{
-		if (value)
+		if (value && pg_strcasecmp(value, "auto") == 0)
+			popt->topt.expanded = 2;
+		else if (value)
 			popt->topt.expanded = ParseVariableBool(value);
 		else
 			popt->topt.expanded = !popt->topt.expanded;
 		if (!quiet)
-			printf(popt->topt.expanded
-				   ? _("Expanded display is on.\n")
-				   : _("Expanded display is off.\n"));
+		{
+			if (popt->topt.expanded == 1)
+				printf(_("Expanded display is on.\n"));
+			else if (popt->topt.expanded == 2)
+				printf(_("Expanded display is used automatically.\n"));
+			else
+				printf(_("Expanded display is off.\n"));
+		}
 	}
 
 	/* locale-aware numeric output */
@@ -2344,7 +2363,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 			popt->topt.columns = atoi(value);
 
 		if (!quiet)
-			printf(_("Target width for \"wrapped\" format is %d.\n"), popt->topt.columns);
+			printf(_("Target width is %d.\n"), popt->topt.columns);
 	}
 
 	else
