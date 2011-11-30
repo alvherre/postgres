@@ -4023,9 +4023,16 @@ l3:
 	tuple->t_data->t_infomask = new_infomask;
 	HeapTupleHeaderClearHotUpdated(tuple->t_data);
 	HeapTupleHeaderSetXmax(tuple->t_data, xid);
-	/* Make sure there is no forward chain link in t_ctid */
-	/* FIXME -- this needs some thought */
-	tuple->t_data->t_ctid = *tid;
+
+	/*
+	 * Make sure there is no forward chain link in t_ctid.  Note that in the
+	 * cases where the tuple is not merely locked, i.e. there was a previous
+	 * update, we must not overwrite t_ctid because it was set by the updater.
+	 *
+	 * FIXME -- not really sure of the implications of this.
+	 */
+	if (HeapTupleHeaderInfomaskIsLocked(new_infomask))
+		tuple->t_data->t_ctid = *tid;
 
 	MarkBufferDirty(*buffer);
 
