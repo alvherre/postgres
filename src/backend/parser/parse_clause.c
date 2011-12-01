@@ -789,9 +789,9 @@ transformFromClauseItem(ParseState *pstate, Node *n,
 		 *
 		 * Note: expandRTE returns new lists, safe for me to modify
 		 */
-		expandRTE(l_rte, l_rtindex, 0, -1, false, false,
+		expandRTE(l_rte, l_rtindex, 0, -1, false, true,
 				  &l_colnames, &l_colvars);
-		expandRTE(r_rte, r_rtindex, 0, -1, false, false,
+		expandRTE(r_rte, r_rtindex, 0, -1, false, true,
 				  &r_colnames, &r_colvars);
 
 		/*
@@ -923,10 +923,30 @@ transformFromClauseItem(ParseState *pstate, Node *n,
 							 errmsg("column \"%s\" specified in USING clause does not exist in right table",
 									u_colname)));
 
-				l_colvar = list_nth(l_colvars, l_index);
-				l_usingvars = lappend(l_usingvars, l_colvar);
-				r_colvar = list_nth(r_colvars, r_index);
-				r_usingvars = lappend(r_usingvars, r_colvar);
+				l_colvar = NULL;
+				foreach (col, l_colvars)
+				{
+					Var *lvar = lfirst(col);
+					if (lvar->varattno == l_index + 1)
+					{
+						l_colvar = lvar;
+						l_usingvars = lappend(l_usingvars, lvar);
+						break;
+					}
+				}
+				r_colvar = NULL;
+				foreach(col, r_colvars)
+				{
+					Var *rvar = lfirst(col);
+					if (rvar->varattno == r_index + 1)
+					{
+						r_colvar = rvar;
+						r_usingvars = lappend(r_usingvars, rvar);
+						break;
+					}
+				}
+				Assert(l_colvar != NULL);
+				Assert(r_colvar != NULL);
 
 				res_colnames = lappend(res_colnames, lfirst(ucol));
 				res_colvars = lappend(res_colvars,

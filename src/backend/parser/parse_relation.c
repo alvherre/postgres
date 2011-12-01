@@ -1944,7 +1944,7 @@ expandTupleDesc(TupleDesc tupdesc, Alias *eref,
  */
 List *
 expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
-			   int rtindex, int sublevels_up, int location)
+			   int rtindex, int sublevels_up, bool logical_sort, int location)
 {
 	List	   *names,
 			   *vars;
@@ -1952,7 +1952,7 @@ expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
 			   *var;
 	List	   *te_list = NIL;
 
-	expandRTE(rte, rtindex, sublevels_up, location, false, true,
+	expandRTE(rte, rtindex, sublevels_up, location, false, logical_sort,
 			  &names, &vars);
 
 	/*

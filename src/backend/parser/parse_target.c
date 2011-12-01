@@ -1134,7 +1134,7 @@ ExpandAllTables(ParseState *pstate, int location)
 
 		target = list_concat(target,
 							 expandRelAttrs(pstate, rte, rtindex, 0,
-											location));
+											true, location));
 	}
 
 	return target;
@@ -1189,7 +1189,7 @@ ExpandSingleTable(ParseState *pstate, RangeTblEntry *rte,
 	{
 		/* expandRelAttrs handles permissions marking */
 		return expandRelAttrs(pstate, rte, rtindex, sublevels_up,
-							  location);
+							  true, location);
 	}
 	else
 	{
