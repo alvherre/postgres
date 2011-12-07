@@ -1428,6 +1428,22 @@ _outTargetEntry(StringInfo str, TargetEntry *node)
 }
 
 static void
+_outGenericExprState(StringInfo str, GenericExprState *node)
+{
+	WRITE_NODE_TYPE("GENERICEXPRSTATE");
+
+	WRITE_NODE_FIELD(arg);
+}
+
+static void
+_outExprState(StringInfo str, ExprState *node)
+{
+	WRITE_NODE_TYPE("EXPRSTATE");
+
+	WRITE_NODE_FIELD(expr);
+}
+
+static void
 _outRangeTblRef(StringInfo str, RangeTblRef *node)
 {
 	WRITE_NODE_TYPE("RANGETBLREF");
@@ -2943,6 +2959,12 @@ _outNode(StringInfo str, void *obj)
 				break;
 			case T_FromExpr:
 				_outFromExpr(str, obj);
+				break;
+			case T_GenericExprState:
+				_outGenericExprState(str, obj);
+				break;
+			case T_ExprState:
+				_outExprState(str, obj);
 				break;
 
 			case T_Path:
