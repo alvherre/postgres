@@ -142,6 +142,7 @@ typedef struct Var
 								 * table, or INNER_VAR/OUTER_VAR/INDEX_VAR */
 	AttrNumber	varattno;		/* attribute number of this var, or zero for
 								 * all */
+	AttrNumber	varlogno;		/* logical position of column in table XXX invalid value? */
 	Oid			vartype;		/* pg_type OID for the type of this var */
 	int32		vartypmod;		/* pg_attribute typmod value */
 	Oid			varcollid;		/* OID of collation, or InvalidOid if none */
@@ -1166,6 +1167,7 @@ typedef struct TargetEntry
 								 * clause */
 	Oid			resorigtbl;		/* OID of column's source table */
 	AttrNumber	resorigcol;		/* column's number in source table */
+	AttrNumber	resoriglogcol;	/* column's logical number in source table */
 	bool		resjunk;		/* set to true to eliminate the attribute from
 								 * final target list */
 } TargetEntry;

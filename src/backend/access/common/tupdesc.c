@@ -534,6 +534,27 @@ TupleDescInitEntryCollation(TupleDesc desc,
 	desc->attrs[attributeNumber - 1]->attcollation = collationid;
 }
 
+/*
+ * TupleDescInitEntryLognum
+ *
+ * Assign a nondefault lognum to a previously initialized tuple descriptor
+ * entry.
+ */
+void
+TupleDescInitEntryLognum(TupleDesc desc,
+						 AttrNumber attributeNumber,
+						 int attlognum)
+{
+	/*
+	 * sanity checks
+	 */
+	AssertArg(PointerIsValid(desc));
+	AssertArg(attributeNumber >= 1);
+	AssertArg(attributeNumber <= desc->natts);
+
+	desc->attrs[attributeNumber - 1]->attlognum = attlognum;
+}
+
 
 /*
  * BuildDescForRelation

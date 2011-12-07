@@ -909,6 +909,7 @@ _outVar(StringInfo str, Var *node)
 
 	WRITE_UINT_FIELD(varno);
 	WRITE_INT_FIELD(varattno);
+	WRITE_INT_FIELD(varlogno);
 	WRITE_OID_FIELD(vartype);
 	WRITE_INT_FIELD(vartypmod);
 	WRITE_OID_FIELD(varcollid);
@@ -1422,6 +1423,7 @@ _outTargetEntry(StringInfo str, TargetEntry *node)
 	WRITE_UINT_FIELD(ressortgroupref);
 	WRITE_OID_FIELD(resorigtbl);
 	WRITE_INT_FIELD(resorigcol);
+	WRITE_INT_FIELD(resoriglogcol);
 	WRITE_BOOL_FIELD(resjunk);
 }
 

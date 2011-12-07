@@ -1925,6 +1925,7 @@ expandTupleDesc(TupleDesc tupdesc, Alias *eref,
 							  attr->atttypid, attr->atttypmod,
 							  attr->attcollation,
 							  sublevels_up);
+			varnode->varlogno = attr->attlognum;
 			varnode->location = location;
 
 			*colvars = lappend(*colvars, varnode);
@@ -1972,6 +1973,7 @@ expandRelAttrs(ParseState *pstate, RangeTblEntry *rte,
 							 (AttrNumber) pstate->p_next_resno++,
 							 label,
 							 false);
+		te->resoriglogcol = varnode->varlogno;
 		te_list = lappend(te_list, te);
 
 		/* Require read access to each column */

@@ -136,6 +136,7 @@ _equalVar(Var *a, Var *b)
 {
 	COMPARE_SCALAR_FIELD(varno);
 	COMPARE_SCALAR_FIELD(varattno);
+	/* intentially do not compare varlogno */
 	COMPARE_SCALAR_FIELD(vartype);
 	COMPARE_SCALAR_FIELD(vartypmod);
 	COMPARE_SCALAR_FIELD(varcollid);
@@ -740,6 +741,7 @@ _equalTargetEntry(TargetEntry *a, TargetEntry *b)
 	COMPARE_SCALAR_FIELD(ressortgroupref);
 	COMPARE_SCALAR_FIELD(resorigtbl);
 	COMPARE_SCALAR_FIELD(resorigcol);
+	/* intentionally do not compare resoriglogcol */
 	COMPARE_SCALAR_FIELD(resjunk);
 
 	return true;

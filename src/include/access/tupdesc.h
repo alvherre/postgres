@@ -125,6 +125,10 @@ extern void TupleDescInitEntryCollation(TupleDesc desc,
 							AttrNumber attributeNumber,
 							Oid collationid);
 
+extern void TupleDescInitEntryLognum(TupleDesc desc,
+						 AttrNumber attributeNumber,
+						 int attlognum);
+
 extern TupleDesc BuildDescForRelation(List *schema);
 
 extern TupleDesc BuildDescFromLists(List *names, List *types, List *typmods, List *collations);

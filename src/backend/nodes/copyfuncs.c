@@ -1063,6 +1063,7 @@ _copyVar(Var *from)
 
 	COPY_SCALAR_FIELD(varno);
 	COPY_SCALAR_FIELD(varattno);
+	COPY_SCALAR_FIELD(varlogno);
 	COPY_SCALAR_FIELD(vartype);
 	COPY_SCALAR_FIELD(vartypmod);
 	COPY_SCALAR_FIELD(varcollid);
@@ -1762,6 +1763,7 @@ _copyTargetEntry(TargetEntry *from)
 	COPY_SCALAR_FIELD(ressortgroupref);
 	COPY_SCALAR_FIELD(resorigtbl);
 	COPY_SCALAR_FIELD(resorigcol);
+	COPY_SCALAR_FIELD(resoriglogcol);
 	COPY_SCALAR_FIELD(resjunk);
 
 	return newnode;
