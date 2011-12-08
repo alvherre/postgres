@@ -4638,7 +4638,7 @@ ExecInitExpr(Expr *node, PlanState *parent)
 				}
 				/* Set up evaluation, skipping any deleted columns */
 				Assert(list_length(rowexpr->args) <= rstate->tupdesc->natts);
-				attrs = rstate->tupdesc->attrs;
+				attrs = TupleDescGetSortedAttrs(rstate->tupdesc);
 				i = 0;
 				foreach(l, rowexpr->args)
 				{
