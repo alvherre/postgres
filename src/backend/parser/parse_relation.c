@@ -725,8 +725,7 @@ buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
 		numaliases = 0;
 	}
 
-	// attrs = TupleDescGetSortedAttrs(tupdesc);
-	attrs = tupdesc->attrs;
+	attrs = TupleDescGetSortedAttrs(tupdesc);
 
 	for (varattno = 0; varattno < maxattrs; varattno++)
 	{
@@ -1557,7 +1556,7 @@ addRTEtoQuery(ParseState *pstate, RangeTblEntry *rte,
  * actual position of the RTE in its rangetable.
  *
  * If logical_sort is true, then the resulting lists should be sorted by logical
- * column number; otherwise use regular attnum.
+ * column number (attlognum); otherwise use regular attnum.
  *
  * The output lists go into *colnames and *colvars.
  * If only one of the two kinds of output list is needed, pass NULL for the
