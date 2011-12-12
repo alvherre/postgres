@@ -3936,6 +3936,8 @@ l3:
 						keep_xmax = xwait;
 						keep_xmax_multi = true;
 					}
+
+					pfree(members);
 				}
 			}
 			else if (infomask & HEAP_XMAX_KEYSHR_LOCK)
@@ -4693,6 +4695,9 @@ GetMultiXactIdHintBits(MultiXactId multi)
 	if (!has_update)
 		bits |= HEAP_XMAX_IS_NOT_UPDATE;
 
+	if (nmembers > 0)
+		pfree(members);
+
 	return bits;
 }
 
@@ -4743,6 +4748,8 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 			break;
 #endif
 		}
+
+		pfree(members);
 	}
 
 	return update_xact;
