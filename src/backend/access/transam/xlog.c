@@ -562,7 +562,13 @@ static TimeLineID lastPageTLI = 0;
 static XLogRecPtr minRecoveryPoint;		/* local copy of
 										 * ControlFile->minRecoveryPoint */
 static bool updateMinRecoveryPoint = true;
-static bool reachedMinRecoveryPoint = false;
+
+/*
+ * Have we reached a consistent database state? In crash recovery, we have
+ * to replay all the WAL, so reachedConsistency is never set. During archive
+ * recovery, the database is consistent once minRecoveryPoint is reached.
+ */
+bool reachedConsistency = false;
 
 static bool InRedo = false;
 
@@ -6759,12 +6765,6 @@ StartupXLOG(void)
 		LocalXLogInsertAllowed = -1;
 
 		/*
-		 * Check to see if the XLOG sequence contained any unresolved
-		 * references to uninitialized pages.
-		 */
-		XLogCheckInvalidPages();
-
-		/*
 		 * Perform a checkpoint to update all our recovery activity to disk.
 		 *
 		 * Note that we write a shutdown checkpoint rather than an on-line
@@ -6900,13 +6900,26 @@ static void
 CheckRecoveryConsistency(void)
 {
 	/*
+	 * During crash recovery, we don't reach a consistent state until we've
+	 * replayed all the WAL.
+	 */
+	if (XLogRecPtrIsInvalid(minRecoveryPoint))
+		return;
+
+	/*
 	 * Have we passed our safe starting point?
 	 */
-	if (!reachedMinRecoveryPoint &&
+	if (!reachedConsistency &&
 		XLByteLE(minRecoveryPoint, EndRecPtr) &&
 		XLogRecPtrIsInvalid(ControlFile->backupStartPoint))
 	{
-		reachedMinRecoveryPoint = true;
+		/*
+		 * Check to see if the XLOG sequence contained any unresolved
+		 * references to uninitialized pages.
+		 */
+		XLogCheckInvalidPages();
+
+		reachedConsistency = true;
 		ereport(LOG,
 				(errmsg("consistent recovery state reached at %X/%X",
 						EndRecPtr.xlogid, EndRecPtr.xrecoff)));
@@ -6919,7 +6932,7 @@ CheckRecoveryConsistency(void)
 	 */
 	if (standbyState == STANDBY_SNAPSHOT_READY &&
 		!LocalHotStandbyActive &&
-		reachedMinRecoveryPoint &&
+		reachedConsistency &&
 		IsUnderPostmaster)
 	{
 		/* use volatile pointer to prevent code rearrangement */
@@ -7919,7 +7932,7 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 	volatile XLogCtlData *xlogctl = XLogCtl;
 
 	/*
-	 * Is it safe to checkpoint?  We must ask each of the resource managers
+	 * Is it safe to restartpoint?  We must ask each of the resource managers
 	 * whether they have any partial state information that might prevent a
 	 * correct restart from this point.  If so, we skip this opportunity, but
 	 * return at the next checkpoint record for another try.
@@ -7936,6 +7949,22 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 					 checkPoint->redo.xrecoff);
 				return;
 			}
+	}
+
+	/*
+	 * Also refrain from creating a restartpoint if we have seen any references
+	 * to non-existent pages. Restarting recovery from the restartpoint would
+	 * not see the references, so we would lose the cross-check that the pages
+	 * belonged to a relation that was dropped later.
+	 */
+	if (XLogHaveInvalidPages())
+	{
+		elog(trace_recovery(DEBUG2),
+			 "could not record restart point at %X/%X because there "
+			 "are unresolved references to invalid pages",
+			 checkPoint->redo.xlogid,
+			 checkPoint->redo.xrecoff);
+		return;
 	}
 
 	/*

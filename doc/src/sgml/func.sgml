@@ -364,8 +364,8 @@
     </indexterm>
     Ordinary comparison operators yield null (signifying <quote>unknown</>),
     not true or false, when either input is null.  For example,
-    <literal>7 = NULL</> yields null.  When this behavior is not suitable,
-    use the
+    <literal>7 = NULL</> yields null, as does <literal>7 &lt;&gt; NULL</>.  When
+    this behavior is not suitable, use the
     <literal>IS <optional> NOT </> DISTINCT FROM</literal> constructs:
 <synopsis>
 <replaceable>expression</replaceable> IS DISTINCT FROM <replaceable>expression</replaceable>
@@ -13612,6 +13612,10 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
    </indexterm>
 
    <indexterm>
+    <primary>pg_tablespace_location</primary>
+   </indexterm>
+
+   <indexterm>
     <primary>pg_typeof</primary>
    </indexterm>
 
@@ -13757,6 +13761,11 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
        <entry><literal><function>pg_tablespace_databases(<parameter>tablespace_oid</parameter>)</function></literal></entry>
        <entry><type>setof oid</type></entry>
        <entry>get the set of database OIDs that have objects in the tablespace</entry>
+      </row>
+      <row>
+       <entry><literal><function>pg_tablespace_location(<parameter>tablespace_oid</parameter>)</function></literal></entry>
+       <entry><type>text</type></entry>
+       <entry>get the path in the filesystem that this tablespace is located in</entry>
       </row>
       <row>
        <entry><literal><function>pg_typeof(<parameter>any</parameter>)</function></literal></entry>
