@@ -2959,10 +2959,19 @@ l2:
 			 * key columns, we don't need to wait for it to wait; but we
 			 * need to preserve it as locker.
 			 */
-			if ((oldtup.t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK) &&
-				key_intact)
+			if ((infomask & HEAP_XMAX_KEYSHR_LOCK) && key_intact)
 			{
 				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
+
+				/*
+				 * recheck the locker; if someone else changed the tuple while we
+				 * weren't looking, start over.
+				 */
+				if ((oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
+					!TransactionIdEquals(HeapTupleHeaderGetXmax(oldtup.t_data),
+										 xwait))
+					goto l2;
+
 				keep_xmax = xwait;
 				keep_xmax_multi = false;
 			}
