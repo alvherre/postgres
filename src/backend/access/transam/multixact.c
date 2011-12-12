@@ -495,9 +495,11 @@ MultiXactIdIsRunning(MultiXactId multi)
 	}
 
 	/*
-	 * Checking for myself is cheap compared to looking in shared memory, so
-	 * first do the equivalent of MultiXactIdIsCurrent().  This is not needed
-	 * for correctness, it's just a fast path.
+	 * Checking for myself is cheap compared to looking in shared memory;
+	 * return true if any live subtransaction of the current top-level
+	 * transaction is a member.
+	 *
+	 * This is not needed for correctness, it's just a fast path.
 	 */
 	for (i = 0; i < nmembers; i++)
 	{
@@ -652,7 +654,7 @@ CreateMultiXactId(int nmembers, MultiXactMember *members)
 				mxid_to_string(InvalidMultiXactId, nmembers, members));
 
 	/*
-	 * See if the same set of XIDs already exists in our cache; if so, just
+	 * See if the same set of members already exists in our cache; if so, just
 	 * re-use that MultiXactId.  (Note: it might seem that looking in our
 	 * cache is insufficient, and we ought to search disk to see if a
 	 * duplicate definition already exists.  But since we only ever create
@@ -875,7 +877,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 *
 	 * We don't care about MultiXactId wraparound here; it will be handled by
 	 * the next iteration.	But note that nextMXact may be InvalidMultiXactId
-	 * or the first value on a segment-beggining page after this routine exits,
+	 * or the first value on a segment-beginning page after this routine exits,
 	 * so anyone else looking at the variable must be prepared to deal with
 	 * either case.  Similarly, nextOffset may be zero, but we won't use that
 	 * as the actual start offset of the next multixact.
@@ -956,12 +958,14 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	 *
 	 * An ID older than MultiXactState->oldestMultiXactId cannot possibly be
 	 * useful; it should have already been frozen by vacuum.  We've truncated
-	 * the on-disk structures anyway, so we return empty if such a value is
-	 * queried.
+	 * the on-disk structures anyway.  Since returning the wrong state could
+	 * lead to an incorrect visibility result, this now raises an error.
+	 * Versions prior to 9.2 silently returned an empty array, but this is no
+	 * longer safe.
 	 *
 	 * Conversely, an ID >= nextMXact shouldn't ever be seen here; if it is
-	 * seen, it implies undetected ID wraparound has occurred.	We just
-	 * silently assume that such an ID is no longer running.
+	 * seen, it implies undetected ID wraparound has occurred.	This raises
+	 * an error, as in the case above.
 	 *
 	 * Shared lock is enough here since we aren't modifying any global state.
 	 *
