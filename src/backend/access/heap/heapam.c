@@ -2789,6 +2789,12 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	 * If we're not updating any "key" column, we can grab a milder lock type.
 	 * This allows for more concurrency when we are running simultaneously with
 	 * foreign key checks.
+	 *
+	 * Note that if a column gets detoasted while executing the update, but the
+	 * value ends up being the same, this test will fail and we will use the
+	 * stronger lock.  This is acceptable; the important case to optimize is
+	 * updates that don't manipulate key columns, not those that
+	 * serendipitiously arrive at the same key values.
 	 */
 	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup, false))
 	{
@@ -2898,7 +2904,8 @@ l2:
 			 * Note that there could have been another update in the MultiXact.
 			 * In that case, we need to check whether it committed or aborted.
 			 * If it aborted we are safe to update it again; otherwise there is
-			 * an update conflict that must be handled below.
+			 * an update conflict, and we have to return HeapTupleUpdated
+			 * below.
 			 *
 			 * In the LockTupleKeyUpdate case, we still need to preserve the
 			 * surviving members: those would include the tuple locks we had
