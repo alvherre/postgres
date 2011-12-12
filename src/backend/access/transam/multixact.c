@@ -984,7 +984,7 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("MultiXactId %u does no longer exist -- apparent wraparound",
-						multi)))
+						multi)));
 
 	if (!MultiXactIdPrecedes(multi, nextMXact))
 		ereport(ERROR,
