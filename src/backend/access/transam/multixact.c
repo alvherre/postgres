@@ -977,18 +977,16 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	LWLockRelease(MultiXactGenLock);
 
 	if (MultiXactIdPrecedes(multi, oldestMXact))
-	{
-		debug_elog2(DEBUG2, "GetMembers: it's too old");
-		*members = NULL;
-		return -1;
-	}
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("MultiXactId %u does no longer exist -- apparent wraparound",
+						multi)))
 
 	if (!MultiXactIdPrecedes(multi, nextMXact))
-	{
-		debug_elog2(DEBUG2, "GetMembers: it's too new!");
-		*members = NULL;
-		return -1;
-	}
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("MultiXactId %u has not been created yet -- apparent wraparound",
+						multi)));
 
 	/*
 	 * Find out the offset at which we need to start reading MultiXactMembers
