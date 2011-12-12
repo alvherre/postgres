@@ -91,6 +91,19 @@ static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 static uint16 GetMultiXactIdHintBits(MultiXactId multi);
 
 
+/*
+ * Some convenience macros to hide calls to get_lockmode_for_tuplelock().
+ * These let the code specify a LockTupleMode argument, instead of having to
+ * translate it to LOCKMODE, which is slightly more readable.
+ */
+#define LockTupleTuplock(rel, tup, mode) \
+	LockTuple((rel), (tup), get_lockmode_for_tuplelock(mode))
+#define UnlockTupleTuplock(rel, tup, mode) \
+	UnlockTuple((rel), (tup), get_lockmode_for_tuplelock(mode))
+#define ConditionalLockTupleTuplock(rel, tup, mode) \
+	ConditionalLockTuple((rel), (tup), get_lockmode_for_tuplelock(mode))
+
+
 /* ----------------------------------------------------------------
  *						 heap support routines
  * ----------------------------------------------------------------
@@ -2422,8 +2435,7 @@ l1:
 		 */
 		if (!have_tuple_lock)
 		{
-			LockTuple(relation, &(tp.t_self),
-					  get_lockmode_for_tuplelock(LockTupleKeyUpdate));
+			LockTuple(relation, &(tp.t_self), LockTupleKeyUpdate);
 			have_tuple_lock = true;
 		}
 
@@ -2508,8 +2520,7 @@ l1:
 		*update_xmax = HeapTupleHeaderGetUpdateXid(tp.t_data);
 		UnlockReleaseBuffer(buffer);
 		if (have_tuple_lock)
-			UnlockTuple(relation, &(tp.t_self),
-						get_lockmode_for_tuplelock(LockTupleKeyUpdate));
+			UnlockTupleTuplock(relation, &(tp.t_self), LockTupleKeyUpdate);
 		if (vmbuffer != InvalidBuffer)
 			ReleaseBuffer(vmbuffer);
 		return result;
@@ -2619,8 +2630,7 @@ l1:
 	 * Release the lmgr tuple lock, if we had it.
 	 */
 	if (have_tuple_lock)
-		UnlockTuple(relation, &(tp.t_self),
-					get_lockmode_for_tuplelock(LockTupleKeyUpdate));
+		UnlockTupleTuplock(relation, &(tp.t_self), LockTupleKeyUpdate);
 
 	pgstat_count_heap_delete(relation);
 
@@ -2846,8 +2856,7 @@ l2:
 		 */
 		if (!have_tuple_lock)
 		{
-			LockTuple(relation, &(oldtup.t_self),
-					  get_lockmode_for_tuplelock(tuplock));
+			LockTupleTuplock(relation, &(oldtup.t_self), tuplock);
 			have_tuple_lock = true;
 		}
 
@@ -2993,8 +3002,7 @@ l2:
 		*update_xmax = HeapTupleHeaderGetUpdateXid(oldtup.t_data);
 		UnlockReleaseBuffer(buffer);
 		if (have_tuple_lock)
-			UnlockTuple(relation, &(oldtup.t_self),
-						get_lockmode_for_tuplelock(tuplock));
+			UnlockTupleTuplock(relation, &(oldtup.t_self), tuplock);
 		if (vmbuffer != InvalidBuffer)
 			ReleaseBuffer(vmbuffer);
 		bms_free(hot_attrs);
@@ -3381,8 +3389,7 @@ l2:
 	 * Release the lmgr tuple lock, if we had it.
 	 */
 	if (have_tuple_lock)
-		UnlockTuple(relation, &(oldtup.t_self),
-					get_lockmode_for_tuplelock(tuplock));
+		UnlockTupleTuplock(relation, &(oldtup.t_self), tuplock);
 
 	pgstat_count_heap_update(relation, use_hot_update);
 
@@ -3762,7 +3769,7 @@ l3:
 						 (members[i].status >= MultiXactStatusForShare)))
 					{
 						if (have_tuple_lock)
-							UnlockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
+							UnlockTupleTuplock(relation, tid, mode);
 						/*
 						 * FIXME -- here we should lock buffer, update xmax,
 						 * release buffer
@@ -3789,14 +3796,14 @@ l3:
 		{
 			if (nowait)
 			{
-				if (!ConditionalLockTuple(relation, tid, get_lockmode_for_tuplelock(mode)))
+				if (!ConditionalLockTupleTuplock(relation, tid, mode))
 					ereport(ERROR,
 							(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 					errmsg("could not obtain lock on row in relation \"%s\"",
 						   RelationGetRelationName(relation))));
 			}
 			else
-				LockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
+				LockTupleTuplock(relation, tid, mode);
 			have_tuple_lock = true;
 		}
 
@@ -4036,7 +4043,7 @@ l3:
 		*update_xmax = HeapTupleHeaderGetUpdateXid(tuple->t_data);
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 		if (have_tuple_lock)
-			UnlockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
+			UnlockTupleTuplock(relation, tid, mode);
 		return result;
 	}
 
@@ -4067,7 +4074,7 @@ l3:
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 		/* Probably can't hold tuple lock here, but may as well check */
 		if (have_tuple_lock)
-			UnlockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
+			UnlockTupleTuplock(relation, tid, mode);
 		return HeapTupleMayBeUpdated;
 	}
 
@@ -4346,7 +4353,7 @@ l3:
 	 * release the lmgr tuple lock, if we had it.
 	 */
 	if (have_tuple_lock)
-		UnlockTuple(relation, tid, get_lockmode_for_tuplelock(mode));
+		UnlockTupleTuplock(relation, tid, mode);
 
 	return HeapTupleMayBeUpdated;
 }
