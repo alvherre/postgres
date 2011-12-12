@@ -3899,7 +3899,7 @@ l3:
 				 * no way to tell from just the hint bits.
 				 */
 				nmembers = GetMultiXactIdMembers(xwait, &members);
-				if (nmembers == 0)
+				if (nmembers <= 0)
 				{
 					require_sleep = false;
 					/*
