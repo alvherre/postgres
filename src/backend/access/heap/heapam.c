@@ -2928,8 +2928,7 @@ l2:
 				if (remain > 0)
 				{
 					keep_xmax = HeapTupleHeaderGetXmax(oldtup.t_data);
-					keep_xmax_multi =
-						(oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
+					keep_xmax_multi = true;
 				}
 				else
 				{
