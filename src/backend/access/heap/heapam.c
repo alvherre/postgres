@@ -2740,11 +2740,11 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	bool		key_intact;
 	bool		all_visible_cleared = false;
 	bool		all_visible_cleared_new = false;
-	bool			keep_xmax_multi = false;
-	TransactionId	keep_xmax = InvalidTransactionId;
-	TransactionId	keep_xmax_old = InvalidTransactionId;
-	uint16		keep_xmax_infomask = 0;
-	uint16		keep_xmax_old_infomask = 0;
+	bool		keep_xmax_multi;
+	TransactionId keep_xmax;
+	uint16		keep_xmax_infomask;
+	TransactionId keep_xmax_old;
+	uint16		keep_xmax_old_infomask;
 
 	Assert(ItemPointerIsValid(otid));
 
@@ -2817,6 +2817,16 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	 */
 
 l2:
+	/*
+	 * Initialize these variables again if we restart for any reason.  Some of
+	 * these may be unnecessary, but let's be tidy.
+	 */
+	keep_xmax = InvalidTransactionId;
+	keep_xmax_multi = false;
+	keep_xmax_infomask = 0;
+	keep_xmax_old = InvalidTransactionId;
+	keep_xmax_old_infomask = 0;
+
 	result = HeapTupleSatisfiesUpdate(oldtup.t_data, cid, buffer);
 
 	/* see below about the "no wait" case */
