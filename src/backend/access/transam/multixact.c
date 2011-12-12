@@ -1305,8 +1305,13 @@ mxstatus_to_string(MultiXactStatus status)
 static char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
-	char	   *str = palloc(15 * (nmembers + 1) + 4);
+	static char	   *str = NULL;
 	int			i;
+
+	if (str != NULL)
+		pfree(str);
+
+	str = MemoryContextAlloc(TopMemoryContext, 15 * (nmembers + 1) + 4);
 
 	snprintf(str, 47, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
 			 mxstatus_to_string(members[0].status));
