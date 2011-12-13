@@ -1091,7 +1091,7 @@ read_info(SeqTable elm, Relation rel, Buffer *buf)
 	 * this again if the update gets lost.
 	 */
 	Assert(!(tuple.t_data->t_infomask & HEAP_XMAX_IS_MULTI));
-	if (HeapTupleHeaderGetXmax(tuple.t_data) != InvalidTransactionId)
+	if (HeapTupleHeaderGetRawXmax(tuple.t_data) != InvalidTransactionId)
 	{
 		HeapTupleHeaderSetXmax(tuple.t_data, InvalidTransactionId);
 		tuple.t_data->t_infomask &= ~HEAP_XMAX_COMMITTED;

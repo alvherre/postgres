@@ -3873,7 +3873,7 @@ CheckForSerializableConflictOut(bool visible, Relation relation,
 			break;
 		case HEAPTUPLE_DELETE_IN_PROGRESS:
 			Assert(!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
-			xid = HeapTupleHeaderGetXmax(tuple->t_data);
+			xid = HeapTupleHeaderGetRawXmax(tuple->t_data);
 			break;
 		case HEAPTUPLE_INSERT_IN_PROGRESS:
 			xid = HeapTupleHeaderGetXmin(tuple->t_data);

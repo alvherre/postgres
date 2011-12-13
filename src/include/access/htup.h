@@ -241,7 +241,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 )
 
 /*
- * HeapTupleHeaderGetXmax gets you the raw Xmax field.  To find out the Xid
+ * HeapTupleHeaderGetRawXmax gets you the raw Xmax field.  To find out the Xid
  * that updated a tuple, you might need to resolve the MultiXactId if certain
  * bits are set.  HeapTupleHeaderGetUpdateXid checks those bits and takes care
  * to resolve the MultiXactId if necessary.  This might involve multixact I/O,
@@ -254,10 +254,10 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 	 !((tup)->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)) ? \
 		HeapTupleGetUpdateXid(tup) \
 	: \
-		HeapTupleHeaderGetXmax(tup) \
+		HeapTupleHeaderGetRawXmax(tup) \
 )
 
-#define HeapTupleHeaderGetXmax(tup) \
+#define HeapTupleHeaderGetRawXmax(tup) \
 ( \
 	(tup)->t_choice.t_heap.t_xmax \
 )

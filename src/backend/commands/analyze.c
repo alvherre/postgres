@@ -1151,7 +1151,7 @@ acquire_sample_rows(Relation onerel, HeapTuple *rows, int targrows,
 					 * both inserted and deleted in our xact.)
 					 */
 					Assert(!(targtuple.t_data->t_infomask & HEAP_XMAX_IS_MULTI));
-					if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(targtuple.t_data)))
+					if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(targtuple.t_data)))
 						deadrows += 1;
 					else
 						liverows += 1;

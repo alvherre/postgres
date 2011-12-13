@@ -1809,7 +1809,7 @@ heap_get_latest_tid(Relation relation,
 static void
 UpdateXmaxHintBits(HeapTupleHeader tuple, Buffer buffer, TransactionId xid)
 {
-	Assert(TransactionIdEquals(HeapTupleHeaderGetXmax(tuple), xid));
+	Assert(TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple), xid));
 	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
 
 	if (!(tuple->t_infomask & (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID)))
@@ -2422,7 +2422,7 @@ l1:
 		uint16		infomask;
 
 		/* must copy state data before unlocking buffer */
-		xwait = HeapTupleHeaderGetXmax(tp.t_data);
+		xwait = HeapTupleHeaderGetRawXmax(tp.t_data);
 		infomask = tp.t_data->t_infomask;
 
 		LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
@@ -2461,7 +2461,7 @@ l1:
 			 * change, and start over if so.
 			 */
 			if (!(tp.t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-				!TransactionIdEquals(HeapTupleHeaderGetXmax(tp.t_data),
+				!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tp.t_data),
 									 xwait))
 				goto l1;
 
@@ -2487,7 +2487,7 @@ l1:
 			 * Check for xmax change, and start over if so.
 			 */
 			if ((tp.t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-				!TransactionIdEquals(HeapTupleHeaderGetXmax(tp.t_data),
+				!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tp.t_data),
 									 xwait))
 				goto l1;
 
@@ -2859,7 +2859,7 @@ l2:
 		 */
 
 		/* must copy state data before unlocking buffer */
-		xwait = HeapTupleHeaderGetXmax(oldtup.t_data);
+		xwait = HeapTupleHeaderGetRawXmax(oldtup.t_data);
 		infomask = oldtup.t_data->t_infomask;
 
 		LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
@@ -2902,7 +2902,7 @@ l2:
 			 * change, and start over if so.
 			 */
 			if (!(oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-				!TransactionIdEquals(HeapTupleHeaderGetXmax(oldtup.t_data),
+				!TransactionIdEquals(HeapTupleHeaderGetRawXmax(oldtup.t_data),
 									 xwait))
 				goto l2;
 
@@ -2940,7 +2940,7 @@ l2:
 				 */
 				if (remain > 0)
 				{
-					keep_xmax = HeapTupleHeaderGetXmax(oldtup.t_data);
+					keep_xmax = HeapTupleHeaderGetRawXmax(oldtup.t_data);
 					keep_xmax_multi = true;
 				}
 				else
@@ -2971,7 +2971,7 @@ l2:
 				 * weren't looking, start over.
 				 */
 				if ((oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-					!TransactionIdEquals(HeapTupleHeaderGetXmax(oldtup.t_data),
+					!TransactionIdEquals(HeapTupleHeaderGetRawXmax(oldtup.t_data),
 										 xwait))
 					goto l2;
 
@@ -2990,7 +2990,7 @@ l2:
 				 * Check for xmax change, and start over if so.
 				 */
 				if ((oldtup.t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-					!TransactionIdEquals(HeapTupleHeaderGetXmax(oldtup.t_data),
+					!TransactionIdEquals(HeapTupleHeaderGetRawXmax(oldtup.t_data),
 										 xwait))
 					goto l2;
 
@@ -3748,7 +3748,7 @@ l3:
 		bool		require_sleep;
 
 		/* must copy state data before unlocking buffer */
-		xwait = HeapTupleHeaderGetXmax(tuple->t_data);
+		xwait = HeapTupleHeaderGetRawXmax(tuple->t_data);
 		infomask = tuple->t_data->t_infomask;
 		infomask2 = tuple->t_data->t_infomask2;
 
@@ -3855,7 +3855,7 @@ l3:
 				goto l3;
 			require_sleep = false;
 			/* acquire fresh values -- XXX do we need to restart if xmax changed? */
-			keep_xmax = HeapTupleHeaderGetXmax(tuple->t_data);
+			keep_xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
 			keep_xmax_multi = (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
 		}
 
@@ -3878,7 +3878,7 @@ l3:
 				goto l3;
 			require_sleep = false;
 			/* acquire fresh values */
-			keep_xmax = HeapTupleHeaderGetXmax(tuple->t_data);
+			keep_xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
 			keep_xmax_multi = (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
 		}
 
@@ -3930,7 +3930,7 @@ l3:
 						 */
 						LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 						if (!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-							!TransactionIdEquals(HeapTupleHeaderGetXmax(tuple->t_data),
+							!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple->t_data),
 												 xwait))
 							goto l3;
 						/* otherwise, we're good */
@@ -3948,7 +3948,7 @@ l3:
 
 				/* if the xmax changed in the meantime, start over */
 				if ((tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-					!TransactionIdEquals(HeapTupleHeaderGetXmax(tuple->t_data),
+					!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple->t_data),
 										 xwait))
 					goto l3;
 				/* otherwise, we're good */
@@ -3994,7 +3994,7 @@ l3:
 				 * change, and start over if so.
 				 */
 				if (!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-					!TransactionIdEquals(HeapTupleHeaderGetXmax(tuple->t_data),
+					!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple->t_data),
 										 xwait))
 					goto l3;
 
@@ -4036,7 +4036,7 @@ l3:
 				 * this point.  Check for xmax change, and start over if so.
 				 */
 				if ((tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
-					!TransactionIdEquals(HeapTupleHeaderGetXmax(tuple->t_data),
+					!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple->t_data),
 										 xwait))
 					goto l3;
 
@@ -4089,7 +4089,7 @@ l3:
 	 * there's no explicit test for a share lock only; this was already covered
 	 * above, because it's only representable by a MultiXactId.
 	 */
-	xmax = HeapTupleHeaderGetXmax(tuple->t_data);
+	xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
 	old_infomask = tuple->t_data->t_infomask;
 
 	if (!(old_infomask & (HEAP_XMAX_INVALID |
@@ -4558,7 +4558,7 @@ heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 recheck_xmax:
 	if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
 	{
-		xid = HeapTupleHeaderGetXmax(tuple);
+		xid = HeapTupleHeaderGetRawXmax(tuple);
 		if (TransactionIdIsNormal(xid) &&
 			TransactionIdPrecedes(xid, cutoff_xid))
 		{
@@ -4723,7 +4723,7 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE));
 	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
 
-	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple), &members);
+	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetRawXmax(tuple), &members);
 
 	if (nmembers > 0)
 	{
@@ -4779,7 +4779,7 @@ heap_tuple_needs_freeze(HeapTupleHeader tuple, TransactionId cutoff_xid,
 
 	if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
 	{
-		xid = HeapTupleHeaderGetXmax(tuple);
+		xid = HeapTupleHeaderGetRawXmax(tuple);
 		if (TransactionIdIsNormal(xid) &&
 			TransactionIdPrecedes(xid, cutoff_xid))
 			return true;
@@ -4873,8 +4873,7 @@ HeapTupleHeaderAdvanceLatestRemovedXid(HeapTupleHeader tuple,
 									   TransactionId *latestRemovedXid)
 {
 	TransactionId xmin = HeapTupleHeaderGetXmin(tuple);
-	/* FIXME -- change this? */
-	TransactionId xmax = HeapTupleHeaderGetXmax(tuple);
+	TransactionId xmax = HeapTupleHeaderGetUpdateXid(tuple);
 	TransactionId xvac = HeapTupleHeaderGetXvac(tuple);
 
 	if (tuple->t_infomask & HEAP_MOVED)

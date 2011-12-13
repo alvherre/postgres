@@ -365,7 +365,7 @@ heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum,
 			 * HeapTupleHeaderIsHotUpdated will never return true for an
 			 * XMIN_INVALID tuple, so this code will work even when there were
 			 * sequential updates within the aborted transaction.)
-			 *
+			 *HeapTupleHeaderIsLocked
 			 * Note that we might first arrive at a dead heap-only tuple
 			 * either here or while following a chain below.  Whichever path
 			 * gets there first will mark the tuple unused.
@@ -464,7 +464,7 @@ heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum,
 				 * that the page is reconsidered for pruning in future.
 				 */
 				heap_prune_record_prunable(prstate,
-										   HeapTupleHeaderGetXmax(htup));
+										   HeapTupleHeaderGetUpdateXid(htup));
 				break;
 
 			case HEAPTUPLE_DELETE_IN_PROGRESS:
@@ -474,7 +474,7 @@ heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum,
 				 * that the page is reconsidered for pruning in future.
 				 */
 				heap_prune_record_prunable(prstate,
-										   HeapTupleHeaderGetXmax(htup));
+										   HeapTupleHeaderGetUpdateXid(htup));
 				break;
 
 			case HEAPTUPLE_LIVE:
@@ -747,7 +747,7 @@ heap_get_root_tuples(Page page, OffsetNumber *root_offsets)
 
 			/* Set up to scan the HOT-chain */
 			nextoffnum = ItemPointerGetOffsetNumber(&htup->t_ctid);
-			priorXmax = HeapTupleHeaderGetXmax(htup);
+			priorXmax = HeapTupleHeaderGetUpdateXid(htup);
 		}
 		else
 		{
@@ -788,7 +788,7 @@ heap_get_root_tuples(Page page, OffsetNumber *root_offsets)
 				break;
 
 			nextoffnum = ItemPointerGetOffsetNumber(&htup->t_ctid);
-			priorXmax = HeapTupleHeaderGetXmax(htup);
+			priorXmax = HeapTupleHeaderGetUpdateXid(htup);
 		}
 	}
 }
