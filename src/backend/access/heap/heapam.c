@@ -1803,11 +1803,14 @@ heap_get_latest_tid(Relation relation,
  * hint bit if possible --- but beware that that may not yet be possible,
  * if the transaction committed asynchronously.  Hence callers should look
  * only at XMAX_INVALID.
+ *
+ * Note this is not allowed for tuples whose xmax is a multixact.
  */
 static void
 UpdateXmaxHintBits(HeapTupleHeader tuple, Buffer buffer, TransactionId xid)
 {
 	Assert(TransactionIdEquals(HeapTupleHeaderGetXmax(tuple), xid));
+	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
 
 	if (!(tuple->t_infomask & (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID)))
 	{
@@ -3003,8 +3006,7 @@ l2:
 		 */
 		if (TransactionIdIsValid(keep_xmax) ||
 			none_remain ||
-			(oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderIsLocked(oldtup.t_data))
+			(oldtup.t_data->t_infomask & HEAP_XMAX_INVALID))
 			result = HeapTupleMayBeUpdated;
 		else
 			result = HeapTupleUpdated;
