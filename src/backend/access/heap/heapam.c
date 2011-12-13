@@ -2880,12 +2880,15 @@ l2:
 		}
 
 		/*
-		 * Now sleep on the locker.  Note that if there are only key-share
-		 * lockers and we're not updating the key columns, we will be awaken
-		 * before it is gone, so we may need to mark the new tuple with a
-		 * new MultiXactId including the original xmax and ourselves.
+		 * Now we have to do something about the existing locker.  If it's a
+		 * multi, sleep on it; we might be awakened before it is completely
+		 * gone (or even not sleep at all in some cases); we need to preserve
+		 * it as locker, unless it is gone completely.
 		 *
-		 * XXX this comment needs to be more comprehensive
+		 * If it's not a multi, we need to check for sleeping conditions before
+		 * actually going to sleep.  If the update doesn't conflict with the
+		 * locks, we just continue without sleeping (but making sure it is
+		 * preserved).
 		 */
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
