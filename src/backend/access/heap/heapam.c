@@ -2789,7 +2789,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	oldtup.t_self = *otid;
 
 	/*
-	 * If we're not updating any "key" column, we can grab a milder lock type.
+	 * If we're not updating any "key" column, we can grab a weaker lock type.
 	 * This allows for more concurrency when we are running simultaneously with
 	 * foreign key checks.
 	 *
@@ -3758,35 +3758,18 @@ l3:
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
 		/*
-		 * If we wish to acquire share or key lock, and the tuple is already
-		 * key or share locked by a multixact that includes any subtransaction
-		 * of the current top transaction, then we effectively hold the desired
-		 * lock already (except if we own key share lock and now desire share
-		 * lock).  We *must* succeed without trying to take the tuple lock,
-		 * else we will deadlock against anyone wanting to acquire a stronger
-		 * lock.
-		 *
-		 * FIXME -- we don't do the below currently, but I think we should:
-		 *
-		 * We update the Xmax with a new MultiXactId to include the new lock
-		 * mode in this case.
-		 *
-		 * Note that since we want to alter the Xmax, we need to re-acquire the
-		 * buffer lock.  The xmax could have changed in the meantime, so we
-		 * recheck it in that case, but we keep the buffer lock while doing it
-		 * to prevent starvation.  The second time around we know we must be
-		 * part of the MultiXactId in any case, which is why we don't need to
-		 * go back to recheck HeapTupleSatisfiesUpdate.  Also, after we
-		 * re-acquire lock, the MultiXact is likely to (but not necessarily) be
-		 * the same that we see here, so it should be in multixact's cache and
-		 * thus quick to obtain.
+		 * If any subtransaction of the current top transaction already holds a
+		 * lock as strong or stronger than what we're requesting, we
+		 * effectively hold the desired lock already.  We *must* succeed
+		 * without trying to take the tuple lock, else we will deadlock against
+		 * anyone wanting to acquire a stronger lock.
 		 */
-		if ((infomask & HEAP_XMAX_IS_MULTI) &&
-			((mode == LockTupleShare) || (mode == LockTupleKeyShare)))
+		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			int		i;
 			int		nmembers;
 			MultiXactMember *members;
+			MultiXactStatus cutoff = get_mxact_status_for_tuplelock(mode);
 
 			nmembers = GetMultiXactIdMembers(xwait, &members);
 
@@ -3794,16 +3777,11 @@ l3:
 			{
 				if (TransactionIdIsCurrentTransactionId(members[i].xid))
 				{
-					if ((mode == LockTupleKeyShare) ||
-						((mode == LockTupleShare) &&
-						 (members[i].status >= MultiXactStatusForShare)))
+					if (members[i].status >= cutoff)
 					{
 						if (have_tuple_lock)
 							UnlockTupleTuplock(relation, tid, mode);
-						/*
-						 * FIXME -- here we should lock buffer, update xmax,
-						 * release buffer
-						 */
+		
 						pfree(members);
 						return HeapTupleMayBeUpdated;
 					}
