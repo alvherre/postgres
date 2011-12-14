@@ -4278,20 +4278,23 @@ l3:
 	 * Store transaction information of xact locking the tuple.
 	 *
 	 * Note: Cmax is meaningless in this context, so don't set it; this avoids
-	 * possibly generating a useless combo CID.  FIXME -- it's not useless
-	 * if a multixact contains an update.
+	 * possibly generating a useless combo CID.  Moreover, if we're locking a
+	 * previously updated tuple, it's important to preserve the Cmax.
 	 *
-	 * Note: do not touch the HOT_UPDATED bit; this might not be the most
-	 * recent version of the tuple.
+	 * Note we only reset the HOT UPDATE bit if there's no update; otherwise
+	 * we risk breaking the HOT chain.
 	 */
 	tuple->t_data->t_infomask = new_infomask;
-	// HeapTupleHeaderClearHotUpdated(tuple->t_data);
+	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
+		HeapTupleHeaderClearHotUpdated(tuple->t_data);
 	HeapTupleHeaderSetXmax(tuple->t_data, xid);
 
 	/*
 	 * Make sure there is no forward chain link in t_ctid.  Note that in the
-	 * cases where the tuple has been updated, we must not overwrite t_ctid
-	 * because it was set by the updater.
+	 * cases where the tuple has been updated, we must not overwrite t_ctid,
+	 * because it was set by the updater.  Moreover, if the tuple has been
+	 * updated, we need to follow the update chain to lock the new versions
+	 * of the tuple as well.
 	 *
 	 * FIXME -- not really sure of the implications of this.
 	 */
