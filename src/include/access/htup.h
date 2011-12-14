@@ -196,13 +196,13 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
  *
  * Beware of multiple evaluation of arguments.
  */
-#define HeapTupleHeaderInfomaskIsLocked(infomask) \
+#define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
 	((!((infomask) & HEAP_XMAX_IS_MULTI) && \
 	  (infomask) & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) || \
 	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_IS_NOT_UPDATE)))
 
-#define HeapTupleHeaderIsLocked(tup) \
-	HeapTupleHeaderInfomaskIsLocked((tup)->t_infomask)
+#define HeapTupleHeaderIsOnlyLocked(tup) \
+	HeapTupleHeaderInfomaskIsOnlyLocked((tup)->t_infomask)
 
 /*
  * information stored in t_infomask2:

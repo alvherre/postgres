@@ -1780,7 +1780,7 @@ heap_get_latest_tid(Relation relation,
 		 * If there's a valid t_ctid link, follow it, else we're done.
 		 */
 		if ((tp.t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderIsLocked(tp.t_data) ||
+			HeapTupleHeaderIsOnlyLocked(tp.t_data) ||
 			ItemPointerEquals(&tp.t_self, &tp.t_data->t_ctid))
 		{
 			UnlockReleaseBuffer(buffer);
@@ -2500,7 +2500,7 @@ l1:
 		 * only locked the tuple without updating it.
 		 */
 		if ((tp.t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderIsLocked(tp.t_data))
+			HeapTupleHeaderIsOnlyLocked(tp.t_data))
 			result = HeapTupleMayBeUpdated;
 		else
 			result = HeapTupleUpdated;
@@ -3823,7 +3823,7 @@ l3:
 		 */
 		require_sleep = true;
 		if ((mode == LockTupleKeyShare) &&
-			(HeapTupleHeaderInfomaskIsLocked(infomask) ||
+			(HeapTupleHeaderInfomaskIsOnlyLocked(infomask) ||
 			 infomask2 & HEAP_UPDATE_KEY_INTACT))
 		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3831,7 +3831,7 @@ l3:
 			/*
 			 * Make sure it's still an appropriate lock, else start over.
 			 */
-			if (!(HeapTupleHeaderIsLocked(tuple->t_data) ||
+			if (!(HeapTupleHeaderIsOnlyLocked(tuple->t_data) ||
 				  (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT)))
 				goto l3;
 			require_sleep = false;
@@ -4038,7 +4038,7 @@ l3:
 		 */
 		if (!require_sleep ||
 			(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderIsLocked(tuple->t_data) ||
+			HeapTupleHeaderIsOnlyLocked(tuple->t_data) ||
 			none_remains)
 			result = HeapTupleMayBeUpdated;
 		else
@@ -4290,12 +4290,12 @@ l3:
 
 	/*
 	 * Make sure there is no forward chain link in t_ctid.  Note that in the
-	 * cases where the tuple is not merely locked, i.e. there was a previous
-	 * update, we must not overwrite t_ctid because it was set by the updater.
+	 * cases where the tuple has been updated, we must not overwrite t_ctid
+	 * because it was set by the updater.
 	 *
 	 * FIXME -- not really sure of the implications of this.
 	 */
-	if (HeapTupleHeaderInfomaskIsLocked(new_infomask))
+	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
 		tuple->t_data->t_ctid = *tid;
 
 	MarkBufferDirty(*buffer);

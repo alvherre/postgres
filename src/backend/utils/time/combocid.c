@@ -120,7 +120,7 @@ HeapTupleHeaderGetCmax(HeapTupleHeader tup)
 
 	Assert(!(tup->t_infomask & HEAP_MOVED));
 	/* We do not store cmax when locking a tuple */
-	Assert(!HeapTupleHeaderIsLocked(tup));
+	Assert(!HeapTupleHeaderIsOnlyLocked(tup));
 	Assert((tup->t_infomask & HEAP_XMAX_IS_MULTI) ||
 		   TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tup)));
 

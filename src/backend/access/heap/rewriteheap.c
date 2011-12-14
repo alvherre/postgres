@@ -353,7 +353,7 @@ rewrite_heap_tuple(RewriteState state,
 	 * If the tuple has been updated, check the old-to-new mapping hash table.
 	 */
 	if (!((old_tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
-		  HeapTupleHeaderIsLocked(old_tuple->t_data)) &&
+		  HeapTupleHeaderIsOnlyLocked(old_tuple->t_data)) &&
 		!(ItemPointerEquals(&(old_tuple->t_self),
 							&(old_tuple->t_data->t_ctid))))
 	{
