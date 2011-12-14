@@ -1,0 +1,50 @@
+Parsed test spec with 2 sessions
+
+starting permutation: s1s s1c s2u s2c
+step s1s: SELECT * FROM A WHERE AID = 1 FOR UPDATE;
+aid            col1           
+
+1              0              
+step s1c: COMMIT;
+step s2u: UPDATE A SET AID = 2 WHERE AID = 1;
+step s2c: COMMIT;
+
+starting permutation: s1s s2u s1c s2c
+step s1s: SELECT * FROM A WHERE AID = 1 FOR UPDATE;
+aid            col1           
+
+1              0              
+step s2u: UPDATE A SET AID = 2 WHERE AID = 1; <waiting ...>
+step s1c: COMMIT;
+step s2u: <... completed>
+step s2c: COMMIT;
+
+starting permutation: s1s s2u s2c s1c
+step s1s: SELECT * FROM A WHERE AID = 1 FOR UPDATE;
+aid            col1           
+
+1              0              
+step s2u: UPDATE A SET AID = 2 WHERE AID = 1; <waiting ...>
+invalid permutation detected
+
+starting permutation: s2u s1s s1c s2c
+step s2u: UPDATE A SET AID = 2 WHERE AID = 1;
+step s1s: SELECT * FROM A WHERE AID = 1 FOR UPDATE; <waiting ...>
+invalid permutation detected
+
+starting permutation: s2u s1s s2c s1c
+step s2u: UPDATE A SET AID = 2 WHERE AID = 1;
+step s1s: SELECT * FROM A WHERE AID = 1 FOR UPDATE; <waiting ...>
+step s2c: COMMIT;
+step s1s: <... completed>
+aid            col1           
+
+step s1c: COMMIT;
+
+starting permutation: s2u s2c s1s s1c
+step s2u: UPDATE A SET AID = 2 WHERE AID = 1;
+step s2c: COMMIT;
+step s1s: SELECT * FROM A WHERE AID = 1 FOR UPDATE;
+aid            col1           
+
+step s1c: COMMIT;
