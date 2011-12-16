@@ -173,7 +173,7 @@ printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo)
 void
 SendRowDescriptionMessage(TupleDesc typeinfo, List *targetlist, int16 *formats)
 {
-	Form_pg_attribute *attrs = TupleDescGetSortedAttrs(typeinfo);
+	Form_pg_attribute *attrs = typeinfo->attrs;
 	int			natts = typeinfo->natts;
 	int			proto = PG_PROTOCOL_MAJOR(FrontendProtocol);
 	int			i;
