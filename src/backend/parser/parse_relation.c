@@ -442,6 +442,12 @@ GetCTEForRTE(ParseState *pstate, RangeTblEntry *rte, int rtelevelsup)
 	return NULL;				/* keep compiler quiet */
 }
 
+static int16
+get_attnum_by_lognum(RangeTblEntry *rte, int16 attlognum)
+{
+	return list_nth_int(rte->lognums, attlognum - 1);
+}
+
 /*
  * scanRTEForColumn
  *	  Search the column names of a single RTE for the given name.
@@ -484,6 +490,8 @@ scanRTEForColumn(ParseState *pstate, RangeTblEntry *rte, char *colname,
 						 errmsg("column reference \"%s\" is ambiguous",
 								colname),
 						 parser_errposition(pstate, location)));
+			if (rte->lognums)
+				attnum = get_attnum_by_lognum(rte, attnum);
 			var = make_var(pstate, rte, attnum, location);
 			/* Require read access to the column */
 			markVarForSelectPriv(pstate, var, rte);
@@ -699,9 +707,13 @@ markVarForSelectPriv(ParseState *pstate, Var *var, RangeTblEntry *rte)
  * eref->colnames is filled in.  Also, alias->colnames is rebuilt to insert
  * empty strings for any dropped columns, so that it will be one-to-one with
  * physical column numbers.
+ *
+ * If lognums is not NULL, it will be filled with a map from logical column
+ * numbers to attnum; that way, the nth element of eref->colnames corresponds
+ * to the attnum found in the nth element of lognums.
  */
 static void
-buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
+buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref, List **lognums)
 {
 	int			maxattrs = tupdesc->natts;
 	ListCell   *aliaslc;
@@ -754,6 +766,9 @@ buildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
 		}
 
 		eref->colnames = lappend(eref->colnames, attrname);
+
+		if (lognums)
+			*lognums = lappend_int(*lognums, attr->attnum);
 	}
 
 	/* Too many user-supplied aliases? */
@@ -910,7 +925,7 @@ addRangeTableEntry(ParseState *pstate,
 	 * and/or actual column names.
 	 */
 	rte->eref = makeAlias(refname, NIL);
-	buildRelationAliases(rel->rd_att, alias, rte->eref);
+	buildRelationAliases(rel->rd_att, alias, rte->eref, &rte->lognums);
 
 	/*
 	 * Drop the rel refcount, but keep the access lock till end of transaction
@@ -973,7 +988,7 @@ addRangeTableEntryForRelation(ParseState *pstate,
 	 * and/or actual column names.
 	 */
 	rte->eref = makeAlias(refname, NIL);
-	buildRelationAliases(rel->rd_att, alias, rte->eref);
+	buildRelationAliases(rel->rd_att, alias, rte->eref, &rte->lognums);
 
 	/*----------
 	 * Flags:
@@ -1148,7 +1163,7 @@ addRangeTableEntryForFunction(ParseState *pstate,
 		/* Composite data type, e.g. a table's row type */
 		Assert(tupdesc);
 		/* Build the column alias list */
-		buildRelationAliases(tupdesc, alias, eref);
+		buildRelationAliases(tupdesc, alias, eref, NULL);
 	}
 	else if (functypclass == TYPEFUNC_SCALAR)
 	{
@@ -1555,7 +1570,7 @@ addRTEtoQuery(ParseState *pstate, RangeTblEntry *rte,
  * values to use in the created Vars.  Ordinarily rtindex should match the
  * actual position of the RTE in its rangetable.
  *
- * If logical_sort is true, then the resulting lists should be sorted by logical
+ * If logical_sort is true, then the resulting lists are sorted by logical
  * column number (attlognum); otherwise use regular attnum.
  *
  * The output lists go into *colnames and *colvars.

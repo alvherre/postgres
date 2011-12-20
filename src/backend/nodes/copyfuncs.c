@@ -1966,6 +1966,7 @@ _copyRangeTblEntry(RangeTblEntry *from)
 	COPY_SCALAR_FIELD(rtekind);
 	COPY_SCALAR_FIELD(relid);
 	COPY_SCALAR_FIELD(relkind);
+	COPY_NODE_FIELD(lognums);
 	COPY_NODE_FIELD(subquery);
 	COPY_SCALAR_FIELD(jointype);
 	COPY_NODE_FIELD(joinaliasvars);
