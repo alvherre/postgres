@@ -22,6 +22,7 @@
 #include "catalog/pg_type.h"
 #include "parser/parse_type.h"
 #include "utils/builtins.h"
+#include "utils/memutils.h"
 #include "utils/resowner.h"
 #include "utils/syscache.h"
 
@@ -725,8 +726,6 @@ cmplognum(const void *attr1, const void *attr2)
 		return 1;
 	return 0;
 }
-
-#include "utils/memutils.h"
 
 /*
  * Return the array of attrs sorted by logical position
