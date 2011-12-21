@@ -118,10 +118,10 @@ index_form_tuple(TupleDesc tupleDescriptor,
 	hoff = IndexInfoFindDataOffset(infomask);
 #ifdef TOAST_INDEX_HACK
 	data_size = heap_compute_data_size(tupleDescriptor,
-									   untoasted_values, isnull);
+									   untoasted_values, isnull, false);
 #else
 	data_size = heap_compute_data_size(tupleDescriptor,
-									   values, isnull);
+									   values, isnull, false);
 #endif
 	size = hoff + data_size;
 	size = MAXALIGN(size);		/* be conservative */
@@ -136,6 +136,7 @@ index_form_tuple(TupleDesc tupleDescriptor,
 					values,
 #endif
 					isnull,
+					false,
 					(char *) tp + hoff,
 					data_size,
 					&tupmask,

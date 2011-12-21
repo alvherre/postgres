@@ -83,7 +83,8 @@
 Size
 heap_compute_data_size(TupleDesc tupleDesc,
 					   Datum *values,
-					   bool *isnull)
+					   bool *isnull,
+					   bool logical_order)
 {
 	Size		data_length = 0;
 	int			i;
@@ -93,11 +94,14 @@ heap_compute_data_size(TupleDesc tupleDesc,
 	for (i = 0; i < numberOfAttributes; i++)
 	{
 		Datum		val;
+		int			idx;
 
-		if (isnull[i])
+		idx = logical_order ? att[i]->attlognum - 1 : i;
+
+		if (isnull[idx])
 			continue;
 
-		val = values[i];
+		val = values[idx];
 
 		if (ATT_IS_PACKABLE(att[i]) &&
 			VARATT_CAN_MAKE_SHORT(DatumGetPointer(val)))
@@ -132,6 +136,7 @@ heap_compute_data_size(TupleDesc tupleDesc,
 void
 heap_fill_tuple(TupleDesc tupleDesc,
 				Datum *values, bool *isnull,
+				bool logical_order,
 				char *data, Size data_size,
 				uint16 *infomask, bits8 *bit)
 {
@@ -162,6 +167,13 @@ heap_fill_tuple(TupleDesc tupleDesc,
 	for (i = 0; i < numberOfAttributes; i++)
 	{
 		Size		data_length;
+		int			idx;
+		Datum		value;
+		bool		thisnull;
+
+		idx = logical_order ? att[i]->attlognum - 1 : i;
+
+		thisnull = isnull[idx];
 
 		if (bit != NULL)
 		{
@@ -174,7 +186,7 @@ heap_fill_tuple(TupleDesc tupleDesc,
 				bitmask = 1;
 			}
 
-			if (isnull[i])
+			if (thisnull)
 			{
 				*infomask |= HEAP_HASNULL;
 				continue;
@@ -182,6 +194,8 @@ heap_fill_tuple(TupleDesc tupleDesc,
 
 			*bitP |= bitmask;
 		}
+
+		value = values[idx];
 
 		/*
 		 * XXX we use the att_align macros on the pointer value itself, not on
@@ -192,13 +206,13 @@ heap_fill_tuple(TupleDesc tupleDesc,
 		{
 			/* pass-by-value */
 			data = (char *) att_align_nominal(data, att[i]->attalign);
-			store_att_byval(data, values[i], att[i]->attlen);
+			store_att_byval(data, value, att[i]->attlen);
 			data_length = att[i]->attlen;
 		}
 		else if (att[i]->attlen == -1)
 		{
 			/* varlena */
-			Pointer		val = DatumGetPointer(values[i]);
+			Pointer		val = DatumGetPointer(value);
 
 			*infomask |= HEAP_HASVARWIDTH;
 			if (VARATT_IS_EXTERNAL(val))
@@ -236,8 +250,8 @@ heap_fill_tuple(TupleDesc tupleDesc,
 			/* cstring ... never needs alignment */
 			*infomask |= HEAP_HASVARWIDTH;
 			Assert(att[i]->attalign == 'c');
-			data_length = strlen(DatumGetCString(values[i])) + 1;
-			memcpy(data, DatumGetPointer(values[i]), data_length);
+			data_length = strlen(DatumGetCString(value)) + 1;
+			memcpy(data, DatumGetPointer(value), data_length);
 		}
 		else
 		{
@@ -245,7 +259,7 @@ heap_fill_tuple(TupleDesc tupleDesc,
 			data = (char *) att_align_nominal(data, att[i]->attalign);
 			Assert(att[i]->attlen > 0);
 			data_length = att[i]->attlen;
-			memcpy(data, DatumGetPointer(values[i]), data_length);
+			memcpy(data, DatumGetPointer(value), data_length);
 		}
 
 		data += data_length;
@@ -684,7 +698,7 @@ heap_form_tuple(TupleDesc tupleDescriptor,
 
 	hoff = len = MAXALIGN(len); /* align user data safely */
 
-	data_len = heap_compute_data_size(tupleDescriptor, values, isnull);
+	data_len = heap_compute_data_size(tupleDescriptor, values, isnull, false);
 
 	len += data_len;
 
@@ -716,6 +730,7 @@ heap_form_tuple(TupleDesc tupleDescriptor,
 	heap_fill_tuple(tupleDescriptor,
 					values,
 					isnull,
+					false,
 					(char *) td + hoff,
 					data_len,
 					&td->t_infomask,
@@ -1443,7 +1458,7 @@ heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 
 	hoff = len = MAXALIGN(len); /* align user data safely */
 
-	data_len = heap_compute_data_size(tupleDescriptor, values, isnull);
+	data_len = heap_compute_data_size(tupleDescriptor, values, isnull, logical_order);
 
 	len += data_len;
 
@@ -1465,6 +1480,7 @@ heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 	heap_fill_tuple(tupleDescriptor,
 					values,
 					isnull,
+					logical_order,
 					(char *) tuple + hoff,
 					data_len,
 					&tuple->t_infomask,

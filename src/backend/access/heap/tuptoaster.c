@@ -604,8 +604,8 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 * Look for attributes with attstorage 'x' to compress.  Also find large
 	 * attributes with attstorage 'x' or 'e', and store them external.
 	 */
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen)
+	while (heap_compute_data_size(tupleDesc, toast_values, toast_isnull,
+								  false) > maxDataLen)
 	{
 		int			biggest_attno = -1;
 		int32		biggest_size = MAXALIGN(TOAST_POINTER_SIZE);
@@ -694,8 +694,8 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 * Second we look for attributes of attstorage 'x' or 'e' that are still
 	 * inline.	But skip this if there's no toast table to push them to.
 	 */
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen &&
+	while (heap_compute_data_size(tupleDesc, toast_values, toast_isnull,
+								  false) > maxDataLen &&
 		   rel->rd_rel->reltoastrelid != InvalidOid)
 	{
 		int			biggest_attno = -1;
@@ -745,8 +745,8 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 * Round 3 - this time we take attributes with storage 'm' into
 	 * compression
 	 */
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen)
+	while (heap_compute_data_size(tupleDesc, toast_values, toast_isnull,
+								  false) > maxDataLen)
 	{
 		int			biggest_attno = -1;
 		int32		biggest_size = MAXALIGN(TOAST_POINTER_SIZE);
@@ -808,8 +808,8 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 	 */
 	maxDataLen = TOAST_TUPLE_TARGET_MAIN - hoff;
 
-	while (heap_compute_data_size(tupleDesc,
-								  toast_values, toast_isnull) > maxDataLen &&
+	while (heap_compute_data_size(tupleDesc, toast_values, toast_isnull,
+								  false) > maxDataLen &&
 		   rel->rd_rel->reltoastrelid != InvalidOid)
 	{
 		int			biggest_attno = -1;
@@ -883,8 +883,8 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 		if (olddata->t_infomask & HEAP_HASOID)
 			new_header_len += sizeof(Oid);
 		new_header_len = MAXALIGN(new_header_len);
-		new_data_len = heap_compute_data_size(tupleDesc,
-											  toast_values, toast_isnull);
+		new_data_len = heap_compute_data_size(tupleDesc, toast_values,
+											  toast_isnull, false);
 		new_tuple_len = new_header_len + new_data_len;
 
 		/*
@@ -910,6 +910,7 @@ toast_insert_or_update(Relation rel, HeapTuple newtup, HeapTuple oldtup,
 		heap_fill_tuple(tupleDesc,
 						toast_values,
 						toast_isnull,
+						false,
 						(char *) new_data + new_header_len,
 						new_data_len,
 						&(new_data->t_infomask),
@@ -1121,8 +1122,8 @@ toast_flatten_tuple_attribute(Datum value,
 	if (olddata->t_infomask & HEAP_HASOID)
 		new_header_len += sizeof(Oid);
 	new_header_len = MAXALIGN(new_header_len);
-	new_data_len = heap_compute_data_size(tupleDesc,
-										  toast_values, toast_isnull);
+	new_data_len = heap_compute_data_size(tupleDesc, toast_values,
+										  toast_isnull, false);
 	new_tuple_len = new_header_len + new_data_len;
 
 	new_data = (HeapTupleHeader) palloc0(new_tuple_len);
@@ -1143,6 +1144,7 @@ toast_flatten_tuple_attribute(Datum value,
 	heap_fill_tuple(tupleDesc,
 					toast_values,
 					toast_isnull,
+					false,
 					(char *) new_data + new_header_len,
 					new_data_len,
 					&(new_data->t_infomask),
