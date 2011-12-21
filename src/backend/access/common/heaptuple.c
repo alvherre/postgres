@@ -128,6 +128,9 @@ heap_compute_data_size(TupleDesc tupleDesc,
  * heap_fill_tuple
  *		Load data portion of a tuple from values/isnull arrays
  *
+ * logical_order means that the values and isnull arrays are sorted
+ * following attlognum.
+ *
  * We also fill the null bitmap (if any) and set the infomask bits
  * that reflect the tuple's data contents.
  *
