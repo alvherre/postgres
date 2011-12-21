@@ -282,7 +282,6 @@ markTargetListOrigin(ParseState *pstate, TargetEntry *tle,
 			/* It's a table or view, report it */
 			tle->resorigtbl = rte->relid;
 			tle->resorigcol = attnum;
-			tle->resoriglogcol = var->varlogno;
 			break;
 		case RTE_SUBQUERY:
 			/* Subselect-in-FROM: copy up from the subselect */
@@ -1305,7 +1304,6 @@ ExpandRowReference(ParseState *pstate, Node *expr,
 								 (AttrNumber) pstate->p_next_resno++,
 								 pstrdup(NameStr(att->attname)),
 								 false);
-			te->resoriglogcol = att->attlognum;
 			result = lappend(result, te);
 		}
 		else

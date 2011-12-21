@@ -88,10 +88,7 @@ makeVar(Index varno,
 	var->varnoold = varno;
 	var->varoattno = varattno;
 
-	/*
-	 * Likewise, we just set varlogno to Invalid and location to "unknown" here
-	 */
-	var->varlogno = InvalidAttrNumber;
+	/* Likewise, we just set location to "unknown" here */
 	var->location = -1;
 
 	return var;
@@ -231,7 +228,6 @@ makeTargetEntry(Expr *expr,
 	tle->ressortgroupref = 0;
 	tle->resorigtbl = InvalidOid;
 	tle->resorigcol = 0;
-	tle->resoriglogcol = 0;
 
 	tle->resjunk = resjunk;
 

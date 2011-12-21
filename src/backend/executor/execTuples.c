@@ -945,9 +945,6 @@ ExecTypeFromTLInternal(List *targetList, bool hasoid, bool skipjunk)
 		TupleDescInitEntryCollation(typeInfo,
 									cur_resno,
 									exprCollation((Node *) tle->expr));
-		TupleDescInitEntryLognum(typeInfo,
-								 cur_resno,
-								 tle->resoriglogcol);
 		cur_resno++;
 	}
 

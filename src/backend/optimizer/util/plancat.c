@@ -850,7 +850,6 @@ build_physical_tlist(PlannerInfo *root, RelOptInfo *rel)
 			for (attrno = 1; attrno <= numattrs; attrno++)
 			{
 				Form_pg_attribute att_tup = relation->rd_att->attrs[attrno - 1];
-				TargetEntry	   *te;
 
 				if (att_tup->attisdropped)
 				{
@@ -865,11 +864,12 @@ build_physical_tlist(PlannerInfo *root, RelOptInfo *rel)
 							  att_tup->atttypmod,
 							  att_tup->attcollation,
 							  0);
-				var->varlogno = att_tup->attlognum;
-				te = makeTargetEntry((Expr *) var, attrno, NULL, false);
-				te->resoriglogcol = var->varlogno;
 
-				tlist = lappend(tlist, te);
+				tlist = lappend(tlist,
+								makeTargetEntry((Expr *) var,
+												attrno,
+												NULL,
+												false));
 			}
 
 			heap_close(relation, NoLock);

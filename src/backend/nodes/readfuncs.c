@@ -409,7 +409,6 @@ _readVar(void)
 
 	READ_UINT_FIELD(varno);
 	READ_INT_FIELD(varattno);
-	READ_INT_FIELD(varlogno);
 	READ_OID_FIELD(vartype);
 	READ_INT_FIELD(vartypmod);
 	READ_OID_FIELD(varcollid);
@@ -1115,7 +1114,6 @@ _readTargetEntry(void)
 	READ_UINT_FIELD(ressortgroupref);
 	READ_OID_FIELD(resorigtbl);
 	READ_INT_FIELD(resorigcol);
-	READ_INT_FIELD(resoriglogcol);
 	READ_BOOL_FIELD(resjunk);
 
 	READ_DONE();
