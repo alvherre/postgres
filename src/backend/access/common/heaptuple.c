@@ -1375,19 +1375,23 @@ heap_freetuple(HeapTuple htup)
  * "minimal" tuple lacking a HeapTupleData header as well as room for system
  * columns.
  *
+ * If logical_order is true, the values and isnull arrays are sorted in logical
+ * order, so we re-sort them to build the tuple correctly.
+ *
  * The result is allocated in the current memory context.
  */
 MinimalTuple
 heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 						Datum *values,
-						bool *isnull)
+						bool *isnull,
+						bool logical_order)
 {
 	MinimalTuple tuple;			/* return tuple */
 	Size		len,
 				data_len;
 	int			hoff;
 	bool		hasnull = false;
-	Form_pg_attribute *att = tupleDescriptor->attrs;
+	Form_pg_attribute *att;
 	int			numberOfAttributes = tupleDescriptor->natts;
 	int			i;
 
@@ -1396,6 +1400,9 @@ heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 				(errcode(ERRCODE_TOO_MANY_COLUMNS),
 				 errmsg("number of columns (%d) exceeds limit (%d)",
 						numberOfAttributes, MaxTupleAttributeNumber)));
+
+	att = logical_order ? TupleDescGetSortedAttrs(tupleDescriptor) :
+		tupleDescriptor->attrs;
 
 	/*
 	 * Check for nulls and embedded tuples; expand any toasted attributes in
