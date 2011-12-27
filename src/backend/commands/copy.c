@@ -146,7 +146,7 @@ typedef struct CopyStateData
 	bool		file_has_oids;
 	FmgrInfo	oid_in_function;
 	Oid			oid_typioparam;
-	FmgrInfo   *in_functions;	/* array of input functions for each attrs */
+	FmgrInfo   *in_functions;	/* array of input functions for each attr */
 	Oid		   *typioparams;	/* array of element types for in_functions */
 	int		   *defmap;			/* array of default att numbers */
 	ExprState **defexprs;		/* array of default att expressions */
@@ -1498,7 +1498,7 @@ CopyTo(CopyState cstate)
 		tupDesc = RelationGetDescr(cstate->rel);
 	else
 		tupDesc = cstate->queryDesc->tupDesc;
-	attr = tupDesc->attrs;
+	attr = TupleDescGetSortedAttrs(tupDesc);
 	num_phys_attrs = tupDesc->natts;
 	cstate->null_print_client = cstate->null_print;		/* default */
 
@@ -1509,18 +1509,20 @@ CopyTo(CopyState cstate)
 	cstate->out_functions = (FmgrInfo *) palloc(num_phys_attrs * sizeof(FmgrInfo));
 	foreach(cur, cstate->attnumlist)
 	{
-		int			attnum = lfirst_int(cur);
+		int			attlognum = lfirst_int(cur);
+		int			attnum = attr[attlognum - 1]->attnum;
 		Oid			out_func_oid;
 		bool		isvarlena;
 
 		if (cstate->binary)
-			getTypeBinaryOutputInfo(attr[attnum - 1]->atttypid,
+			getTypeBinaryOutputInfo(attr[attlognum - 1]->atttypid,
 									&out_func_oid,
 									&isvarlena);
 		else
-			getTypeOutputInfo(attr[attnum - 1]->atttypid,
+			getTypeOutputInfo(attr[attlognum - 1]->atttypid,
 							  &out_func_oid,
 							  &isvarlena);
+		/* out_functions is in canonical column order, not logical */
 		fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
 	}
 
@@ -1570,14 +1572,14 @@ CopyTo(CopyState cstate)
 
 			foreach(cur, cstate->attnumlist)
 			{
-				int			attnum = lfirst_int(cur);
+				int			attlognum = lfirst_int(cur);
 				char	   *colname;
 
 				if (hdr_delim)
 					CopySendChar(cstate, cstate->delim[0]);
 				hdr_delim = true;
 
-				colname = NameStr(attr[attnum - 1]->attname);
+				colname = NameStr(attr[attlognum - 1]->attname);
 
 				CopyAttributeOutCSV(cstate, colname, false,
 									list_length(cstate->attnumlist) == 1);
@@ -1679,9 +1681,9 @@ CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum *values, bool *nulls)
 
 	foreach(cur, cstate->attnumlist)
 	{
-		int			attnum = lfirst_int(cur);
-		Datum		value = values[attnum - 1];
-		bool		isnull = nulls[attnum - 1];
+		int			attlognum = lfirst_int(cur);
+		Datum		value = values[attlognum - 1];
+		bool		isnull = nulls[attlognum - 1];
 
 		if (!cstate->binary)
 		{
@@ -2024,7 +2026,8 @@ CopyFrom(CopyState cstate)
 			break;
 
 		/* And now we can form the input tuple. */
-		tuple = heap_form_tuple(tupDesc, values, nulls);
+		tuple = heap_form_tuple_extended(tupDesc, values, nulls,
+										 HTOPT_LOGICAL_ORDER);
 
 		if (loaded_oid != InvalidOid)
 			HeapTupleSetOid(tuple, loaded_oid);
@@ -2285,8 +2288,11 @@ BeginCopyFrom(Relation rel,
 							 &in_func_oid, &typioparams[attnum - 1]);
 		fmgr_info(in_func_oid, &in_functions[attnum - 1]);
 
-		/* Get default info if needed */
-		if (!list_member_int(cstate->attnumlist, attnum))
+		/*
+		 * Get default info if needed.  Beware that attnumlist uses logical
+		 * column numbers.
+		 */
+		if (!list_member_int(cstate->attnumlist, attr[attnum - 1]->attlognum))
 		{
 			/* attribute is NOT to be copied from input */
 			/* use default value if one exists */
@@ -2489,7 +2495,7 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 	ExprState **defexprs = cstate->defexprs;
 
 	tupDesc = RelationGetDescr(cstate->rel);
-	attr = tupDesc->attrs;
+	attr = TupleDescGetSortedAttrs(tupDesc);
 	num_phys_attrs = tupDesc->natts;
 	attr_count = list_length(cstate->attnumlist);
 	nfields = file_has_oids ? (attr_count + 1) : attr_count;
@@ -2549,14 +2555,15 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		/* Loop to read the user attributes on the line. */
 		foreach(cur, cstate->attnumlist)
 		{
-			int			attnum = lfirst_int(cur);
-			int			m = attnum - 1;
+			int			attlognum = lfirst_int(cur);
+			Form_pg_attribute thisatt = attr[attlognum - 1];
+			int			m = thisatt->attnum - 1;
 
 			if (fieldno >= fldct)
 				ereport(ERROR,
 						(errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
 						 errmsg("missing data for column \"%s\"",
-								NameStr(attr[m]->attname))));
+								NameStr(thisatt->attname))));
 			string = field_strings[fieldno++];
 
 			if (cstate->csv_mode && string == NULL &&
@@ -2566,14 +2573,14 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 				string = cstate->null_print;
 			}
 
-			cstate->cur_attname = NameStr(attr[m]->attname);
+			cstate->cur_attname = NameStr(thisatt->attname);
 			cstate->cur_attval = string;
-			values[m] = InputFunctionCall(&in_functions[m],
-										  string,
-										  typioparams[m],
-										  attr[m]->atttypmod);
+			values[attlognum - 1] = InputFunctionCall(&in_functions[m],
+													  string,
+													  typioparams[m],
+													  thisatt->atttypmod);
 			if (string != NULL)
-				nulls[m] = false;
+				nulls[attlognum - 1] = false;
 			cstate->cur_attname = NULL;
 			cstate->cur_attval = NULL;
 		}
@@ -2648,17 +2655,19 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		i = 0;
 		foreach(cur, cstate->attnumlist)
 		{
-			int			attnum = lfirst_int(cur);
-			int			m = attnum - 1;
+			int			attlognum = lfirst_int(cur);
+			Form_pg_attribute thisatt = attr[attlognum - 1];
+			int			m = thisatt->attnum - 1;
 
-			cstate->cur_attname = NameStr(attr[m]->attname);
+			cstate->cur_attname = NameStr(thisatt->attname);
 			i++;
-			values[m] = CopyReadBinaryAttribute(cstate,
-												i,
-												&in_functions[m],
-												typioparams[m],
-												attr[m]->atttypmod,
-												&nulls[m]);
+			values[attlognum - 1] =
+				CopyReadBinaryAttribute(cstate,
+										i,
+										&in_functions[m],
+										typioparams[m],
+										thisatt->atttypmod,
+										&nulls[attlognum - 1]);
 			cstate->cur_attname = NULL;
 		}
 	}
@@ -3857,7 +3866,7 @@ CopyAttributeOutCSV(CopyState cstate, char *string,
 }
 
 /*
- * CopyGetAttnums - build an integer list of attnums to be copied
+ * CopyGetAttnums - build an integer list of attlognums to be copied
  *
  * The input attnamelist is either the user-specified column list,
  * or NIL if there was none (in which case we want all the non-dropped
@@ -3873,7 +3882,7 @@ CopyGetAttnums(TupleDesc tupDesc, Relation rel, List *attnamelist)
 	if (attnamelist == NIL)
 	{
 		/* Generate default column list */
-		Form_pg_attribute *attr = tupDesc->attrs;
+		Form_pg_attribute *attr = TupleDescGetSortedAttrs(tupDesc);
 		int			attr_count = tupDesc->natts;
 		int			i;
 
@@ -3881,7 +3890,7 @@ CopyGetAttnums(TupleDesc tupDesc, Relation rel, List *attnamelist)
 		{
 			if (attr[i]->attisdropped)
 				continue;
-			attnums = lappend_int(attnums, i + 1);
+			attnums = lappend_int(attnums, attr[i]->attnum);
 		}
 	}
 	else
@@ -3903,7 +3912,7 @@ CopyGetAttnums(TupleDesc tupDesc, Relation rel, List *attnamelist)
 					continue;
 				if (namestrcmp(&(tupDesc->attrs[i]->attname), name) == 0)
 				{
-					attnum = tupDesc->attrs[i]->attnum;
+					attnum = tupDesc->attrs[i]->attlognum;
 					break;
 				}
 			}
