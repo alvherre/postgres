@@ -79,6 +79,9 @@
 /*
  * heap_compute_data_size
  *		Determine size of the data area of a tuple to be constructed
+ *
+ * logical_order means that the values and isnull arrays are sorted
+ * following attlognum.
  */
 Size
 heap_compute_data_size(TupleDesc tupleDesc,
@@ -642,9 +645,10 @@ heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest)
  * The result is allocated in the current memory context.
  */
 HeapTuple
-heap_form_tuple(TupleDesc tupleDescriptor,
-				Datum *values,
-				bool *isnull)
+heap_form_tuple_extended(TupleDesc tupleDescriptor,
+						 Datum *values,
+						 bool *isnull,
+						 int flags)
 {
 	HeapTuple	tuple;			/* return tuple */
 	HeapTupleHeader td;			/* tuple data */
@@ -655,6 +659,7 @@ heap_form_tuple(TupleDesc tupleDescriptor,
 	Form_pg_attribute *att = tupleDescriptor->attrs;
 	int			numberOfAttributes = tupleDescriptor->natts;
 	int			i;
+	bool		logical_order = (flags & HTOPT_LOGICAL_ORDER) != 0;
 
 	if (numberOfAttributes > MaxTupleAttributeNumber)
 		ereport(ERROR,
@@ -701,7 +706,8 @@ heap_form_tuple(TupleDesc tupleDescriptor,
 
 	hoff = len = MAXALIGN(len); /* align user data safely */
 
-	data_len = heap_compute_data_size(tupleDescriptor, values, isnull, false);
+	data_len = heap_compute_data_size(tupleDescriptor, values, isnull,
+									  logical_order);
 
 	len += data_len;
 
@@ -733,7 +739,7 @@ heap_form_tuple(TupleDesc tupleDescriptor,
 	heap_fill_tuple(tupleDescriptor,
 					values,
 					isnull,
-					false,
+					logical_order,
 					(char *) td + hoff,
 					data_len,
 					&td->t_infomask,
@@ -884,7 +890,7 @@ heap_modifytuple(HeapTuple tuple,
 }
 
 /*
- * heap_deform_tuple
+ * heap_deform_tuple_extended
  *		Given a tuple, extract data into values/isnull arrays; this is
  *		the inverse of heap_form_tuple.
  *
@@ -900,12 +906,12 @@ heap_modifytuple(HeapTuple tuple,
  *		noncacheable attribute offsets are involved.
  */
 void
-heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc,
-				  Datum *values, bool *isnull)
+heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
+						   Datum *values, bool *isnull, int flags)
 {
 	HeapTupleHeader tup = tuple->t_data;
 	bool		hasnulls = HeapTupleHasNulls(tuple);
-	Form_pg_attribute *att = tupleDesc->attrs;
+	Form_pg_attribute *att;
 	int			tdesc_natts = tupleDesc->natts;
 	int			natts;			/* number of atts to extract */
 	int			attnum;
@@ -913,8 +919,11 @@ heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc,
 	long		off;			/* offset in tuple data */
 	bits8	   *bp = tup->t_bits;		/* ptr to null bitmap in tuple */
 	bool		slow = false;	/* can we use/set attcacheoff? */
+	bool		logical_order = (flags & HTOPT_LOGICAL_ORDER) != 0;
 
 	natts = HeapTupleHeaderGetNatts(tup);
+	att = logical_order ?
+		TupleDescGetSortedAttrs(tupleDesc) : tupleDesc->attrs;
 
 	/*
 	 * In inheritance situations, it is possible that the given tuple actually
@@ -931,7 +940,7 @@ heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc,
 	{
 		Form_pg_attribute thisatt = att[attnum];
 
-		if (hasnulls && att_isnull(attnum, bp))
+		if (hasnulls && att_isnull(thisatt->attnum - 1, bp))
 		{
 			values[attnum] = (Datum) 0;
 			isnull[attnum] = true;
@@ -1402,7 +1411,7 @@ MinimalTuple
 heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 						Datum *values,
 						bool *isnull,
-						bool logical_order)
+						int flags)
 {
 	MinimalTuple tuple;			/* return tuple */
 	Size		len,
@@ -1412,6 +1421,7 @@ heap_form_minimal_tuple(TupleDesc tupleDescriptor,
 	Form_pg_attribute *att;
 	int			numberOfAttributes = tupleDescriptor->natts;
 	int			i;
+	bool		logical_order = (flags & HTOPT_LOGICAL_ORDER) != 0;
 
 	if (numberOfAttributes > MaxTupleAttributeNumber)
 		ereport(ERROR,

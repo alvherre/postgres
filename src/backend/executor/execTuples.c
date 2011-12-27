@@ -604,7 +604,8 @@ ExecCopySlotMinimalTuple(TupleTableSlot *slot)
 	 */
 	return heap_form_minimal_tuple(slot->tts_tupleDescriptor,
 								   slot->tts_values,
-								   slot->tts_isnull, true);
+								   slot->tts_isnull,
+								   HTOPT_LOGICAL_ORDER);
 }
 
 /* --------------------------------

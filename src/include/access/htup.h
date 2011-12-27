@@ -885,6 +885,18 @@ extern Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
 			heap_getsysattr((tup), (attnum), (tupleDesc), (isnull)) \
 	)
 
+/*
+ * Option flags for several of the functions below.
+ */
+/* indicates that the various values arrays are in logical column order */
+#define HTOPT_LOGICAL_ORDER		(1 << 0)
+
+/* backwards-compatibility macros */
+#define heap_form_tuple(tupdesc, values, isnull) \
+	heap_form_tuple_extended((tupdesc), (values), (isnull), 0)
+#define heap_deform_tuple(tuple, tupdesc, values, isnull) \
+	heap_deform_tuple_extended((tuple), (tupdesc), (values), (isnull), 0)
+
 /* prototypes for functions in common/heaptuple.c */
 extern Size heap_compute_data_size(TupleDesc tupleDesc,
 					   Datum *values, bool *isnull, bool logical_order);
@@ -900,15 +912,15 @@ extern Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
 				bool *isnull);
 extern HeapTuple heap_copytuple(HeapTuple tuple);
 extern void heap_copytuple_with_tuple(HeapTuple src, HeapTuple dest);
-extern HeapTuple heap_form_tuple(TupleDesc tupleDescriptor,
-				Datum *values, bool *isnull);
+extern HeapTuple heap_form_tuple_extended(TupleDesc tupleDescriptor,
+		 				 Datum *values, bool *isnull, int flags);
 extern HeapTuple heap_modify_tuple(HeapTuple tuple,
 				  TupleDesc tupleDesc,
 				  Datum *replValues,
 				  bool *replIsnull,
 				  bool *doReplace);
-extern void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc,
-				  Datum *values, bool *isnull);
+extern void heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
+		 				   Datum *values, bool *isnull, int flags);
 
 /* these three are deprecated versions of the three above: */
 extern HeapTuple heap_formtuple(TupleDesc tupleDescriptor,
@@ -922,7 +934,7 @@ extern void heap_deformtuple(HeapTuple tuple, TupleDesc tupleDesc,
 				 Datum *values, char *nulls);
 extern void heap_freetuple(HeapTuple htup);
 extern MinimalTuple heap_form_minimal_tuple(TupleDesc tupleDescriptor,
-						Datum *values, bool *isnull, bool logical_order);
+						Datum *values, bool *isnull, int flags);
 extern void heap_free_minimal_tuple(MinimalTuple mtup);
 extern MinimalTuple heap_copy_minimal_tuple(MinimalTuple mtup);
 extern HeapTuple heap_tuple_from_minimal_tuple(MinimalTuple mtup);
