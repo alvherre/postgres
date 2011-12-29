@@ -104,7 +104,7 @@ typedef struct CopyStateData
 	/* parameters from the COPY command */
 	Relation	rel;			/* relation to copy to or from */
 	QueryDesc  *queryDesc;		/* executable query to copy from */
-	List	   *attnumlist;		/* integer list of attlognums to copy */
+	List	   *attnumlist;		/* integer list of attnums to copy */
 	char	   *filename;		/* filename, or NULL for STDIN/STDOUT */
 	bool		binary;			/* binary format? */
 	bool		oids;			/* include OIDs? */
@@ -1570,14 +1570,14 @@ CopyTo(CopyState cstate)
 
 			foreach(cur, cstate->attnumlist)
 			{
-				int			attlognum = lfirst_int(cur);
+				int			attnum = lfirst_int(cur);
 				char	   *colname;
 
 				if (hdr_delim)
 					CopySendChar(cstate, cstate->delim[0]);
 				hdr_delim = true;
 
-				colname = NameStr(attr[attlognum - 1]->attname);
+				colname = NameStr(attr[attnum - 1]->attname);
 
 				CopyAttributeOutCSV(cstate, colname, false,
 									list_length(cstate->attnumlist) == 1);
@@ -1682,8 +1682,6 @@ CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum *values, bool *nulls)
 		int			attnum = lfirst_int(cur);
 		Datum		value = values[attnum - 1];
 		bool		isnull = nulls[attnum - 1];
-
-		fprintf(stderr, "printint attribute %d: %d\n", attnum, value);
 
 		if (!cstate->binary)
 		{
@@ -2287,10 +2285,8 @@ BeginCopyFrom(Relation rel,
 							 &in_func_oid, &typioparams[attnum - 1]);
 		fmgr_info(in_func_oid, &in_functions[attnum - 1]);
 
-		/*
-		 * Get default info if needed.
-		 */
-		if (!list_member_int(cstate->attnumlist, attr[attnum - 1]->attnum))
+		/* Get default info if needed */
+		if (!list_member_int(cstate->attnumlist, attnum))
 		{
 			/* attribute is NOT to be copied from input */
 			/* use default value if one exists */
@@ -2554,14 +2550,13 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		foreach(cur, cstate->attnumlist)
 		{
 			int			attnum = lfirst_int(cur);
-			Form_pg_attribute thisatt = attr[attnum - 1];
-			int			m = thisatt->attnum - 1;
+			int			m = attnum - 1;
 
 			if (fieldno >= fldct)
 				ereport(ERROR,
 						(errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
 						 errmsg("missing data for column \"%s\"",
-								NameStr(thisatt->attname))));
+								NameStr(attr[m]->attname))));
 			string = field_strings[fieldno++];
 
 			if (cstate->csv_mode && string == NULL &&
@@ -2571,14 +2566,14 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 				string = cstate->null_print;
 			}
 
-			cstate->cur_attname = NameStr(thisatt->attname);
+			cstate->cur_attname = NameStr(attr[m]->attname);
 			cstate->cur_attval = string;
-			values[attnum - 1] = InputFunctionCall(&in_functions[m],
-												   string,
-												   typioparams[m],
-												   thisatt->atttypmod);
+			values[m] = InputFunctionCall(&in_functions[m],
+										  string,
+										  typioparams[m],
+										  attr[m]->atttypmod);
 			if (string != NULL)
-				nulls[attnum - 1] = false;
+				nulls[m] = false;
 			cstate->cur_attname = NULL;
 			cstate->cur_attval = NULL;
 		}
@@ -2654,18 +2649,16 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		foreach(cur, cstate->attnumlist)
 		{
 			int			attnum = lfirst_int(cur);
-			Form_pg_attribute thisatt = attr[attnum - 1];
-			int			m = thisatt->attnum - 1;
+			int			m = attnum - 1;
 
-			cstate->cur_attname = NameStr(thisatt->attname);
+			cstate->cur_attname = NameStr(attr[m]->attname);
 			i++;
-			values[attnum - 1] =
-				CopyReadBinaryAttribute(cstate,
-										i,
-										&in_functions[m],
-										typioparams[m],
-										thisatt->atttypmod,
-										&nulls[attnum - 1]);
+			values[m] = CopyReadBinaryAttribute(cstate,
+												i,
+												&in_functions[m],
+												typioparams[m],
+												attr[m]->atttypmod,
+												&nulls[m]);
 			cstate->cur_attname = NULL;
 		}
 	}
