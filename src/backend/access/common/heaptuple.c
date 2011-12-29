@@ -911,7 +911,7 @@ heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
 {
 	HeapTupleHeader tup = tuple->t_data;
 	bool		hasnulls = HeapTupleHasNulls(tuple);
-	Form_pg_attribute *att;
+	Form_pg_attribute *att = tupleDesc->attrs;
 	int			tdesc_natts = tupleDesc->natts;
 	int			natts;			/* number of atts to extract */
 	int			attnum;
@@ -922,8 +922,6 @@ heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
 	bool		logical_order = (flags & HTOPT_LOGICAL_ORDER) != 0;
 
 	natts = HeapTupleHeaderGetNatts(tup);
-	att = logical_order ?
-		TupleDescGetSortedAttrs(tupleDesc) : tupleDesc->attrs;
 
 	/*
 	 * In inheritance situations, it is possible that the given tuple actually
@@ -939,16 +937,18 @@ heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
 	for (attnum = 0; attnum < natts; attnum++)
 	{
 		Form_pg_attribute thisatt = att[attnum];
+		int		fillattnum = logical_order ?
+			thisatt->attlognum - 1 : thisatt->attnum - 1;
 
 		if (hasnulls && att_isnull(thisatt->attnum - 1, bp))
 		{
-			values[attnum] = (Datum) 0;
-			isnull[attnum] = true;
+			values[fillattnum] = (Datum) 0;
+			isnull[fillattnum] = true;
 			slow = true;		/* can't use attcacheoff anymore */
 			continue;
 		}
 
-		isnull[attnum] = false;
+		isnull[fillattnum] = false;
 
 		if (!slow && thisatt->attcacheoff >= 0)
 			off = thisatt->attcacheoff;
@@ -979,7 +979,7 @@ heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
 				thisatt->attcacheoff = off;
 		}
 
-		values[attnum] = fetchatt(thisatt, tp + off);
+		values[fillattnum] = fetchatt(thisatt, tp + off);
 
 		off = att_addlength_pointer(off, thisatt->attlen, tp + off);
 
@@ -990,6 +990,8 @@ heap_deform_tuple_extended(HeapTuple tuple, TupleDesc tupleDesc,
 	/*
 	 * If tuple doesn't have all the atts indicated by tupleDesc, read the
 	 * rest as null
+	 *
+	 * FIXME -- this is wrong if HTOPT_LOGICAL_ORDER
 	 */
 	for (; attnum < tdesc_natts; attnum++)
 	{

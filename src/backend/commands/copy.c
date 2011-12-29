@@ -104,7 +104,7 @@ typedef struct CopyStateData
 	/* parameters from the COPY command */
 	Relation	rel;			/* relation to copy to or from */
 	QueryDesc  *queryDesc;		/* executable query to copy from */
-	List	   *attnumlist;		/* integer list of attnums to copy */
+	List	   *attnumlist;		/* integer list of attlognums to copy */
 	char	   *filename;		/* filename, or NULL for STDIN/STDOUT */
 	bool		binary;			/* binary format? */
 	bool		oids;			/* include OIDs? */
@@ -1498,7 +1498,7 @@ CopyTo(CopyState cstate)
 		tupDesc = RelationGetDescr(cstate->rel);
 	else
 		tupDesc = cstate->queryDesc->tupDesc;
-	attr = TupleDescGetSortedAttrs(tupDesc);
+	attr = tupDesc->attrs;
 	num_phys_attrs = tupDesc->natts;
 	cstate->null_print_client = cstate->null_print;		/* default */
 
@@ -1509,20 +1509,18 @@ CopyTo(CopyState cstate)
 	cstate->out_functions = (FmgrInfo *) palloc(num_phys_attrs * sizeof(FmgrInfo));
 	foreach(cur, cstate->attnumlist)
 	{
-		int			attlognum = lfirst_int(cur);
-		int			attnum = attr[attlognum - 1]->attnum;
+		int			attnum = lfirst_int(cur);
 		Oid			out_func_oid;
 		bool		isvarlena;
 
 		if (cstate->binary)
-			getTypeBinaryOutputInfo(attr[attlognum - 1]->atttypid,
+			getTypeBinaryOutputInfo(attr[attnum - 1]->atttypid,
 									&out_func_oid,
 									&isvarlena);
 		else
-			getTypeOutputInfo(attr[attlognum - 1]->atttypid,
+			getTypeOutputInfo(attr[attnum - 1]->atttypid,
 							  &out_func_oid,
 							  &isvarlena);
-		/* out_functions is in canonical column order, not logical */
 		fmgr_info(out_func_oid, &cstate->out_functions[attnum - 1]);
 	}
 
@@ -1681,9 +1679,11 @@ CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum *values, bool *nulls)
 
 	foreach(cur, cstate->attnumlist)
 	{
-		int			attlognum = lfirst_int(cur);
-		Datum		value = values[attlognum - 1];
-		bool		isnull = nulls[attlognum - 1];
+		int			attnum = lfirst_int(cur);
+		Datum		value = values[attnum - 1];
+		bool		isnull = nulls[attnum - 1];
+
+		fprintf(stderr, "printint attribute %d: %d\n", attnum, value);
 
 		if (!cstate->binary)
 		{
@@ -3866,7 +3866,7 @@ CopyAttributeOutCSV(CopyState cstate, char *string,
 }
 
 /*
- * CopyGetAttnums - build an integer list of attlognums to be copied
+ * CopyGetAttnums - build an integer list of attnums to be copied
  *
  * The input attnamelist is either the user-specified column list,
  * or NIL if there was none (in which case we want all the non-dropped
@@ -3912,7 +3912,7 @@ CopyGetAttnums(TupleDesc tupDesc, Relation rel, List *attnamelist)
 					continue;
 				if (namestrcmp(&(tupDesc->attrs[i]->attname), name) == 0)
 				{
-					attnum = tupDesc->attrs[i]->attlognum;
+					attnum = tupDesc->attrs[i]->attnum;
 					break;
 				}
 			}
