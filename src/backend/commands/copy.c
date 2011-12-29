@@ -2026,8 +2026,7 @@ CopyFrom(CopyState cstate)
 			break;
 
 		/* And now we can form the input tuple. */
-		tuple = heap_form_tuple_extended(tupDesc, values, nulls,
-										 HTOPT_LOGICAL_ORDER);
+		tuple = heap_form_tuple(tupDesc, values, nulls);
 
 		if (loaded_oid != InvalidOid)
 			HeapTupleSetOid(tuple, loaded_oid);
@@ -2289,10 +2288,9 @@ BeginCopyFrom(Relation rel,
 		fmgr_info(in_func_oid, &in_functions[attnum - 1]);
 
 		/*
-		 * Get default info if needed.  Beware that attnumlist uses logical
-		 * column numbers.
+		 * Get default info if needed.
 		 */
-		if (!list_member_int(cstate->attnumlist, attr[attnum - 1]->attlognum))
+		if (!list_member_int(cstate->attnumlist, attr[attnum - 1]->attnum))
 		{
 			/* attribute is NOT to be copied from input */
 			/* use default value if one exists */
@@ -2495,7 +2493,7 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 	ExprState **defexprs = cstate->defexprs;
 
 	tupDesc = RelationGetDescr(cstate->rel);
-	attr = TupleDescGetSortedAttrs(tupDesc);
+	attr = tupDesc->attrs;
 	num_phys_attrs = tupDesc->natts;
 	attr_count = list_length(cstate->attnumlist);
 	nfields = file_has_oids ? (attr_count + 1) : attr_count;
@@ -2555,8 +2553,8 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		/* Loop to read the user attributes on the line. */
 		foreach(cur, cstate->attnumlist)
 		{
-			int			attlognum = lfirst_int(cur);
-			Form_pg_attribute thisatt = attr[attlognum - 1];
+			int			attnum = lfirst_int(cur);
+			Form_pg_attribute thisatt = attr[attnum - 1];
 			int			m = thisatt->attnum - 1;
 
 			if (fieldno >= fldct)
@@ -2575,12 +2573,12 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 
 			cstate->cur_attname = NameStr(thisatt->attname);
 			cstate->cur_attval = string;
-			values[attlognum - 1] = InputFunctionCall(&in_functions[m],
-													  string,
-													  typioparams[m],
-													  thisatt->atttypmod);
+			values[attnum - 1] = InputFunctionCall(&in_functions[m],
+												   string,
+												   typioparams[m],
+												   thisatt->atttypmod);
 			if (string != NULL)
-				nulls[attlognum - 1] = false;
+				nulls[attnum - 1] = false;
 			cstate->cur_attname = NULL;
 			cstate->cur_attval = NULL;
 		}
@@ -2655,19 +2653,19 @@ NextCopyFrom(CopyState cstate, ExprContext *econtext,
 		i = 0;
 		foreach(cur, cstate->attnumlist)
 		{
-			int			attlognum = lfirst_int(cur);
-			Form_pg_attribute thisatt = attr[attlognum - 1];
+			int			attnum = lfirst_int(cur);
+			Form_pg_attribute thisatt = attr[attnum - 1];
 			int			m = thisatt->attnum - 1;
 
 			cstate->cur_attname = NameStr(thisatt->attname);
 			i++;
-			values[attlognum - 1] =
+			values[attnum - 1] =
 				CopyReadBinaryAttribute(cstate,
 										i,
 										&in_functions[m],
 										typioparams[m],
 										thisatt->atttypmod,
-										&nulls[attlognum - 1]);
+										&nulls[attnum - 1]);
 			cstate->cur_attname = NULL;
 		}
 	}
