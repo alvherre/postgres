@@ -183,7 +183,7 @@ static FormData_pg_attribute a7 = {
 	0, {"tableoid"}, OIDOID, 0, sizeof(Oid),
 	TableOidAttributeNumber, TableOidAttributeNumber,
 	TableOidAttributeNumber,
-   	0, -1, -1,
+	0, -1, -1,
 	true, 'p', 'i', true, false, false, true, 0
 };
 
