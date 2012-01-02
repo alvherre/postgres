@@ -4,7 +4,7 @@
  *	  prototypes for various files in optimizer/path
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/paths.h
@@ -57,10 +57,15 @@ extern bool eclass_matches_any_index(EquivalenceClass *ec,
 						 RelOptInfo *rel);
 extern bool match_index_to_operand(Node *operand, int indexcol,
 					   IndexOptInfo *index);
-extern List *expand_indexqual_conditions(IndexOptInfo *index,
-							List *clausegroups);
+extern void expand_indexqual_conditions(IndexOptInfo *index,
+							List *indexclauses, List *indexclausecols,
+							List **indexquals_p, List **indexqualcols_p);
 extern void check_partial_indexes(PlannerInfo *root, RelOptInfo *rel);
-extern List *flatten_clausegroups_list(List *clausegroups);
+extern Expr *adjust_rowcompare_for_index(RowCompareExpr *clause,
+							IndexOptInfo *index,
+							int indexcol,
+							List **indexcolnos,
+							bool *var_on_left_p);
 
 /*
  * orindxpath.c

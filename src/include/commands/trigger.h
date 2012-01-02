@@ -3,7 +3,7 @@
  * trigger.h
  *	  Declarations for trigger handling.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/trigger.h
@@ -115,7 +115,7 @@ extern Oid CreateTrigger(CreateTrigStmt *stmt, const char *queryString,
 extern void RemoveTriggerById(Oid trigOid);
 extern Oid	get_trigger_oid(Oid relid, const char *name, bool missing_ok);
 
-extern void renametrig(Oid relid, const char *oldname, const char *newname);
+extern void renametrig(RenameStmt *stmt);
 
 extern void EnableDisableTrigger(Relation rel, const char *tgname,
 					 char fires_when, bool skip_system);

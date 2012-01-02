@@ -3,7 +3,7 @@
  * index.c
  *	  code to create and destroy POSTGRES index relations
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1155,7 +1155,8 @@ index_constraint_create(Relation heapRelation,
 								   NULL,
 								   NULL,
 								   true,		/* islocal */
-								   0);	/* inhcount */
+								   0,			/* inhcount */
+								   false);		/* isonly */
 
 	/*
 	 * Register the index as internally dependent on the constraint.

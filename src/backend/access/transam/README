@@ -473,7 +473,7 @@ the same page, only BKP(1) would have been set.
 For this reason as well as the risk of deadlocking on buffer locks, it's best
 to design WAL records so that they reflect small atomic actions involving just
 one or a few pages.  The current XLOG infrastructure cannot handle WAL records
-involving references to more than three shared buffers, anyway.
+involving references to more than four shared buffers, anyway.
 
 In the case where the WAL record contains enough information to re-generate
 the entire contents of a page, do *not* show that page's buffer ID in the
@@ -481,8 +481,7 @@ rdata array, even if some of the rdata items point into the buffer.  This is
 because you don't want XLogInsert to log the whole page contents.  The
 standard replay-routine pattern for this case is
 
-	reln = XLogOpenRelation(rnode);
-	buffer = XLogReadBuffer(reln, blkno, true);
+	buffer = XLogReadBuffer(rnode, blkno, true);
 	Assert(BufferIsValid(buffer));
 	page = (Page) BufferGetPage(buffer);
 
@@ -501,8 +500,7 @@ The standard replay-routine pattern for this case is
 	if (record->xl_info & XLR_BKP_BLOCK_n)
 		<< do nothing, page was rewritten from logged copy >>;
 
-	reln = XLogOpenRelation(rnode);
-	buffer = XLogReadBuffer(reln, blkno, false);
+	buffer = XLogReadBuffer(rnode, blkno, false);
 	if (!BufferIsValid(buffer))
 		<< do nothing, page has been deleted >>;
 	page = (Page) BufferGetPage(buffer);

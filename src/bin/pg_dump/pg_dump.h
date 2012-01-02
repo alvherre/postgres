@@ -3,7 +3,7 @@
  * pg_dump.h
  *	  Common header file for the pg_dump utility
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_dump/pg_dump.h
@@ -129,6 +129,7 @@ typedef struct _dumpableObject
 	char	   *name;			/* object name (should never be NULL) */
 	struct _namespaceInfo *namespace;	/* containing namespace, or NULL */
 	bool		dump;			/* true if we want to dump this object */
+	bool        dumpdata;       /* true if we want data for this object */
 	bool		ext_member;		/* true if object is member of extension */
 	DumpId	   *dependencies;	/* dumpIds of objects this one depends on */
 	int			nDeps;			/* number of valid dependencies */
@@ -377,6 +378,7 @@ typedef struct _constraintInfo
 	bool		condeferrable;	/* TRUE if constraint is DEFERRABLE */
 	bool		condeferred;	/* TRUE if constraint is INITIALLY DEFERRED */
 	bool		conislocal;		/* TRUE if constraint has local definition */
+	bool		conisonly;		/* TRUE if constraint is non-inheritable */
 	bool		separate;		/* TRUE if must dump as separate item */
 } ConstraintInfo;
 

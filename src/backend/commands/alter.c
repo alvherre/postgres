@@ -3,7 +3,7 @@
  * alter.c
  *	  Drivers for generic alter commands
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -65,6 +65,14 @@ ExecRenameStmt(RenameStmt *stmt)
 			RenameDatabase(stmt->subname, stmt->newname);
 			break;
 
+		case OBJECT_FDW:
+			RenameForeignDataWrapper(stmt->subname, stmt->newname);
+			break;
+
+		case OBJECT_FOREIGN_SERVER:
+			RenameForeignServer(stmt->subname, stmt->newname);
+			break;
+
 		case OBJECT_FUNCTION:
 			RenameFunction(stmt->object, stmt->objarg, stmt->newname);
 			break;
@@ -97,62 +105,18 @@ ExecRenameStmt(RenameStmt *stmt)
 		case OBJECT_SEQUENCE:
 		case OBJECT_VIEW:
 		case OBJECT_INDEX:
+		case OBJECT_FOREIGN_TABLE:
+			RenameRelation(stmt);
+			break;
+
 		case OBJECT_COLUMN:
 		case OBJECT_ATTRIBUTE:
+			renameatt(stmt);
+			break;
+
 		case OBJECT_TRIGGER:
-		case OBJECT_FOREIGN_TABLE:
-			{
-				Oid			relid;
-
-				CheckRelationOwnership(stmt->relation, true);
-
-				/*
-				 * Lock level used here should match what will be taken later,
-				 * in RenameRelation, renameatt, or renametrig.
-				 */
-				relid = RangeVarGetRelid(stmt->relation, AccessExclusiveLock,
-										 false);
-
-				switch (stmt->renameType)
-				{
-					case OBJECT_TABLE:
-					case OBJECT_SEQUENCE:
-					case OBJECT_VIEW:
-					case OBJECT_INDEX:
-					case OBJECT_FOREIGN_TABLE:
-						{
-							/*
-							 * RENAME TABLE requires that we (still) hold
-							 * CREATE rights on the containing namespace, as
-							 * well as ownership of the table.
-							 */
-							Oid			namespaceId = get_rel_namespace(relid);
-							AclResult	aclresult;
-
-							aclresult = pg_namespace_aclcheck(namespaceId,
-															  GetUserId(),
-															  ACL_CREATE);
-							if (aclresult != ACLCHECK_OK)
-								aclcheck_error(aclresult, ACL_KIND_NAMESPACE,
-											get_namespace_name(namespaceId));
-
-							RenameRelation(relid, stmt->newname, stmt->renameType);
-							break;
-						}
-					case OBJECT_COLUMN:
-					case OBJECT_ATTRIBUTE:
-						renameatt(relid, stmt);
-						break;
-					case OBJECT_TRIGGER:
-						renametrig(relid,
-								   stmt->subname,		/* old att name */
-								   stmt->newname);		/* new att name */
-						break;
-					default:
-						 /* can't happen */ ;
-				}
-				break;
-			}
+			renametrig(stmt);
+			break;
 
 		case OBJECT_TSPARSER:
 			RenameTSParser(stmt->object, stmt->newname);
@@ -170,8 +134,9 @@ ExecRenameStmt(RenameStmt *stmt)
 			RenameTSConfiguration(stmt->object, stmt->newname);
 			break;
 
+		case OBJECT_DOMAIN:
 		case OBJECT_TYPE:
-			RenameType(stmt->object, stmt->newname);
+			RenameType(stmt);
 			break;
 
 		default:
@@ -227,7 +192,6 @@ ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt *stmt)
 		case OBJECT_TABLE:
 		case OBJECT_VIEW:
 		case OBJECT_FOREIGN_TABLE:
-			CheckRelationOwnership(stmt->relation, true);
 			AlterTableNamespace(stmt->relation, stmt->newschema,
 								stmt->objectType, AccessExclusiveLock);
 			break;

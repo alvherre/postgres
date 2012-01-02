@@ -4,7 +4,7 @@
  *	  prototypes for costsize.c and clausesel.c.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/optimizer/cost.h
@@ -67,9 +67,8 @@ extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(double tuples_fetched, BlockNumber pages,
 					double index_pages, PlannerInfo *root);
 extern void cost_seqscan(Path *path, PlannerInfo *root, RelOptInfo *baserel);
-extern void cost_index(IndexPath *path, PlannerInfo *root, IndexOptInfo *index,
-		   List *indexQuals, List *indexOrderBys,
-		   bool indexonly, RelOptInfo *outer_rel);
+extern void cost_index(IndexPath *path, PlannerInfo *root,
+					   RelOptInfo *outer_rel);
 extern void cost_bitmap_heap_scan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
 					  Path *bitmapqual, RelOptInfo *outer_rel);
 extern void cost_bitmap_and_node(BitmapAndPath *path, PlannerInfo *root);

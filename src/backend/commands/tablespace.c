@@ -35,7 +35,7 @@
  * and munge the system catalogs of the new database.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -314,8 +314,6 @@ CreateTableSpace(CreateTableSpaceStmt *stmt)
 		DirectFunctionCall1(namein, CStringGetDatum(stmt->tablespacename));
 	values[Anum_pg_tablespace_spcowner - 1] =
 		ObjectIdGetDatum(ownerId);
-	values[Anum_pg_tablespace_spclocation - 1] =
-		CStringGetTextDatum(location);
 	nulls[Anum_pg_tablespace_spcacl - 1] = true;
 	nulls[Anum_pg_tablespace_spcoptions - 1] = true;
 

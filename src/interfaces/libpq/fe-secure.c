@@ -6,7 +6,7 @@
  *	  message integrity and endpoint authentication.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1013,7 +1013,7 @@ initialize_SSL(PGconn *conn)
 		 * might or might not accept the connection.  Any other error,
 		 * however, is grounds for complaint.
 		 */
-		if (errno != ENOENT)
+		if (errno != ENOENT && errno != ENOTDIR)
 		{
 			printfPQExpBuffer(&conn->errorMessage,
 			   libpq_gettext("could not open certificate file \"%s\": %s\n"),

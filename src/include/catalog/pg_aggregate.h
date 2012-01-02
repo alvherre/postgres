@@ -5,7 +5,7 @@
  *	  along with the relation's initial contents.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_aggregate.h
@@ -225,6 +225,9 @@ DATA(insert ( 2335	array_agg_transfn	array_agg_finalfn		0	2281	_null_ ));
 
 /* text */
 DATA(insert ( 3538	string_agg_transfn	string_agg_finalfn		0	2281	_null_ ));
+
+/* bytea */
+DATA(insert ( 3545	bytea_agg_transfn	bytea_agg_finalfn		0	2281	_null_ ));
 
 /*
  * prototypes for functions in pg_aggregate.c

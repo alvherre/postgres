@@ -19,9 +19,6 @@ ECPG: stmtClosePortalStmt block
 	}
 ECPG: stmtDeallocateStmt block
 	{
-		if (connection)
-			mmerror(PARSE_ERROR, ET_ERROR, "AT option not allowed in DEALLOCATE statement");
-
 		output_deallocate_prepare_statement($1);
 	}
 ECPG: stmtDeclareCursorStmt block
@@ -72,8 +69,6 @@ ECPG: stmtViewStmt rule
 	}
 	| ECPGDeallocateDescr
 	{
-		if (connection)
-			mmerror(PARSE_ERROR, ET_ERROR, "AT option not allowed in DEALLOCATE statement");
 		fprintf(yyout,"ECPGdeallocate_desc(__LINE__, %s);",$1);
 		whenever_action(0);
 		free($1);
@@ -107,7 +102,7 @@ ECPG: stmtViewStmt rule
 	{
 		const char *con = connection ? connection : "NULL";
 
-		if (!strcmp($1, "all"))
+		if (strcmp($1, "all") == 0)
 			fprintf(yyout, "{ ECPGdeallocate_all(__LINE__, %d, %s);", compat, con);
 		else if ($1[0] == ':')
 			fprintf(yyout, "{ ECPGdeallocate(__LINE__, %d, %s, %s);", compat, con, $1+1);

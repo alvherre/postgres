@@ -3,7 +3,7 @@
  * timestamp.c
  *	  Functions for the built-in SQL92 types "timestamp" and "interval".
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1828,6 +1828,25 @@ timestamp_cmp(PG_FUNCTION_ARGS)
 	Timestamp	dt2 = PG_GETARG_TIMESTAMP(1);
 
 	PG_RETURN_INT32(timestamp_cmp_internal(dt1, dt2));
+}
+
+/* note: this is used for timestamptz also */
+static int
+timestamp_fastcmp(Datum x, Datum y, SortSupport ssup)
+{
+	Timestamp	a = DatumGetTimestamp(x);
+	Timestamp	b = DatumGetTimestamp(y);
+
+	return timestamp_cmp_internal(a, b);
+}
+
+Datum
+timestamp_sortsupport(PG_FUNCTION_ARGS)
+{
+	SortSupport	ssup = (SortSupport) PG_GETARG_POINTER(0);
+
+	ssup->comparator = timestamp_fastcmp;
+	PG_RETURN_VOID();
 }
 
 Datum

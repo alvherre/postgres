@@ -4,7 +4,7 @@
  *	  header file for postgres btree access method implementation.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/nbtree.h
@@ -417,13 +417,18 @@ typedef struct xl_btree_newroot
 
 /*
  *	When a new operator class is declared, we require that the user
- *	supply us with an amproc procedure for determining whether, for
- *	two keys a and b, a < b, a = b, or a > b.  This routine must
- *	return < 0, 0, > 0, respectively, in these three cases.  Since we
- *	only have one such proc in amproc, it's number 1.
+ *	supply us with an amproc procedure (BTORDER_PROC) for determining
+ *	whether, for two keys a and b, a < b, a = b, or a > b.  This routine
+ *	must return < 0, 0, > 0, respectively, in these three cases.  (It must
+ *	not return INT_MIN, since we may negate the result before using it.)
+ *
+ *	To facilitate accelerated sorting, an operator class may choose to
+ *	offer a second procedure (BTSORTSUPPORT_PROC).  For full details, see
+ *	src/include/utils/sortsupport.h.
  */
 
-#define BTORDER_PROC	1
+#define BTORDER_PROC		1
+#define BTSORTSUPPORT_PROC	2
 
 /*
  *	We need to be able to tell the difference between read and write
@@ -602,6 +607,7 @@ extern Datum btmarkpos(PG_FUNCTION_ARGS);
 extern Datum btrestrpos(PG_FUNCTION_ARGS);
 extern Datum btbulkdelete(PG_FUNCTION_ARGS);
 extern Datum btvacuumcleanup(PG_FUNCTION_ARGS);
+extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
 
 /*

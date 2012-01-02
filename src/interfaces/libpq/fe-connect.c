@@ -3,7 +3,7 @@
  * fe-connect.c
  *	  functions related to setting up a connection to the backend
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -4904,7 +4904,9 @@ PasswordFromFile(char *hostname, char *port, char *dbname, char *username)
 	while (!feof(fp) && !ferror(fp))
 	{
 		char	   *t = buf,
-				   *ret;
+				   *ret,
+				   *p1,
+				   *p2;
 		int			len;
 
 		if (fgets(buf, sizeof(buf), fp) == NULL)
@@ -4925,6 +4927,16 @@ PasswordFromFile(char *hostname, char *port, char *dbname, char *username)
 			continue;
 		ret = strdup(t);
 		fclose(fp);
+
+		/* De-escape password. */
+		for (p1 = p2 = ret; *p1 != ':' && *p1 != '\0'; ++p1, ++p2)
+		{
+			if (*p1 == '\\' && p1[1] != '\0')
+				++p1;
+			*p2 = *p1;
+		}
+		*p2 = '\0';
+
 		return ret;
 	}
 

@@ -10911,6 +10911,24 @@ SELECT NULLIF(value, '(none)') ...
      <row>
       <entry>
        <indexterm>
+        <primary>bytea_agg</primary>
+       </indexterm>
+       <function>
+         bytea_agg(<replaceable class="parameter">expression</replaceable>)
+       </function>
+      </entry>
+      <entry>
+       <type>bytea</type>
+      </entry>
+      <entry>
+       <type>bytea</type>
+      </entry>
+      <entry>input values concatenated into a bytea</entry>
+     </row>
+
+     <row>
+      <entry>
+       <indexterm>
         <primary>count</primary>
        </indexterm>
        <function>count(*)</function>
@@ -13612,6 +13630,10 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
    </indexterm>
 
    <indexterm>
+    <primary>pg_tablespace_location</primary>
+   </indexterm>
+
+   <indexterm>
     <primary>pg_typeof</primary>
    </indexterm>
 
@@ -13757,6 +13779,11 @@ SELECT pg_type_is_visible('myschema.widget'::regtype);
        <entry><literal><function>pg_tablespace_databases(<parameter>tablespace_oid</parameter>)</function></literal></entry>
        <entry><type>setof oid</type></entry>
        <entry>get the set of database OIDs that have objects in the tablespace</entry>
+      </row>
+      <row>
+       <entry><literal><function>pg_tablespace_location(<parameter>tablespace_oid</parameter>)</function></literal></entry>
+       <entry><type>text</type></entry>
+       <entry>get the path in the filesystem that this tablespace is located in</entry>
       </row>
       <row>
        <entry><literal><function>pg_typeof(<parameter>any</parameter>)</function></literal></entry>

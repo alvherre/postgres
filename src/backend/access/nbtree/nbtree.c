@@ -8,7 +8,7 @@
  *	  This file contains only the public interface routines.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1090,4 +1090,15 @@ restart:
 		blkno = recurse_to;
 		goto restart;
 	}
+}
+
+/*
+ *	btcanreturn() -- Check whether btree indexes support index-only scans.
+ *
+ * btrees always do, so this is trivial.
+ */
+Datum
+btcanreturn(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_BOOL(true);
 }

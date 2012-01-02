@@ -3,7 +3,7 @@
  * rewriteHandler.c
  *		Primary module of query rewriter.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1382,6 +1382,7 @@ ApplyRetrieveRule(Query *parsetree,
 
 	rte->rtekind = RTE_SUBQUERY;
 	rte->relid = InvalidOid;
+	rte->security_barrier = RelationIsSecurityView(relation);
 	rte->subquery = rule_action;
 	rte->inh = false;			/* must not be set for a subquery */
 

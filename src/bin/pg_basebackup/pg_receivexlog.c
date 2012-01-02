@@ -5,7 +5,7 @@
  *
  * Author: Magnus Hagander <magnus@hagander.net>
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		  src/bin/pg_basebackup/pg_receivexlog.c
@@ -126,7 +126,7 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 					log,
 					seg;
 
-		if (!strcmp(dirent->d_name, ".") || !strcmp(dirent->d_name, ".."))
+		if (strcmp(dirent->d_name, ".") == 0 || strcmp(dirent->d_name, "..") == 0)
 			continue;
 
 		/* xlog files are always 24 characters */
@@ -278,11 +278,15 @@ StreamLog(void)
  * When sigint is called, just tell the system to exit at the next possible
  * moment.
  */
+#ifndef WIN32
+
 static void
 sigint_handler(int signum)
 {
 	time_to_abort = true;
 }
+
+#endif
 
 int
 main(int argc, char **argv)

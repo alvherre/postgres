@@ -5,7 +5,7 @@
  *
  * See src/backend/access/transam/README for more information.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -4595,11 +4595,8 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 
 		for (fork = 0; fork <= MAX_FORKNUM; fork++)
 		{
-			if (smgrexists(srel, fork))
-			{
-				XLogDropRelation(xnodes[i], fork);
-				smgrdounlink(srel, fork, true);
-			}
+			XLogDropRelation(xnodes[i], fork);
+			smgrdounlink(srel, fork, true);
 		}
 		smgrclose(srel);
 	}
@@ -4738,11 +4735,8 @@ xact_redo_abort(xl_xact_abort *xlrec, TransactionId xid)
 
 		for (fork = 0; fork <= MAX_FORKNUM; fork++)
 		{
-			if (smgrexists(srel, fork))
-			{
-				XLogDropRelation(xlrec->xnodes[i], fork);
-				smgrdounlink(srel, fork, true);
-			}
+			XLogDropRelation(xlrec->xnodes[i], fork);
+			smgrdounlink(srel, fork, true);
 		}
 		smgrclose(srel);
 	}

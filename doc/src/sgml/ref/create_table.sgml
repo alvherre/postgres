@@ -124,6 +124,12 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
    a column constraint is only a notational convenience for use when the
    constraint only affects one column.
   </para>
+
+  <para>
+   To be able to create a table, you must have <literal>USAGE</literal>
+   privilege on all column types or the type in the <literal>OF</literal>
+   clause, respectively.
+  </para>
  </refsect1>
 
  <refsect1>
@@ -540,7 +546,8 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
       cannot be used.  Although it's allowed, there is little point in using
       B-tree or hash indexes with an exclusion constraint, because this
       does nothing that an ordinary unique constraint doesn't do better.
-      So in practice the access method will always be <acronym>GiST</>.
+      So in practice the access method will always be <acronym>GiST</> or
+      <acronym>SP-GiST</>.
      </para>
 
      <para>

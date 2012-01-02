@@ -90,14 +90,14 @@
 /* Define to 1 if you have the `append_history' function. */
 #undef HAVE_APPEND_HISTORY
 
-/* Define to 1 if you have the `atexit' function. */
-#undef HAVE_ATEXIT
-
 /* Define to 1 if you have the `cbrt' function. */
 #undef HAVE_CBRT
 
 /* Define to 1 if you have the `class' function. */
 #undef HAVE_CLASS
+
+/* Define to 1 if you have the <crtdefs.h> header file. */
+#undef HAVE_CRTDEFS_H
 
 /* Define to 1 if you have the `crypt' function. */
 #undef HAVE_CRYPT
@@ -275,7 +275,7 @@
 /* Define to 1 if `text.data' is member of `krb5_error'. */
 #undef HAVE_KRB5_ERROR_TEXT_DATA
 
-/* Define to 1 if you have krb5_free_unparsed_name */
+/* Define to 1 if you have krb5_free_unparsed_name. */
 #undef HAVE_KRB5_FREE_UNPARSED_NAME
 
 /* Define to 1 if `client' is member of `krb5_ticket'. */
@@ -366,9 +366,6 @@
 /* Define to 1 if you have the <net/if.h> header file. */
 #undef HAVE_NET_IF_H
 
-/* Define to 1 if you have the `on_exit' function. */
-#undef HAVE_ON_EXIT
-
 /* Define to 1 if you have the <ossp/uuid.h> header file. */
 #undef HAVE_OSSP_UUID_H
 
@@ -386,6 +383,9 @@
 
 /* Define to 1 if you have the POSIX signal interface. */
 #undef HAVE_POSIX_SIGNALS
+
+/* Define to 1 if the assembler supports PPC's LWARX mutex hint bit. */
+#undef HAVE_PPC_LWARX_MUTEX_HINT
 
 /* Define to 1 if you have the `pstat' function. */
 #undef HAVE_PSTAT

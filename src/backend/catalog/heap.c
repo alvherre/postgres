@@ -3,7 +3,7 @@
  * heap.c
  *	  code to create and destroy POSTGRES heap relations
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -92,10 +92,10 @@ static Oid AddNewRelationType(const char *typeName,
 				   Oid new_array_type);
 static void RelationRemoveInheritance(Oid relid);
 static void StoreRelCheck(Relation rel, char *ccname, Node *expr,
-			  bool is_validated, bool is_local, int inhcount);
+			  bool is_validated, bool is_local, int inhcount, bool is_only);
 static void StoreConstraints(Relation rel, List *cooked_constraints);
 static bool MergeWithExistingConstraint(Relation rel, char *ccname, Node *expr,
-							bool allow_merge, bool is_local);
+							bool allow_merge, bool is_local, bool is_only);
 static void SetRelationNumChecks(Relation rel, int numchecks);
 static Node *cookConstraint(ParseState *pstate,
 			   Node *raw_constraint,
@@ -1875,7 +1875,7 @@ StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr)
  */
 static void
 StoreRelCheck(Relation rel, char *ccname, Node *expr,
-			  bool is_validated, bool is_local, int inhcount)
+			  bool is_validated, bool is_local, int inhcount, bool is_only)
 {
 	char	   *ccbin;
 	char	   *ccsrc;
@@ -1958,7 +1958,8 @@ StoreRelCheck(Relation rel, char *ccname, Node *expr,
 						  ccbin,	/* Binary form of check constraint */
 						  ccsrc,	/* Source form of check constraint */
 						  is_local,		/* conislocal */
-						  inhcount);	/* coninhcount */
+						  inhcount,		/* coninhcount */
+						  is_only);		/* conisonly */
 
 	pfree(ccbin);
 	pfree(ccsrc);
@@ -1999,7 +2000,7 @@ StoreConstraints(Relation rel, List *cooked_constraints)
 				break;
 			case CONSTR_CHECK:
 				StoreRelCheck(rel, con->name, con->expr, !con->skip_validation,
-							  con->is_local, con->inhcount);
+							  con->is_local, con->inhcount, con->is_only);
 				numchecks++;
 				break;
 			default:
@@ -2042,7 +2043,8 @@ AddRelationNewConstraints(Relation rel,
 						  List *newColDefaults,
 						  List *newConstraints,
 						  bool allow_merge,
-						  bool is_local)
+						  bool is_local,
+						  bool is_only)
 {
 	List	   *cookedConstraints = NIL;
 	TupleDesc	tupleDesc;
@@ -2115,6 +2117,7 @@ AddRelationNewConstraints(Relation rel,
 		cooked->skip_validation = false;
 		cooked->is_local = is_local;
 		cooked->inhcount = is_local ? 0 : 1;
+		cooked->is_only = is_only;
 		cookedConstraints = lappend(cookedConstraints, cooked);
 	}
 
@@ -2182,7 +2185,7 @@ AddRelationNewConstraints(Relation rel,
 			 * what ATAddCheckConstraint wants.)
 			 */
 			if (MergeWithExistingConstraint(rel, ccname, expr,
-											allow_merge, is_local))
+								allow_merge, is_local, is_only))
 				continue;
 		}
 		else
@@ -2229,7 +2232,7 @@ AddRelationNewConstraints(Relation rel,
 		 * OK, store it.
 		 */
 		StoreRelCheck(rel, ccname, expr, !cdef->skip_validation, is_local,
-					  is_local ? 0 : 1);
+					  is_local ? 0 : 1, is_only);
 
 		numchecks++;
 
@@ -2241,6 +2244,7 @@ AddRelationNewConstraints(Relation rel,
 		cooked->skip_validation = cdef->skip_validation;
 		cooked->is_local = is_local;
 		cooked->inhcount = is_local ? 0 : 1;
+		cooked->is_only = is_only;
 		cookedConstraints = lappend(cookedConstraints, cooked);
 	}
 
@@ -2266,7 +2270,8 @@ AddRelationNewConstraints(Relation rel,
  */
 static bool
 MergeWithExistingConstraint(Relation rel, char *ccname, Node *expr,
-							bool allow_merge, bool is_local)
+							bool allow_merge, bool is_local,
+							bool is_only)
 {
 	bool		found;
 	Relation	conDesc;
@@ -2328,6 +2333,11 @@ MergeWithExistingConstraint(Relation rel, char *ccname, Node *expr,
 				con->conislocal = true;
 			else
 				con->coninhcount++;
+			if (is_only)
+			{
+				Assert(is_local);
+				con->conisonly = true;
+			}
 			simple_heap_update(conDesc, &tup->t_self, tup);
 			CatalogUpdateIndexes(conDesc, tup);
 			break;

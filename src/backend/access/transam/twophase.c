@@ -3,7 +3,7 @@
  * twophase.c
  *		Two-phase commit support functions.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -1366,8 +1366,7 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
 
 		for (fork = 0; fork <= MAX_FORKNUM; fork++)
 		{
-			if (smgrexists(srel, fork))
-				smgrdounlink(srel, fork, false);
+			smgrdounlink(srel, fork, false);
 		}
 		smgrclose(srel);
 	}
