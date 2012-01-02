@@ -590,8 +590,7 @@ tuplestore_putvalues(Tuplestorestate *state, TupleDesc tdesc,
 	MinimalTuple tuple;
 	MemoryContext oldcxt = MemoryContextSwitchTo(state->context);
 
-	tuple = heap_form_minimal_tuple(tdesc, values, isnull,
-									HTOPT_LOGICAL_ORDER);
+	tuple = heap_form_minimal_tuple(tdesc, values, isnull, 0);
 	USEMEM(state, GetMemoryChunkSpace(tuple));
 
 	tuplestore_puttuple_common(state, (void *) tuple);

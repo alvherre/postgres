@@ -1404,8 +1404,9 @@ heap_freetuple(HeapTuple htup)
  * "minimal" tuple lacking a HeapTupleData header as well as room for system
  * columns.
  *
- * If logical_order is true, the values and isnull arrays are sorted in logical
- * order, so we re-sort them to build the tuple correctly.
+ * If the HTOPT_LOGICAL_ORDER flag is set, the values and isnull arrays are
+ * sorted in logical order, so we re-sort them to build the tuple in correct
+ * physical order.
  *
  * The result is allocated in the current memory context.
  */

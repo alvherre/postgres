@@ -1653,8 +1653,8 @@ expandRTE(RangeTblEntry *rte, int rtindex, int sublevels_up,
 					/* Composite data type, e.g. a table's row type */
 					Assert(tupdesc);
 					expandTupleDesc(tupdesc, rte->eref,
-									rtindex, sublevels_up, location, false,
-									include_dropped, colnames, colvars);
+									rtindex, sublevels_up, location, include_dropped,
+									logical_sort, colnames, colvars);
 				}
 				else if (functypclass == TYPEFUNC_SCALAR)
 				{
