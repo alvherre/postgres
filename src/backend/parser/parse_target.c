@@ -853,7 +853,7 @@ checkInsertTargets(ParseState *pstate, List *cols, List **attrnos)
 		/*
 		 * Generate default column list for INSERT.
 		 */
-		Form_pg_attribute *attr = pstate->p_target_relation->rd_att->attrs;
+		Form_pg_attribute *attr = TupleDescGetSortedAttrs(pstate->p_target_relation->rd_att);
 		int			numcol = pstate->p_target_relation->rd_rel->relnatts;
 		int			i;
 
@@ -870,7 +870,7 @@ checkInsertTargets(ParseState *pstate, List *cols, List **attrnos)
 			col->val = NULL;
 			col->location = -1;
 			cols = lappend(cols, col);
-			*attrnos = lappend_int(*attrnos, i + 1);
+			*attrnos = lappend_int(*attrnos, attr[i]->attnum);
 		}
 	}
 	else
@@ -888,7 +888,7 @@ checkInsertTargets(ParseState *pstate, List *cols, List **attrnos)
 			char	   *name = col->name;
 			int			attrno;
 
-			/* Lookup column name, ereport on failure */
+			/* Lookup column number, ereport on failure */
 			attrno = attnameAttNum(pstate->p_target_relation, name, false);
 			if (attrno == InvalidAttrNumber)
 				ereport(ERROR,
@@ -1233,6 +1233,7 @@ ExpandRowReference(ParseState *pstate, Node *expr,
 	TupleDesc	tupleDesc;
 	int			numAttrs;
 	int			i;
+	Form_pg_attribute *attr;
 
 	/*
 	 * If the rowtype expression is a whole-row Var, we can expand the fields
@@ -1279,9 +1280,10 @@ ExpandRowReference(ParseState *pstate, Node *expr,
 
 	/* Generate a list of references to the individual fields */
 	numAttrs = tupleDesc->natts;
+	attr = TupleDescGetSortedAttrs(tupleDesc);
 	for (i = 0; i < numAttrs; i++)
 	{
-		Form_pg_attribute att = tupleDesc->attrs[i];
+		Form_pg_attribute att = attr[i];
 		FieldSelect *fselect;
 
 		if (att->attisdropped)

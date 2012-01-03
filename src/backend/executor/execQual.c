@@ -3127,7 +3127,8 @@ ExecEvalRow(RowExprState *rstate,
 		i++;
 	}
 
-	tuple = heap_form_tuple(rstate->tupdesc, values, isnull);
+	tuple = heap_form_tuple_extended(rstate->tupdesc, values, isnull,
+									 HTOPT_LOGICAL_ORDER);
 
 	pfree(values);
 	pfree(isnull);
@@ -3870,6 +3871,7 @@ ExecEvalFieldSelect(FieldSelectState *fstate,
 	TupleDesc	tupDesc;
 	Form_pg_attribute attr;
 	HeapTupleData tmptup;
+	Form_pg_attribute *attrs;
 
 	tupDatum = ExecEvalExpr(fstate->arg, econtext, isNull, isDone);
 
@@ -3897,7 +3899,8 @@ ExecEvalFieldSelect(FieldSelectState *fstate,
 	if (fieldnum > tupDesc->natts)		/* should never happen */
 		elog(ERROR, "attribute number %d exceeds number of columns %d",
 			 fieldnum, tupDesc->natts);
-	attr = tupDesc->attrs[fieldnum - 1];
+	attrs = TupleDescGetSortedAttrs(tupDesc);
+	attr = attrs[fieldnum - 1];
 
 	/* Check for dropped column, and force a NULL result if so */
 	if (attr->attisdropped)
@@ -3920,7 +3923,7 @@ ExecEvalFieldSelect(FieldSelectState *fstate,
 	tmptup.t_data = tuple;
 
 	result = heap_getattr(&tmptup,
-						  fieldnum,
+						  attr->attnum,
 						  tupDesc,
 						  isNull);
 	return result;

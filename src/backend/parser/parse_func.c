@@ -1414,6 +1414,7 @@ ParseComplexProjection(ParseState *pstate, char *funcname, Node *first_arg,
 {
 	TupleDesc	tupdesc;
 	int			i;
+	Form_pg_attribute *attrs;
 
 	/*
 	 * Special case for whole-row Vars so that we can resolve (foo.*).bar even
@@ -1451,9 +1452,10 @@ ParseComplexProjection(ParseState *pstate, char *funcname, Node *first_arg,
 		return NULL;			/* unresolvable RECORD type */
 	Assert(tupdesc);
 
+	attrs = TupleDescGetSortedAttrs(tupdesc);
 	for (i = 0; i < tupdesc->natts; i++)
 	{
-		Form_pg_attribute att = tupdesc->attrs[i];
+		Form_pg_attribute att = attrs[i];
 
 		if (strcmp(funcname, NameStr(att->attname)) == 0 &&
 			!att->attisdropped)
