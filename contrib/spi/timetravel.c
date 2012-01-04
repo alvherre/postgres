@@ -317,6 +317,7 @@ timetravel(PG_FUNCTION_ARGS)
 		Oid		   *ctypes;
 		char		sql[8192];
 		char		separ = ' ';
+		Form_pg_attribute *attrs;
 
 		/* allocate ctypes for preparation */
 		ctypes = (Oid *) palloc(natts * sizeof(Oid));
@@ -325,10 +326,11 @@ timetravel(PG_FUNCTION_ARGS)
 		 * Construct query: INSERT INTO _relation_ VALUES ($1, ...)
 		 */
 		snprintf(sql, sizeof(sql), "INSERT INTO %s VALUES (", relname);
+		attrs = TupleDescGetSortedAttrs(tupdesc);
 		for (i = 1; i <= natts; i++)
 		{
-			ctypes[i - 1] = SPI_gettypeid(tupdesc, i);
-			if (!(tupdesc->attrs[i - 1]->attisdropped)) /* skip dropped columns */
+			ctypes[i - 1] = SPI_gettypeid(tupdesc, attrs[i - 1]->attnum);
+			if (!(attrs[i - 1]->attisdropped)) /* skip dropped columns */
 			{
 				snprintf(sql + strlen(sql), sizeof(sql) - strlen(sql), "%c$%d", separ, i);
 				separ = ',';

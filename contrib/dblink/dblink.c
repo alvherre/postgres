@@ -1909,6 +1909,9 @@ get_attnum_pk_pos(int *pkattnums, int pknumatts, int key)
 	return -1;
 }
 
+/*
+ * FIXME this probably needs to be tweaked.
+ */
 static HeapTuple
 get_tuple_of_interest(Relation rel, int *pkattnums, int pknumatts, char **src_pkattvals)
 {

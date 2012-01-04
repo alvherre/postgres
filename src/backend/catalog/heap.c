@@ -2086,6 +2086,7 @@ AddRelationNewConstraints(Relation rel,
 	foreach(cell, newColDefaults)
 	{
 		RawColumnDefault *colDef = (RawColumnDefault *) lfirst(cell);
+		/* FIXME -- does this need to change? apparently not, but it's suspicious */
 		Form_pg_attribute atp = rel->rd_att->attrs[colDef->attnum - 1];
 
 		expr = cookDefault(pstate, colDef->raw_default,

@@ -1070,6 +1070,9 @@ ExecEvalParamExtern(ExprState *exprstate, ExprContext *econtext,
  *		to use these.  Ex: overpaid(EMP) might call GetAttributeByNum().
  *		Note: these are actually rather slow because they do a typcache
  *		lookup on each call.
+ *
+ *	FIXME -- probably these functions should consider attrno a logical column
+ *	number
  */
 Datum
 GetAttributeByNum(HeapTupleHeader tuple,
@@ -3980,7 +3983,8 @@ ExecEvalFieldStore(FieldStoreState *fstate,
 		tmptup.t_tableOid = InvalidOid;
 		tmptup.t_data = tuphdr;
 
-		heap_deform_tuple(&tmptup, tupDesc, values, isnull);
+		heap_deform_tuple_extended(&tmptup, tupDesc, values, isnull,
+								   HTOPT_LOGICAL_ORDER);
 	}
 	else
 	{
@@ -4022,7 +4026,8 @@ ExecEvalFieldStore(FieldStoreState *fstate,
 	econtext->caseValue_datum = save_datum;
 	econtext->caseValue_isNull = save_isNull;
 
-	tuple = heap_form_tuple(tupDesc, values, isnull);
+	tuple = heap_form_tuple_extended(tupDesc, values, isnull,
+									 HTOPT_LOGICAL_ORDER);
 
 	pfree(values);
 	pfree(isnull);

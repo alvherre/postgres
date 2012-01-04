@@ -1395,6 +1395,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		TupleConstr *constr;
 		AttrNumber *newattno;
 		AttrNumber	parent_attno;
+		Form_pg_attribute *parent_attrs;
 
 		/*
 		 * A self-exclusive lock is needed here.  If two backends attempt to
@@ -1444,6 +1445,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 			parentsWithOids++;
 
 		tupleDesc = RelationGetDescr(relation);
+		parent_attrs = TupleDescGetSortedAttrs(tupleDesc);
 		constr = tupleDesc->constr;
 
 		/*
@@ -1457,7 +1459,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		for (parent_attno = 1; parent_attno <= tupleDesc->natts;
 			 parent_attno++)
 		{
-			Form_pg_attribute attribute = tupleDesc->attrs[parent_attno - 1];
+			Form_pg_attribute attribute = parent_attrs[parent_attno - 1];
 			char	   *attributeName = NameStr(attribute->attname);
 			int			exist_attno;
 			ColumnDef  *def;
