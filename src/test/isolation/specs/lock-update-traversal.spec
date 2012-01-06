@@ -26,7 +26,9 @@ step "s1c"	{ COMMIT; }
 session "s2"
 step "s2b"	{ BEGIN; }
 step "s2u"	{ UPDATE foo SET value = 2 WHERE key = 1; }
+step "s2u2"	{ UPDATE foo SET value = 3 WHERE key = 1; }
+step "s2u3"	{ UPDATE foo SET value = 4 WHERE key = 1; }
 step "s2c"	{ COMMIT; }
 step "s2d"	{ DELETE FROM foo WHERE key = 1; }
 
-permutation "s1b" "s2b" "s1s" "s2u" "s1l" "s2c" "s2d" "s1c"
+permutation "s1b" "s2b" "s1s" "s2u" "s2u2" "s2u3" "s1l" "s2c" "s2d" "s1c"

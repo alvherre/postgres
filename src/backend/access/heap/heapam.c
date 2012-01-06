@@ -3703,6 +3703,9 @@ get_mxact_status_for_tuplelock(LockTupleMode mode)
  * starve out waiting exclusive-lockers.  However, if there is not any active
  * conflict for a tuple, we don't incur any extra overhead.
  */
+static void
+heap_lock_updated_tuple(Relation rel, ItemPointer tid);
+
 HTSU_Result
 heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 				ItemPointer ctid, TransactionId *update_xmax,
@@ -4356,6 +4359,14 @@ l3:
 
 	LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
+	if (!HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
+	{
+		ItemPointerData		tid;
+	
+		ItemPointerCopy(&(tuple->t_data->t_ctid), &tid);
+		heap_lock_updated_tuple(relation, &tid);
+	}
+
 	/*
 	 * Don't update the visibility map here. Locking a tuple doesn't change
 	 * visibility info.
@@ -4369,6 +4380,41 @@ l3:
 		UnlockTupleTuplock(relation, tid, mode);
 
 	return HeapTupleMayBeUpdated;
+}
+
+#include "executor/tuptable.h"
+#include "access/printtup.h"
+static void
+heap_lock_updated_tuple(Relation rel, ItemPointer tid)
+{
+	TupleTableSlot	*slot;
+	HeapTupleData	mytup;
+	Buffer			buf;
+
+	slot = MakeSingleTupleTableSlot(rel->rd_att);
+
+restart:
+	ItemPointerCopy(tid, &(mytup.t_self));
+
+	if (!heap_fetch(rel, SnapshotAny, &mytup, &buf, false, NULL))
+		elog(ERROR, "unable to fetch updated version of tuple");
+
+	ExecStoreTuple(&mytup, slot, buf, false);
+	ReleaseBuffer(buf);
+	printf("reporting tuple at %u/%u\n", ItemPointerGetBlockNumber(tid),
+		   ItemPointerGetOffsetNumber(tid));
+	debugtup(slot, NULL);
+
+	/* found end of update chain? */
+	if (ItemPointerEquals(&(mytup.t_self), &(mytup.t_data->t_ctid)));
+	{
+		ExecDropSingleTupleTableSlot(slot);
+		return;
+	}
+
+	/* almost tail recursion */
+	ItemPointerCopy(&(mytup.t_data->t_ctid), tid);
+	goto restart;
 }
 
 
