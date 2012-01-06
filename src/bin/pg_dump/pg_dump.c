@@ -4,7 +4,7 @@
  *	  pg_dump is a utility for dumping out a postgres database
  *	  into a script file.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	pg_dump will read the system catalogs in a database and dump out a
@@ -91,6 +91,7 @@ PGconn	   *g_conn;				/* the database connection */
 /* various user-settable parameters */
 bool		schemaOnly;
 bool		dataOnly;
+int         dumpSections; /* bitmask of chosen sections */
 bool		aclsSkip;
 const char *lockWaitTimeout;
 
@@ -115,6 +116,8 @@ static SimpleStringList table_include_patterns = {NULL, NULL};
 static SimpleOidList table_include_oids = {NULL, NULL};
 static SimpleStringList table_exclude_patterns = {NULL, NULL};
 static SimpleOidList table_exclude_oids = {NULL, NULL};
+static SimpleStringList tabledata_exclude_patterns = {NULL, NULL};
+static SimpleOidList tabledata_exclude_oids = {NULL, NULL};
 
 /* default, if no "inclusion" switches appear, is to dump everything */
 static bool include_everything = true;
@@ -248,7 +251,6 @@ static void do_sql_command(PGconn *conn, const char *query);
 static void check_sql_result(PGresult *res, PGconn *conn, const char *query,
 				 ExecStatusType expected);
 
-
 int
 main(int argc, char **argv)
 {
@@ -324,11 +326,13 @@ main(int argc, char **argv)
 		{"column-inserts", no_argument, &column_inserts, 1},
 		{"disable-dollar-quoting", no_argument, &disable_dollar_quoting, 1},
 		{"disable-triggers", no_argument, &disable_triggers, 1},
+		{"exclude-table-data", required_argument, NULL, 4},
 		{"inserts", no_argument, &dump_inserts, 1},
 		{"lock-wait-timeout", required_argument, NULL, 2},
 		{"no-tablespaces", no_argument, &outputNoTablespaces, 1},
 		{"quote-all-identifiers", no_argument, &quote_all_identifiers, 1},
 		{"role", required_argument, NULL, 3},
+		{"section", required_argument, NULL, 5},
 		{"serializable-deferrable", no_argument, &serializable_deferrable, 1},
 		{"use-set-session-authorization", no_argument, &use_setsessauth, 1},
 		{"no-security-labels", no_argument, &no_security_labels, 1},
@@ -346,6 +350,7 @@ main(int argc, char **argv)
 	strcpy(g_opaque_type, "opaque");
 
 	dataOnly = schemaOnly = false;
+	dumpSections = DUMP_UNSECTIONED;
 	lockWaitTimeout = NULL;
 
 	progname = get_progname(argv[0]);
@@ -487,6 +492,14 @@ main(int argc, char **argv)
 				use_role = optarg;
 				break;
 
+			case 4:			/* exclude table(s) data */
+				simple_string_list_append(&tabledata_exclude_patterns, optarg);
+				break;
+
+			case 5:				/* section */
+				set_section(optarg, &dumpSections);
+				break;
+
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 				exit(1);
@@ -515,6 +528,22 @@ main(int argc, char **argv)
 	{
 		write_msg(NULL, "options -s/--schema-only and -a/--data-only cannot be used together\n");
 		exit(1);
+	}
+
+	if ((dataOnly || schemaOnly) && dumpSections != DUMP_UNSECTIONED)
+	{
+		write_msg(NULL, "options -s/--schema-only and -a/--data-only cannot be used with --section\n");
+		exit(1);
+	}
+
+	if (dataOnly)
+		dumpSections = DUMP_DATA;
+	else if (schemaOnly)
+		dumpSections = DUMP_PRE_DATA | DUMP_POST_DATA;
+	else if ( dumpSections != DUMP_UNSECTIONED)
+	{
+		dataOnly = dumpSections == DUMP_DATA;
+		schemaOnly = !(dumpSections & DUMP_DATA);
 	}
 
 	if (dataOnly && outputClean)
@@ -715,6 +744,10 @@ main(int argc, char **argv)
 	}
 	expand_table_name_patterns(&table_exclude_patterns,
 							   &table_exclude_oids);
+
+	expand_table_name_patterns(&tabledata_exclude_patterns,
+							   &tabledata_exclude_oids);
+
 	/* non-matching exclusion patterns aren't an error */
 
 	/*
@@ -827,7 +860,8 @@ help(const char *progname)
 
 	printf(_("\nGeneral options:\n"));
 	printf(_("  -f, --file=FILENAME         output file or directory name\n"));
-	printf(_("  -F, --format=c|d|t|p        output file format (custom, directory, tar, plain text)\n"));
+	printf(_("  -F, --format=c|d|t|p        output file format (custom, directory, tar,\n"
+			 "                              plain text (default))\n"));
 	printf(_("  -v, --verbose               verbose mode\n"));
 	printf(_("  -Z, --compress=0-9          compression level for compressed formats\n"));
 	printf(_("  --lock-wait-timeout=TIMEOUT fail after waiting TIMEOUT for a table lock\n"));
@@ -854,11 +888,13 @@ help(const char *progname)
 	printf(_("  --column-inserts            dump data as INSERT commands with column names\n"));
 	printf(_("  --disable-dollar-quoting    disable dollar quoting, use SQL standard quoting\n"));
 	printf(_("  --disable-triggers          disable triggers during data-only restore\n"));
+	printf(_("  --exclude-table-data=TABLE  do NOT dump data for the named table(s)\n"));
 	printf(_("  --inserts                   dump data as INSERT commands, rather than COPY\n"));
 	printf(_("  --no-security-labels        do not dump security label assignments\n"));
 	printf(_("  --no-tablespaces            do not dump tablespace assignments\n"));
 	printf(_("  --no-unlogged-table-data    do not dump unlogged table data\n"));
 	printf(_("  --quote-all-identifiers     quote all identifiers, even if not key words\n"));
+	printf(_("  --section=SECTION           dump named section (pre-data, data or post-data)\n"));
 	printf(_("  --serializable-deferrable   wait until the dump can run without anomalies\n"));
 	printf(_("  --use-set-session-authorization\n"
 			 "                              use SET SESSION AUTHORIZATION commands instead of\n"
@@ -1087,6 +1123,15 @@ selectDumpableTable(TableInfo *tbinfo)
 		simple_oid_list_member(&table_exclude_oids,
 							   tbinfo->dobj.catId.oid))
 		tbinfo->dobj.dump = false;
+
+	/* If table is to be dumped, check that the data is not excluded */
+	if (tbinfo->dobj.dump && !
+		simple_oid_list_member(&tabledata_exclude_oids,
+							   tbinfo->dobj.catId.oid))
+		tbinfo->dobj.dumpdata = true;
+	else
+		tbinfo->dobj.dumpdata = false;
+
 }
 
 /*
@@ -1354,6 +1399,14 @@ dumpTableData_copy(Archive *fout, void *dcontext)
 	return 1;
 }
 
+/*
+ * Dump table data using INSERT commands.
+ *
+ * Caution: when we restore from an archive file direct to database, the
+ * INSERT commands emitted by this function have to be parsed by
+ * pg_backup_db.c's ExecuteInsertCommands(), which will not handle comments,
+ * E'' strings, or dollar-quoted strings.  So don't emit anything like that.
+ */
 static int
 dumpTableData_insert(Archive *fout, void *dcontext)
 {
@@ -1517,6 +1570,10 @@ dumpTableData(Archive *fout, TableDataInfo *tdinfo)
 	PQExpBuffer copyBuf = createPQExpBuffer();
 	DataDumperPtr dumpFn;
 	char	   *copyStmt;
+
+	/* don't do anything if the data isn't wanted */
+	if (!tbinfo->dobj.dumpdata)
+		return;
 
 	if (!dump_inserts)
 	{
@@ -3089,6 +3146,7 @@ getOperators(int *numOprs)
 	int			i_oprname;
 	int			i_oprnamespace;
 	int			i_rolname;
+	int			i_oprkind;
 	int			i_oprcode;
 
 	/*
@@ -3104,6 +3162,7 @@ getOperators(int *numOprs)
 		appendPQExpBuffer(query, "SELECT tableoid, oid, oprname, "
 						  "oprnamespace, "
 						  "(%s oprowner) AS rolname, "
+						  "oprkind, "
 						  "oprcode::oid AS oprcode "
 						  "FROM pg_operator",
 						  username_subquery);
@@ -3113,6 +3172,7 @@ getOperators(int *numOprs)
 		appendPQExpBuffer(query, "SELECT tableoid, oid, oprname, "
 						  "0::oid AS oprnamespace, "
 						  "(%s oprowner) AS rolname, "
+						  "oprkind, "
 						  "oprcode::oid AS oprcode "
 						  "FROM pg_operator",
 						  username_subquery);
@@ -3124,6 +3184,7 @@ getOperators(int *numOprs)
 						  "oid, oprname, "
 						  "0::oid AS oprnamespace, "
 						  "(%s oprowner) AS rolname, "
+						  "oprkind, "
 						  "oprcode::oid AS oprcode "
 						  "FROM pg_operator",
 						  username_subquery);
@@ -3142,6 +3203,7 @@ getOperators(int *numOprs)
 	i_oprname = PQfnumber(res, "oprname");
 	i_oprnamespace = PQfnumber(res, "oprnamespace");
 	i_rolname = PQfnumber(res, "rolname");
+	i_oprkind = PQfnumber(res, "oprkind");
 	i_oprcode = PQfnumber(res, "oprcode");
 
 	for (i = 0; i < ntups; i++)
@@ -3154,6 +3216,7 @@ getOperators(int *numOprs)
 		oprinfo[i].dobj.namespace = findNamespace(atooid(PQgetvalue(res, i, i_oprnamespace)),
 												  oprinfo[i].dobj.catId.oid);
 		oprinfo[i].rolname = pg_strdup(PQgetvalue(res, i, i_rolname));
+		oprinfo[i].oprkind = (PQgetvalue(res, i, i_oprkind))[0];
 		oprinfo[i].oprcode = atooid(PQgetvalue(res, i, i_oprcode));
 
 		/* Decide whether we want to dump it */
@@ -5671,7 +5734,7 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 							  "SELECT pg_catalog.quote_ident(option_name) || "
 							  "' ' || pg_catalog.quote_literal(option_value) "
 							  "FROM pg_catalog.pg_options_to_table(attfdwoptions)"
-							  "), ', ') AS attfdwoptions "
+							  "), E',\n    ') AS attfdwoptions "
 			 "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
 							  "WHERE a.attrelid = '%u'::pg_catalog.oid "
@@ -5971,11 +6034,16 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 						  tbinfo->dobj.name);
 
 			resetPQExpBuffer(q);
-			if (g_fout->remoteVersion >= 90100)
+			if (g_fout->remoteVersion >= 90200)
 			{
+				/*
+				 * conisonly and convalidated are new in 9.2 (actually, the latter
+				 * is there in 9.1, but it wasn't ever false for check constraints
+				 * until 9.2).
+				 */
 				appendPQExpBuffer(q, "SELECT tableoid, oid, conname, "
 						   "pg_catalog.pg_get_constraintdef(oid) AS consrc, "
-								  "conislocal, convalidated "
+								  "conislocal, convalidated, conisonly "
 								  "FROM pg_catalog.pg_constraint "
 								  "WHERE conrelid = '%u'::pg_catalog.oid "
 								  "   AND contype = 'c' "
@@ -5986,7 +6054,8 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 			{
 				appendPQExpBuffer(q, "SELECT tableoid, oid, conname, "
 						   "pg_catalog.pg_get_constraintdef(oid) AS consrc, "
-								  "conislocal, true AS convalidated "
+								  "conislocal, true AS convalidated, "
+								  "false as conisonly "
 								  "FROM pg_catalog.pg_constraint "
 								  "WHERE conrelid = '%u'::pg_catalog.oid "
 								  "   AND contype = 'c' "
@@ -5997,7 +6066,8 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 			{
 				appendPQExpBuffer(q, "SELECT tableoid, oid, conname, "
 						   "pg_catalog.pg_get_constraintdef(oid) AS consrc, "
-								  "true AS conislocal, true AS convalidated "
+								  "true AS conislocal, true AS convalidated, "
+								  "false as conisonly "
 								  "FROM pg_catalog.pg_constraint "
 								  "WHERE conrelid = '%u'::pg_catalog.oid "
 								  "   AND contype = 'c' "
@@ -6009,7 +6079,8 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 				/* no pg_get_constraintdef, must use consrc */
 				appendPQExpBuffer(q, "SELECT tableoid, oid, conname, "
 								  "'CHECK (' || consrc || ')' AS consrc, "
-								  "true AS conislocal, true AS convalidated "
+								  "true AS conislocal, true AS convalidated, "
+								  "false as conisonly "
 								  "FROM pg_catalog.pg_constraint "
 								  "WHERE conrelid = '%u'::pg_catalog.oid "
 								  "   AND contype = 'c' "
@@ -6022,7 +6093,8 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 				appendPQExpBuffer(q, "SELECT tableoid, 0 AS oid, "
 								  "rcname AS conname, "
 								  "'CHECK (' || rcsrc || ')' AS consrc, "
-								  "true AS conislocal, true AS convalidated "
+								  "true AS conislocal, true AS convalidated, "
+								  "false as conisonly "
 								  "FROM pg_relcheck "
 								  "WHERE rcrelid = '%u'::oid "
 								  "ORDER BY rcname",
@@ -6033,7 +6105,8 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 				appendPQExpBuffer(q, "SELECT tableoid, oid, "
 								  "rcname AS conname, "
 								  "'CHECK (' || rcsrc || ')' AS consrc, "
-								  "true AS conislocal, true AS convalidated "
+								  "true AS conislocal, true AS convalidated, "
+								  "false as conisonly "
 								  "FROM pg_relcheck "
 								  "WHERE rcrelid = '%u'::oid "
 								  "ORDER BY rcname",
@@ -6046,7 +6119,8 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 								  "(SELECT oid FROM pg_class WHERE relname = 'pg_relcheck') AS tableoid, "
 								  "oid, rcname AS conname, "
 								  "'CHECK (' || rcsrc || ')' AS consrc, "
-								  "true AS conislocal, true AS convalidated "
+								  "true AS conislocal, true AS convalidated, "
+								  "false as conisonly "
 								  "FROM pg_relcheck "
 								  "WHERE rcrelid = '%u'::oid "
 								  "ORDER BY rcname",
@@ -6072,6 +6146,7 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 			for (j = 0; j < numConstrs; j++)
 			{
 				bool	validated = PQgetvalue(res, j, 5)[0] == 't';
+				bool	isonly = PQgetvalue(res, j, 6)[0] == 't';
 
 				constrs[j].dobj.objType = DO_CONSTRAINT;
 				constrs[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, 0));
@@ -6088,12 +6163,14 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 				constrs[j].condeferrable = false;
 				constrs[j].condeferred = false;
 				constrs[j].conislocal = (PQgetvalue(res, j, 4)[0] == 't');
+				constrs[j].conisonly = isonly;
 				/*
 				 * An unvalidated constraint needs to be dumped separately, so
 				 * that potentially-violating existing data is loaded before
-				 * the constraint.
+				 * the constraint.  An ONLY constraint needs to be dumped
+				 * separately too.
 				 */
-				constrs[j].separate = !validated;
+				constrs[j].separate = !validated || isonly;
 
 				constrs[j].dobj.dump = tbinfo->dobj.dump;
 
@@ -6101,12 +6178,12 @@ getTableAttrs(TableInfo *tblinfo, int numTables)
 				 * Mark the constraint as needing to appear before the table
 				 * --- this is so that any other dependencies of the
 				 * constraint will be emitted before we try to create the
-				 * table.  If the constraint is not validated, it will be
+				 * table.  If the constraint is to be dumped separately, it will be
 				 * dumped after data is loaded anyway, so don't do it.  (There's
 				 * an automatic dependency in the opposite direction anyway, so
 				 * don't need to add one manually here.)
 				 */
-				if (validated)
+				if (!constrs[j].separate)
 					addObjectDependency(&tbinfo->dobj,
 										constrs[j].dobj.dumpId);
 
@@ -6488,7 +6565,7 @@ getForeignDataWrappers(int *numForeignDataWrappers)
 						  "SELECT quote_ident(option_name) || ' ' || "
 						  "quote_literal(option_value) "
 						  "FROM pg_options_to_table(fdwoptions)"
-						  "), ', ') AS fdwoptions "
+						  "), E',\n    ') AS fdwoptions "
 						  "FROM pg_foreign_data_wrapper",
 						  username_subquery);
 	}
@@ -6502,7 +6579,7 @@ getForeignDataWrappers(int *numForeignDataWrappers)
 						  "SELECT quote_ident(option_name) || ' ' || "
 						  "quote_literal(option_value) "
 						  "FROM pg_options_to_table(fdwoptions)"
-						  "), ', ') AS fdwoptions "
+						  "), E',\n    ') AS fdwoptions "
 						  "FROM pg_foreign_data_wrapper",
 						  username_subquery);
 	}
@@ -6591,7 +6668,7 @@ getForeignServers(int *numForeignServers)
 					  "SELECT quote_ident(option_name) || ' ' || "
 					  "quote_literal(option_value) "
 					  "FROM pg_options_to_table(srvoptions)"
-					  "), ', ') AS srvoptions "
+					  "), E',\n    ') AS srvoptions "
 					  "FROM pg_foreign_server",
 					  username_subquery);
 
@@ -7068,6 +7145,28 @@ collectComments(Archive *fout, CommentItem **items)
 static void
 dumpDumpableObject(Archive *fout, DumpableObject *dobj)
 {
+
+	bool skip = false;
+
+	switch (dobj->objType)
+	{
+		case DO_INDEX:
+		case DO_TRIGGER:
+		case DO_CONSTRAINT:
+		case DO_FK_CONSTRAINT:
+		case DO_RULE:
+			skip = !(dumpSections & DUMP_POST_DATA);
+			break;
+		case DO_TABLE_DATA:
+			skip = !(dumpSections & DUMP_DATA);
+			break;
+		default:
+			skip = !(dumpSections & DUMP_PRE_DATA);
+	}
+
+	if (skip)
+		return;
+
 	switch (dobj->objType)
 	{
 		case DO_NAMESPACE:
@@ -11484,7 +11583,7 @@ dumpForeignDataWrapper(Archive *fout, FdwInfo *fdwinfo)
 		appendPQExpBuffer(q, " VALIDATOR %s", fdwinfo->fdwvalidator);
 
 	if (strlen(fdwinfo->fdwoptions) > 0)
-		appendPQExpBuffer(q, " OPTIONS (%s)", fdwinfo->fdwoptions);
+		appendPQExpBuffer(q, " OPTIONS (\n    %s\n)", fdwinfo->fdwoptions);
 
 	appendPQExpBuffer(q, ";\n");
 
@@ -11588,7 +11687,7 @@ dumpForeignServer(Archive *fout, ForeignServerInfo *srvinfo)
 	appendPQExpBuffer(q, "%s", fmtId(fdwname));
 
 	if (srvinfo->srvoptions && strlen(srvinfo->srvoptions) > 0)
-		appendPQExpBuffer(q, " OPTIONS (%s)", srvinfo->srvoptions);
+		appendPQExpBuffer(q, " OPTIONS (\n    %s\n)", srvinfo->srvoptions);
 
 	appendPQExpBuffer(q, ";\n");
 
@@ -11679,9 +11778,10 @@ dumpUserMappings(Archive *fout,
 					  "SELECT quote_ident(option_name) || ' ' || "
 					  "quote_literal(option_value) "
 					  "FROM pg_options_to_table(umoptions)"
-					  "), ', ') AS umoptions "
+					  "), E',\n    ') AS umoptions "
 					  "FROM pg_user_mappings "
-					  "WHERE srvid = '%u'",
+					  "WHERE srvid = '%u' "
+					  "ORDER BY usename",
 					  catalogId.oid);
 
 	res = PQexec(g_conn, query->data);
@@ -11704,7 +11804,7 @@ dumpUserMappings(Archive *fout,
 		appendPQExpBuffer(q, " SERVER %s", fmtId(servername));
 
 		if (umoptions && strlen(umoptions) > 0)
-			appendPQExpBuffer(q, " OPTIONS (%s)", umoptions);
+			appendPQExpBuffer(q, " OPTIONS (\n    %s\n)", umoptions);
 
 		appendPQExpBuffer(q, ";\n");
 
@@ -12313,8 +12413,10 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 		if (binary_upgrade)
 			binary_upgrade_set_pg_class_oids(q, tbinfo->dobj.catId.oid, false);
 
-		appendPQExpBuffer(q, "CREATE VIEW %s AS\n    %s\n",
-						  fmtId(tbinfo->dobj.name), viewdef);
+		appendPQExpBuffer(q, "CREATE VIEW %s", fmtId(tbinfo->dobj.name));
+		if (tbinfo->reloptions && strlen(tbinfo->reloptions) > 0)
+			appendPQExpBuffer(q, " WITH (%s)", tbinfo->reloptions);
+		appendPQExpBuffer(q, " AS\n    %s\n", viewdef);
 
 		appendPQExpBuffer(labelq, "VIEW %s",
 						  fmtId(tbinfo->dobj.name));
@@ -12337,7 +12439,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 							  "SELECT pg_catalog.quote_ident(option_name) || "
 							  "' ' || pg_catalog.quote_literal(option_value) "
 							  "FROM pg_catalog.pg_options_to_table(ftoptions)"
-							  "), ', ') AS ftoptions "
+							  "), E',\n    ') AS ftoptions "
 							  "FROM pg_catalog.pg_foreign_table ft "
 							  "JOIN pg_catalog.pg_foreign_server fs "
 							  "ON (fs.oid = ft.ftserver) "
@@ -12566,7 +12668,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 
 		/* Dump generic options if any */
 		if (ftoptions && ftoptions[0])
-			appendPQExpBuffer(q, "\nOPTIONS (%s)", ftoptions);
+			appendPQExpBuffer(q, "\nOPTIONS (\n    %s\n)", ftoptions);
 
 		appendPQExpBuffer(q, ";\n");
 
@@ -12766,7 +12868,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 								  fmtId(tbinfo->dobj.name));
 				appendPQExpBuffer(q, "ALTER COLUMN %s ",
 								  fmtId(tbinfo->attnames[j]));
-				appendPQExpBuffer(q, "OPTIONS (%s);\n",
+				appendPQExpBuffer(q, "OPTIONS (\n    %s\n);\n",
 								  tbinfo->attfdwoptions[j]);
 			}
 		}
@@ -13123,9 +13225,9 @@ dumpConstraint(Archive *fout, ConstraintInfo *coninfo)
 		/* Ignore if not to be dumped separately */
 		if (coninfo->separate)
 		{
-			/* not ONLY since we want it to propagate to children */
-			appendPQExpBuffer(q, "ALTER TABLE %s\n",
-							  fmtId(tbinfo->dobj.name));
+			/* add ONLY if we do not want it to propagate to children */
+			appendPQExpBuffer(q, "ALTER TABLE %s %s\n",
+							 coninfo->conisonly ? "ONLY" : "", fmtId(tbinfo->dobj.name));
 			appendPQExpBuffer(q, "    ADD CONSTRAINT %s %s;\n",
 							  fmtId(coninfo->dobj.name),
 							  coninfo->condef);
@@ -14298,7 +14400,7 @@ myFormatType(const char *typname, int32 typmod)
 	}
 
 	/* Show lengths on bpchar and varchar */
-	if (!strcmp(typname, "bpchar"))
+	if (strcmp(typname, "bpchar") == 0)
 	{
 		int			len = (typmod - VARHDRSZ);
 
@@ -14307,14 +14409,14 @@ myFormatType(const char *typname, int32 typmod)
 			appendPQExpBuffer(buf, "(%d)",
 							  typmod - VARHDRSZ);
 	}
-	else if (!strcmp(typname, "varchar"))
+	else if (strcmp(typname, "varchar") == 0)
 	{
 		appendPQExpBuffer(buf, "character varying");
 		if (typmod != -1)
 			appendPQExpBuffer(buf, "(%d)",
 							  typmod - VARHDRSZ);
 	}
-	else if (!strcmp(typname, "numeric"))
+	else if (strcmp(typname, "numeric") == 0)
 	{
 		appendPQExpBuffer(buf, "numeric");
 		if (typmod != -1)

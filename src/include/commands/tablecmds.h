@@ -4,7 +4,7 @@
  *	  prototypes for tablecmds.c.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/tablecmds.h
@@ -45,15 +45,12 @@ extern void ExecuteTruncate(TruncateStmt *stmt);
 
 extern void SetRelationHasSubclass(Oid relationId, bool relhassubclass);
 
-extern void renameatt(Oid myrelid, RenameStmt *stmt);
+extern void renameatt(RenameStmt *stmt);
 
-extern void RenameRelation(Oid myrelid,
-			   const char *newrelname,
-			   ObjectType reltype);
+extern void RenameRelation(RenameStmt *stmt);
 
 extern void RenameRelationInternal(Oid myrelid,
-					   const char *newrelname,
-					   Oid namespaceId);
+					   const char *newrelname);
 
 extern void find_composite_type_dependencies(Oid typeOid,
 								 Relation origRelation,
@@ -73,5 +70,8 @@ extern void AtEOXact_on_commit_actions(bool isCommit);
 extern void AtEOSubXact_on_commit_actions(bool isCommit,
 							  SubTransactionId mySubid,
 							  SubTransactionId parentSubid);
+
+extern void RangeVarCallbackOwnsTable(const RangeVar *relation,
+									  Oid relId, Oid oldRelId, void *arg);
 
 #endif   /* TABLECMDS_H */

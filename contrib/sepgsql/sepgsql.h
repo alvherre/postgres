@@ -4,7 +4,7 @@
  *
  * Definitions corresponding to SE-PostgreSQL
  *
- * Copyright (c) 2010-2011, PostgreSQL Global Development Group
+ * Copyright (c) 2010-2012, PostgreSQL Global Development Group
  *
  * -------------------------------------------------------------------------
  */
@@ -286,7 +286,8 @@ extern bool sepgsql_dml_privileges(List *rangeTabls, bool abort);
 /*
  * database.c
  */
-extern void sepgsql_database_post_create(Oid databaseId);
+extern void sepgsql_database_post_create(Oid databaseId,
+										 const char *dtemplate);
 extern void sepgsql_database_relabel(Oid databaseId, const char *seclabel);
 
 /*

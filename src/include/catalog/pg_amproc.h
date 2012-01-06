@@ -19,7 +19,7 @@
  * some don't pay attention to non-default functions at all.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/catalog/pg_amproc.h
@@ -355,5 +355,23 @@ DATA(insert (	3919   3831 3831 4 3878 ));
 DATA(insert (	3919   3831 3831 5 3879 ));
 DATA(insert (	3919   3831 3831 6 3880 ));
 DATA(insert (	3919   3831 3831 7 3881 ));
+
+
+/* sp-gist */
+DATA(insert (	4015   600 600 1 4018 ));
+DATA(insert (	4015   600 600 2 4019 ));
+DATA(insert (	4015   600 600 3 4020 ));
+DATA(insert (	4015   600 600 4 4021 ));
+DATA(insert (	4015   600 600 5 4022 ));
+DATA(insert (	4016   600 600 1 4023 ));
+DATA(insert (	4016   600 600 2 4024 ));
+DATA(insert (	4016   600 600 3 4025 ));
+DATA(insert (	4016   600 600 4 4026 ));
+DATA(insert (	4016   600 600 5 4022 ));
+DATA(insert (	4017   25 25 1 4027 ));
+DATA(insert (	4017   25 25 2 4028 ));
+DATA(insert (	4017   25 25 3 4029 ));
+DATA(insert (	4017   25 25 4 4030 ));
+DATA(insert (	4017   25 25 5 4031 ));
 
 #endif   /* PG_AMPROC_H */

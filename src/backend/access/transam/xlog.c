@@ -4,7 +4,7 @@
  *		PostgreSQL transaction log manager
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/xlog.c
@@ -452,6 +452,9 @@ typedef struct XLogCtlData
 	XLogRecPtr	recoveryLastRecPtr;
 	/* timestamp of last COMMIT/ABORT record replayed (or being replayed) */
 	TimestampTz recoveryLastXTime;
+	/* timestamp of when we started replaying the current chunk of WAL data,
+	 * only relevant for replication or archive recovery */
+	TimestampTz currentChunkStartTime;
 	/* end of the last record restored from the archive */
 	XLogRecPtr	restoreLastRecPtr;
 	/* Are we requested to pause recovery? */
@@ -606,6 +609,7 @@ static void exitArchiveRecovery(TimeLineID endTLI,
 static bool recoveryStopsHere(XLogRecord *record, bool *includeThis);
 static void recoveryPausesHere(void);
 static void SetLatestXTime(TimestampTz xtime);
+static void SetCurrentChunkStartTime(TimestampTz xtime);
 static void CheckRequiredParameterValues(void);
 static void XLogReportParameters(void);
 static void LocalSetXLogInsertAllowed(void);
@@ -969,19 +973,6 @@ begin:;
 			rdt->next = NULL;
 		}
 	}
-
-	/*
-	 * If we backed up any full blocks and online backup is not in progress,
-	 * mark the backup blocks as removable.  This allows the WAL archiver to
-	 * know whether it is safe to compress archived WAL data by transforming
-	 * full-block records into the non-full-block format.
-	 *
-	 * Note: we could just set the flag whenever !forcePageWrites, but
-	 * defining it like this leaves the info bit free for some potential other
-	 * use in records without any backup blocks.
-	 */
-	if ((info & XLR_BKP_BLOCK_MASK) && !Insert->forcePageWrites)
-		info |= XLR_BKP_REMOVABLE;
 
 	/*
 	 * If there isn't enough space on the current XLOG page for a record
@@ -1600,6 +1591,21 @@ AdvanceXLInsertBuffer(bool new_segment)
 	NewPage   ->xlp_tli = ThisTimeLineID;
 	NewPage   ->xlp_pageaddr.xlogid = NewPageEndPtr.xlogid;
 	NewPage   ->xlp_pageaddr.xrecoff = NewPageEndPtr.xrecoff - XLOG_BLCKSZ;
+
+	/*
+	 * If online backup is not in progress, mark the header to indicate that
+	 * WAL records beginning in this page have removable backup blocks.  This
+	 * allows the WAL archiver to know whether it is safe to compress archived
+	 * WAL data by transforming full-block records into the non-full-block
+	 * format.  It is sufficient to record this at the page level because we
+	 * force a page switch (in fact a segment switch) when starting a backup,
+	 * so the flag will be off before any records can be written during the
+	 * backup.  At the end of a backup, the last page will be marked as all
+	 * unsafe when perhaps only part is unsafe, but at worst the archiver
+	 * would miss the opportunity to compress a few records.
+	 */
+	if (!Insert->forcePageWrites)
+		NewPage->xlp_info |= XLP_BKP_REMOVABLE;
 
 	/*
 	 * If first page of an XLOG segment file, make it a long header.
@@ -5846,6 +5852,41 @@ GetLatestXTime(void)
 }
 
 /*
+ * Save timestamp of the next chunk of WAL records to apply.
+ *
+ * We keep this in XLogCtl, not a simple static variable, so that it can be
+ * seen by all backends.
+ */
+static void
+SetCurrentChunkStartTime(TimestampTz xtime)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	xlogctl->currentChunkStartTime = xtime;
+	SpinLockRelease(&xlogctl->info_lck);
+}
+
+/*
+ * Fetch timestamp of latest processed commit/abort record.
+ * Startup process maintains an accurate local copy in XLogReceiptTime
+ */
+TimestampTz
+GetCurrentChunkReplayStartTime(void)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+	TimestampTz xtime;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	xtime = xlogctl->currentChunkStartTime;
+	SpinLockRelease(&xlogctl->info_lck);
+
+	return xtime;
+}
+
+/*
  * Returns time of receipt of current chunk of XLOG data, as well as
  * whether it was received from streaming replication or from archives.
  */
@@ -6388,6 +6429,7 @@ StartupXLOG(void)
 		xlogctl->replayEndRecPtr = ReadRecPtr;
 		xlogctl->recoveryLastRecPtr = ReadRecPtr;
 		xlogctl->recoveryLastXTime = 0;
+		xlogctl->currentChunkStartTime = 0;
 		xlogctl->recoveryPause = false;
 		SpinLockRelease(&xlogctl->info_lck);
 
@@ -8862,19 +8904,6 @@ do_pg_start_backup(const char *backupidstr, bool fast, char **labelfile)
 						MAXPGPATH)));
 
 	/*
-	 * Force an XLOG file switch before the checkpoint, to ensure that the WAL
-	 * segment the checkpoint is written to doesn't contain pages with old
-	 * timeline IDs. That would otherwise happen if you called
-	 * pg_start_backup() right after restoring from a PITR archive: the first
-	 * WAL segment containing the startup checkpoint has pages in the
-	 * beginning with the old timeline ID. That can cause trouble at recovery:
-	 * we won't have a history file covering the old timeline if pg_xlog
-	 * directory was not included in the base backup and the WAL archive was
-	 * cleared too before starting the backup.
-	 */
-	RequestXLogSwitch();
-
-	/*
 	 * Mark backup active in shared memory.  We must do full-page WAL writes
 	 * during an on-line backup even if not doing so at other times, because
 	 * it's quite possible for the backup dump to obtain a "torn" (partially
@@ -8913,6 +8942,25 @@ do_pg_start_backup(const char *backupidstr, bool fast, char **labelfile)
 	PG_ENSURE_ERROR_CLEANUP(pg_start_backup_callback, (Datum) BoolGetDatum(exclusive));
 	{
 		bool		gotUniqueStartpoint = false;
+
+		/*
+		 * Force an XLOG file switch before the checkpoint, to ensure that the
+		 * WAL segment the checkpoint is written to doesn't contain pages with
+		 * old timeline IDs.  That would otherwise happen if you called
+		 * pg_start_backup() right after restoring from a PITR archive: the
+		 * first WAL segment containing the startup checkpoint has pages in
+		 * the beginning with the old timeline ID.  That can cause trouble at
+		 * recovery: we won't have a history file covering the old timeline if
+		 * pg_xlog directory was not included in the base backup and the WAL
+		 * archive was cleared too before starting the backup.
+		 *
+		 * This also ensures that we have emitted a WAL page header that has
+		 * XLP_BKP_REMOVABLE off before we emit the checkpoint record.
+		 * Therefore, if a WAL archiver (such as pglesslog) is trying to
+		 * compress out removable backup blocks, it won't remove any that
+		 * occur after this point.
+		 */
+		RequestXLogSwitch();
 
 		do
 		{
@@ -9700,7 +9748,10 @@ retry:
 						{
 							havedata = true;
 							if (!XLByteLT(*RecPtr, latestChunkStart))
+							{
 								XLogReceiptTime = GetCurrentTimestamp();
+								SetCurrentChunkStartTime(XLogReceiptTime);
+							}
 						}
 						else
 							havedata = false;

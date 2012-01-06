@@ -5,7 +5,7 @@
  *	Lately it's also being used by psql and bin/scripts/ ...
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_dump/dumputils.h
@@ -58,5 +58,6 @@ extern void vwrite_msg(const char *modulename, const char *fmt, va_list ap)
 				__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 0)));
 extern void exit_horribly(const char *modulename, const char *fmt,...)
 				__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
+extern void set_section (const char *arg, int *dumpSections);
 
 #endif   /* DUMPUTILS_H */

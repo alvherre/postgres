@@ -6,7 +6,7 @@
  * with servers of versions 7.4 and up.  It's okay to omit irrelevant
  * information for an old server, but not to fail outright.
  *
- * Copyright (c) 2000-2011, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
  * src/bin/psql/describe.c
  */
@@ -503,6 +503,11 @@ describeTypes(const char *pattern, bool verbose, bool showSystem)
 						  "      E'\\n'\n"
 						  "  ) AS \"%s\",\n",
 						  gettext_noop("Elements"));
+	}
+	if (verbose && pset.sversion >= 90200)
+	{
+		printACLColumn(&buf, "t.typacl");
+		appendPQExpBuffer(&buf, ",\n  ");
 	}
 
 	appendPQExpBuffer(&buf,
@@ -1781,12 +1786,20 @@ describeOneTableDetails(const char *schemaname,
 		/* print table (and column) check constraints */
 		if (tableinfo.checks)
 		{
+			char *is_only;
+
+			if (pset.sversion >= 90200)
+				is_only = "r.conisonly";
+			else
+				is_only = "false AS conisonly";
+
 			printfPQExpBuffer(&buf,
-							  "SELECT r.conname, "
+							  "SELECT r.conname, %s, "
 							  "pg_catalog.pg_get_constraintdef(r.oid, true)\n"
 							  "FROM pg_catalog.pg_constraint r\n"
-				   "WHERE r.conrelid = '%s' AND r.contype = 'c'\nORDER BY 1;",
-							  oid);
+				   "WHERE r.conrelid = '%s' AND r.contype = 'c'\n"
+				   			  "ORDER BY 2 DESC, 1;",
+							  is_only, oid);
 			result = PSQLexec(buf.data, false);
 			if (!result)
 				goto error_return;
@@ -1799,9 +1812,10 @@ describeOneTableDetails(const char *schemaname,
 				for (i = 0; i < tuples; i++)
 				{
 					/* untranslated contraint name and def */
-					printfPQExpBuffer(&buf, "    \"%s\" %s",
+					printfPQExpBuffer(&buf, "    \"%s\"%s%s",
 									  PQgetvalue(result, i, 0),
-									  PQgetvalue(result, i, 1));
+									  (strcmp(PQgetvalue(result, i, 1), "t") == 0) ? " (ONLY) ":" ",
+									  PQgetvalue(result, i, 2));
 
 					printTableAddFooter(&cont, buf.data);
 				}
@@ -2804,9 +2818,16 @@ listDomains(const char *pattern, bool verbose, bool showSystem)
 					  gettext_noop("Check"));
 
 	if (verbose)
+	{
+		if (pset.sversion >= 90200)
+		{
+			appendPQExpBuffer(&buf, ",\n  ");
+			printACLColumn(&buf, "t.typacl");
+		}
 		appendPQExpBuffer(&buf,
 						  ",\n       d.description as \"%s\"",
 						  gettext_noop("Description"));
+	}
 
 	appendPQExpBuffer(&buf,
 					  "\nFROM pg_catalog.pg_type t\n"

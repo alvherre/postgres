@@ -4,7 +4,7 @@
  *	  Declarations for operations on built-in types.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/builtins.h
@@ -94,6 +94,12 @@ extern Datum has_tablespace_privilege_id_name(PG_FUNCTION_ARGS);
 extern Datum has_tablespace_privilege_id_id(PG_FUNCTION_ARGS);
 extern Datum has_tablespace_privilege_name(PG_FUNCTION_ARGS);
 extern Datum has_tablespace_privilege_id(PG_FUNCTION_ARGS);
+extern Datum has_type_privilege_name_name(PG_FUNCTION_ARGS);
+extern Datum has_type_privilege_name_id(PG_FUNCTION_ARGS);
+extern Datum has_type_privilege_id_name(PG_FUNCTION_ARGS);
+extern Datum has_type_privilege_id_id(PG_FUNCTION_ARGS);
+extern Datum has_type_privilege_name(PG_FUNCTION_ARGS);
+extern Datum has_type_privilege_id(PG_FUNCTION_ARGS);
 extern Datum pg_has_role_name_name(PG_FUNCTION_ARGS);
 extern Datum pg_has_role_name_id(PG_FUNCTION_ARGS);
 extern Datum pg_has_role_id_name(PG_FUNCTION_ARGS);
@@ -763,6 +769,8 @@ extern Datum unknownsend(PG_FUNCTION_ARGS);
 
 extern Datum pg_column_size(PG_FUNCTION_ARGS);
 
+extern Datum bytea_agg_transfn(PG_FUNCTION_ARGS);
+extern Datum bytea_agg_finalfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_transfn(PG_FUNCTION_ARGS);
 extern Datum string_agg_finalfn(PG_FUNCTION_ARGS);
 
@@ -1079,6 +1087,26 @@ extern Datum window_lead_with_offset_and_default(PG_FUNCTION_ARGS);
 extern Datum window_first_value(PG_FUNCTION_ARGS);
 extern Datum window_last_value(PG_FUNCTION_ARGS);
 extern Datum window_nth_value(PG_FUNCTION_ARGS);
+
+/* access/spgist/spgquadtreeproc.c */
+extern Datum spg_quad_config(PG_FUNCTION_ARGS);
+extern Datum spg_quad_choose(PG_FUNCTION_ARGS);
+extern Datum spg_quad_picksplit(PG_FUNCTION_ARGS);
+extern Datum spg_quad_inner_consistent(PG_FUNCTION_ARGS);
+extern Datum spg_quad_leaf_consistent(PG_FUNCTION_ARGS);
+
+/* access/spgist/spgkdtreeproc.c */
+extern Datum spg_kd_config(PG_FUNCTION_ARGS);
+extern Datum spg_kd_choose(PG_FUNCTION_ARGS);
+extern Datum spg_kd_picksplit(PG_FUNCTION_ARGS);
+extern Datum spg_kd_inner_consistent(PG_FUNCTION_ARGS);
+
+/* access/spgist/spgtextproc.c */
+extern Datum spg_text_config(PG_FUNCTION_ARGS);
+extern Datum spg_text_choose(PG_FUNCTION_ARGS);
+extern Datum spg_text_picksplit(PG_FUNCTION_ARGS);
+extern Datum spg_text_inner_consistent(PG_FUNCTION_ARGS);
+extern Datum spg_text_leaf_consistent(PG_FUNCTION_ARGS);
 
 /* access/gin/ginarrayproc.c */
 extern Datum ginarrayextract(PG_FUNCTION_ARGS);

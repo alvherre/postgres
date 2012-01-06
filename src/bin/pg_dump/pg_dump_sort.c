@@ -4,7 +4,7 @@
  *	  Sort the items of a dump into a safe order for dumping
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -175,6 +175,16 @@ DOTypeNameCompare(const void *p1, const void *p2)
 		FuncInfo   *fobj2 = *(FuncInfo * const *) p2;
 
 		cmpval = fobj1->nargs - fobj2->nargs;
+		if (cmpval != 0)
+			return cmpval;
+	}
+	else if (obj1->objType == DO_OPERATOR)
+	{
+		OprInfo	*oobj1 = *(OprInfo * const *) p1;
+		OprInfo *oobj2 = *(OprInfo * const *) p2;
+
+		/* oprkind is 'l', 'r', or 'b'; this sorts prefix, postfix, infix */
+		cmpval = (oobj2->oprkind - oobj1->oprkind);
 		if (cmpval != 0)
 			return cmpval;
 	}

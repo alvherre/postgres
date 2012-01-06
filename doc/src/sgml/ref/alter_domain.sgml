@@ -30,11 +30,13 @@ ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
 ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
     ADD <replaceable class="PARAMETER">domain_constraint</replaceable> [ NOT VALID ]
 ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
-    DROP CONSTRAINT <replaceable class="PARAMETER">constraint_name</replaceable> [ RESTRICT | CASCADE ]
+    DROP CONSTRAINT [ IF EXISTS ] <replaceable class="PARAMETER">constraint_name</replaceable> [ RESTRICT | CASCADE ]
 ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
     VALIDATE CONSTRAINT <replaceable class="PARAMETER">constraint_name</replaceable>
 ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
     OWNER TO <replaceable class="PARAMETER">new_owner</replaceable>
+ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
+    RENAME TO <replaceable class="PARAMETER">new_name</replaceable>
 ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
     SET SCHEMA <replaceable class="PARAMETER">new_schema</replaceable>
 </synopsis>
@@ -90,10 +92,12 @@ ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
    </varlistentry>
 
    <varlistentry>
-    <term>DROP CONSTRAINT</term>
+    <term>DROP CONSTRAINT [ IF EXISTS ]</term>
     <listitem>
      <para>
       This form drops constraints on a domain.
+      If <literal>IF EXISTS</literal> is specified and the constraint
+      does not exist, no error is thrown. In this case a notice is issued instead.
      </para>
     </listitem>
    </varlistentry>
@@ -114,6 +118,15 @@ ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
     <listitem>
      <para>
       This form changes the owner of the domain to the specified user.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>RENAME</literal></term>
+    <listitem>
+     <para>
+      This form changes the name of the domain.
      </para>
     </listitem>
    </varlistentry>
@@ -204,6 +217,15 @@ ALTER DOMAIN <replaceable class="PARAMETER">name</replaceable>
      </varlistentry>
 
      <varlistentry>
+      <term><replaceable class="PARAMETER">new_name</replaceable></term>
+      <listitem>
+       <para>
+        The new name for the domain.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><replaceable class="PARAMETER">new_owner</replaceable></term>
       <listitem>
        <para>
@@ -278,7 +300,7 @@ ALTER DOMAIN zipcode SET SCHEMA customers;
 
   <para>
    <command>ALTER DOMAIN</command> conforms to the <acronym>SQL</acronym>
-   standard, except for the <literal>OWNER</>, <literal>SET SCHEMA</> and
+   standard, except for the <literal>OWNER</>, <literal>RENAME</literal>, <literal>SET SCHEMA</>, and
    <literal>VALIDATE CONSTRAINT</> variants, which are
    <productname>PostgreSQL</productname> extensions.  The <literal>NOT VALID</>
    clause of the <literal>ADD CONSTRAINT</> variant is also a

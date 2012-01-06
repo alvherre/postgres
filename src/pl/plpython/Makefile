@@ -38,7 +38,19 @@ rpathdir = $(python_libdir)
 
 NAME = plpython$(python_majorversion)
 
-OBJS = plpython.o
+OBJS = \
+	plpy_cursorobject.o \
+	plpy_elog.o \
+	plpy_exec.o \
+	plpy_main.o \
+	plpy_planobject.o \
+	plpy_plpymodule.o \
+	plpy_procedure.o \
+	plpy_resultobject.o \
+	plpy_spi.o \
+	plpy_subxactobject.o \
+	plpy_typeio.o \
+	plpy_util.o
 
 DATA = $(NAME)u.control $(NAME)u--1.0.sql $(NAME)u--unpackaged--1.0.sql
 ifeq ($(python_majorversion),2)
@@ -137,7 +149,7 @@ prep3:
 clean3:
 	rm -rf python3/
 
-check: submake prep3
+check: all submake prep3
 	$(pg_regress_check) --inputdir=./python3 --outputdir=./python3 $(REGRESS_OPTS) $(REGRESS)
 
 installcheck: submake prep3
@@ -145,7 +157,7 @@ installcheck: submake prep3
 
 clean: clean3
 else # not Python 3
-check: submake
+check: all submake
 	$(pg_regress_check) $(REGRESS_OPTS) $(REGRESS)
 
 installcheck: submake
@@ -177,7 +189,7 @@ endif # can't build
 # distprep and maintainer-clean rules should be run even if we can't build.
 
 # Force this dependency to be known even without dependency info built:
-plpython.o: spiexceptions.h
+plpy_plpymodule.o: spiexceptions.h
 
 spiexceptions.h: $(top_srcdir)/src/backend/utils/errcodes.txt generate-spiexceptions.pl
 	$(PERL) $(srcdir)/generate-spiexceptions.pl $< > $@
