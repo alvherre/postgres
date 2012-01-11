@@ -777,6 +777,9 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			flagsoff;
 		int			memberoff;
 
+		if (members[i].xid < 900)
+			abort();
+
 		/* this status value is not representable on disk */
 		Assert(members[i].status < MultiXactStatusKeyUpdate);
 

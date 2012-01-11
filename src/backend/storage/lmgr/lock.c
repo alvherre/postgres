@@ -1578,6 +1578,7 @@ LockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
 	 */
 	if (!locallock || locallock->nLocks <= 0)
 	{
+		abort();
 		elog(WARNING, "you don't own a lock of type %s",
 			 lockMethodTable->lockModeNames[lockmode]);
 		return FALSE;
@@ -1614,6 +1615,7 @@ LockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
 		}
 		if (i < 0)
 		{
+			abort();
 			/* don't release a lock belonging to another owner */
 			elog(WARNING, "you don't own a lock of type %s",
 				 lockMethodTable->lockModeNames[lockmode]);
@@ -1699,6 +1701,7 @@ LockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
 	{
 		PROCLOCK_PRINT("LockRelease: WRONGTYPE", proclock);
 		LWLockRelease(partitionLock);
+		abort();
 		elog(WARNING, "you don't own a lock of type %s",
 			 lockMethodTable->lockModeNames[lockmode]);
 		RemoveLocalLock(locallock);
@@ -2636,6 +2639,7 @@ LockRefindAndRelease(LockMethod lockMethodTable, PGPROC *proc,
 	{
 		PROCLOCK_PRINT("lock_twophase_postcommit: WRONGTYPE", proclock);
 		LWLockRelease(partitionLock);
+		abort();
 		elog(WARNING, "you don't own a lock of type %s",
 			 lockMethodTable->lockModeNames[lockmode]);
 		return;

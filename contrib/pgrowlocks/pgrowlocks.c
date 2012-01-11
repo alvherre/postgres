@@ -148,7 +148,7 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				strcat(values[Atnum_type], "IsNotUpdate ");
 
 			values[Atnum_xmax] = palloc(NCHARS * sizeof(char));
-			snprintf(values[Atnum_xmax], NCHARS, "%d", HeapTupleHeaderGetXmax(tuple->t_data));
+			snprintf(values[Atnum_xmax], NCHARS, "%d", HeapTupleHeaderGetRawXmax(tuple->t_data));
 			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI)
 			{
 				MultiXactMember *members;
@@ -158,7 +158,7 @@ pgrowlocks(PG_FUNCTION_ARGS)
 
 				values[Atnum_ismulti] = pstrdup("true");
 
-				nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetXmax(tuple->t_data), &members);
+				nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetRawXmax(tuple->t_data), &members);
 				if (nmembers == -1)
 					elog(ERROR, "GetMultiXactIdMembers returns error");
 
@@ -216,12 +216,12 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				values[Atnum_ismulti] = pstrdup("false");
 
 				values[Atnum_xids] = palloc(NCHARS * sizeof(char));
-				snprintf(values[Atnum_xids], NCHARS, "{%d}", HeapTupleHeaderGetXmax(tuple->t_data));
+				snprintf(values[Atnum_xids], NCHARS, "{%d}", HeapTupleHeaderGetRawXmax(tuple->t_data));
 
 				values[Atnum_modes] = NULL;
 
 				values[Atnum_pids] = palloc(NCHARS * sizeof(char));
-				snprintf(values[Atnum_pids], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetXmax(tuple->t_data)));
+				snprintf(values[Atnum_pids], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetRawXmax(tuple->t_data)));
 			}
 
 			LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
