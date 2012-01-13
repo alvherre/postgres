@@ -88,6 +88,11 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 				bool all_visible_cleared, bool new_all_visible_cleared);
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay);
+static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
+						  TransactionId add_to_xmax, LockTupleMode mode,
+						  TransactionId *result_xmax, uint16 *result_infomask);
+static void heap_lock_updated_tuple(Relation rel, ItemPointer tid,
+						TransactionId xid, LockTupleMode mode);
 static uint16 GetMultiXactIdHintBits(MultiXactId multi);
 
 
@@ -2411,11 +2416,6 @@ heap_delete(Relation relation, ItemPointer tid,
 l1:
 	result = HeapTupleSatisfiesUpdate(tp.t_data, cid, buffer);
 
-	elog(LOG, "heap_delete: HTSU returned %d, xmax is %u and infomask is %x for tuple %u/%u",
-		 result, HeapTupleHeaderGetRawXmax(tp.t_data), tp.t_data->t_infomask,
-		 ItemPointerGetBlockNumber(&(tp.t_self)),
-		 ItemPointerGetOffsetNumber(&(tp.t_self)));
-
 	if (result == HeapTupleInvisible)
 	{
 		UnlockReleaseBuffer(buffer);
@@ -3709,10 +3709,6 @@ get_mxact_status_for_tuplelock(LockTupleMode mode)
  * starve out waiting exclusive-lockers.  However, if there is not any active
  * conflict for a tuple, we don't incur any extra overhead.
  */
-static void
-heap_lock_updated_tuple(Relation rel, ItemPointer tid, TransactionId xid,
-						LockTupleMode mode);
-
 HTSU_Result
 heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 				ItemPointer ctid, TransactionId *update_xmax,
@@ -3724,9 +3720,6 @@ heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 	Page		page;
 	TransactionId xid;
 	TransactionId xmax;
-	TransactionId keep_xmax = InvalidTransactionId;
-	bool		keep_xmax_multi = false;
-	bool		none_remains = false;
 	uint16		old_infomask;
 	uint16		new_infomask;
 	bool		have_tuple_lock = false;
@@ -3743,9 +3736,6 @@ heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 	tuple->t_tableOid = RelationGetRelid(relation);
 
 l3:
-	/* shouldn't get back here if we already set keep_xmax */
-	Assert(keep_xmax == InvalidTransactionId);
-
 	result = HeapTupleSatisfiesUpdate(tuple->t_data, cid, *buffer);
 
 	if (result == HeapTupleInvisible)
@@ -3826,12 +3816,17 @@ l3:
 		}
 
 		/*
-		 * If we're requesting KeyShare, and there's no update present, we
-		 * don't need to wait for locking transaction(s) to finish.  Even if
-		 * there is an update, we can still continue if the key hasn't been
-		 * modified.
+		 * Initially assume that we will have to wait for the locking
+		 * transaction(s) to finish.  We check various cases below in which
+		 * this can be turned off.
 		 */
 		require_sleep = true;
+
+		/*
+		 * If we're requesting KeyShare, and there's no update present, we
+		 * don't need to wait.  Even if there is an update, we can still
+		 * continue if the key hasn't been modified.
+		 */
 		if ((mode == LockTupleKeyShare) &&
 			(HeapTupleHeaderInfomaskIsOnlyLocked(infomask) ||
 			 infomask2 & HEAP_UPDATE_KEY_INTACT))
@@ -3845,14 +3840,18 @@ l3:
 				  (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_INTACT)))
 				goto l3;
 			require_sleep = false;
-			/* acquire fresh values -- XXX do we need to restart if xmax changed? */
-			keep_xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
-			keep_xmax_multi = (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
+
+			/*
+			 * Note we allow Xmax to change here; other updaters/lockers could
+			 * have modified it before we grabbed the buffer lock.  However,
+			 * this is not a problem, because with the recheck we just did we
+			 * ensure that they still don't conflict with the lock we want.
+			 */
 		}
 
 		/*
-		 * If we're requesting Share, we need to ensure there's no update
-		 * and no exclusive lock present.
+		 * If we're requesting Share, we can similarly avoid sleeping if
+		 * there's no update and no exclusive lock present.
 		 */
 		if (mode == LockTupleShare &&
 			(infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_NOT_UPDATE)) &&
@@ -3861,23 +3860,22 @@ l3:
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
-			 * make sure it's still an appropriate lock, else start over.
+			 * Make sure it's still an appropriate lock, else start over.  See
+			 * above about allowing xmax to change.
 			 */
 			if (!(tuple->t_data->t_infomask &
 				  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_NOT_UPDATE)) ||
 				(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
 				goto l3;
 			require_sleep = false;
-			/* acquire fresh values */
-			keep_xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
-			keep_xmax_multi = (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) != 0;
 		}
 
-
 		/*
-		 * If our lock is Update, we might also be able to skip the sleep; for
-		 * this to be true, we need to ensure that there's no other lock type
-		 * than KeyShare.
+		 * If we're requesting Update, we might also be able to avoid sleeping;
+		 * just ensure that there's no other lock type than KeyShare.  Note
+		 * that this is a bit more involved than just checking hint bits -- we
+		 * need to expand the multixact to figure out lock modes for each one
+		 * (unless there was only one such locker).
 		 */
 		if (mode == LockTupleUpdate)
 		{
@@ -3886,19 +3884,14 @@ l3:
 				int		nmembers;
 				MultiXactMember *members;
 
-				/*
-				 * This needs to be done the slow way: there might be
-				 * MultiXactStatusForShare locks hiding in there, and there's
-				 * no way to tell from just the hint bits.
-				 */
 				nmembers = GetMultiXactIdMembers(xwait, &members);
 				if (nmembers <= 0)
 				{
-					require_sleep = false;
 					/*
-					 * No need to keep the previous xmax here. Unlikely to
-					 * happen anyway.
+					 * No need to keep the previous xmax here. This is unlikely
+					 * to happen.
 					 */
+					require_sleep = false;
 				}
 				else
 				{
@@ -3926,8 +3919,6 @@ l3:
 							goto l3;
 						/* otherwise, we're good */
 						require_sleep = false;
-						keep_xmax = xwait;
-						keep_xmax_multi = true;
 					}
 
 					pfree(members);
@@ -3944,14 +3935,13 @@ l3:
 					goto l3;
 				/* otherwise, we're good */
 				require_sleep = false;
-				keep_xmax = xwait;
-				keep_xmax_multi = false;
 			}
 		}
 
 		/*
-		 * By here, we either require to wait for the locking transaction or
-		 * multixact, or have already acquired the buffer exclusive lock.
+		 * By here, we either have already acquired the buffer exclusive lock,
+		 * or we must wait for the locking transaction or multixact; so below
+		 * we ensure that we grab buffer lock after the sleep.
 		 */
 
 		if (require_sleep)
@@ -3990,20 +3980,14 @@ l3:
 					goto l3;
 
 				/*
-				 * Of course, the multixact might not be done here: if we're requesting
-				 * a light lock mode, other transactions with light locks could still
-				 * be alive, as well as locks owned by our own xact or other
-				 * subxacts of this backend.  We need to preserve the surviving
-				 * MultiXact members.  Note that it isn't absolutely necessary
-				 * in the latter case, but doing so is simpler.
+				 * Of course, the multixact might not be done here: if we're
+				 * requesting a light lock mode, other transactions with light
+				 * locks could still be alive, as well as locks owned by our
+				 * own xact or other subxacts of this backend.  We need to
+				 * preserve the surviving MultiXact members.  Note that it
+				 * isn't absolutely necessary in the latter case, but doing so
+				 * is simpler.
 				 */
-				if (remain > 0)
-				{
-					keep_xmax = xwait;
-					keep_xmax_multi = true;
-				}
-				else
-					none_remains = true;
 			}
 			else
 			{
@@ -4041,6 +4025,8 @@ l3:
 			}
 		}
 
+		/* By here, we're certain that we hold buffer exclusive lock again */
+
 		/*
 		 * We may lock if previous xmax aborted, or if it committed but only
 		 * locked the tuple without updating it; or if we didn't have to wait
@@ -4048,8 +4034,7 @@ l3:
 		 */
 		if (!require_sleep ||
 			(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderIsOnlyLocked(tuple->t_data) ||
-			none_remains)
+			HeapTupleHeaderIsOnlyLocked(tuple->t_data))
 			result = HeapTupleMayBeUpdated;
 		else
 			result = HeapTupleUpdated;
@@ -4067,6 +4052,9 @@ l3:
 		return result;
 	}
 
+	xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
+	old_infomask = tuple->t_data->t_infomask;
+
 	/*
 	 * We might already hold the desired lock (or stronger), possibly under a
 	 * different subtransaction of the current top transaction.  If so, there
@@ -4080,9 +4068,6 @@ l3:
 	 * there's no explicit test for a share lock only; this was already covered
 	 * above, because it's only representable by a MultiXactId.
 	 */
-	xmax = HeapTupleHeaderGetRawXmax(tuple->t_data);
-	old_infomask = tuple->t_data->t_infomask;
-
 	if (!(old_infomask & (HEAP_XMAX_INVALID |
 						  HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_IS_MULTI)) &&
@@ -4103,184 +4088,8 @@ l3:
 	 * not modify the tuple just yet, because that would leave it in the wrong
 	 * state if multixact.c elogs.
 	 */
-	xid = GetCurrentTransactionId();
-
-	new_infomask = old_infomask & ~(HEAP_XMAX_COMMITTED |
-									HEAP_XMAX_INVALID |
-									HEAP_XMAX_IS_MULTI |
-									HEAP_LOCK_BITS |
-									HEAP_MOVED);
-
-	/*
-	 * if we have keep_xmax, this is easy to compute -- just create a new mxact
-	 * including our new xid plus whatever there was on Xmax previously.
-	 */
-	if (TransactionIdIsValid(keep_xmax))
-	{
-		if (keep_xmax_multi)
-		{
-			/*
-			 * MultiXactIdExpand takes care to remove members that are no
-			 * longer current.
-			 */
-			xid = MultiXactIdExpand((MultiXactId) keep_xmax, xid,
-									get_mxact_status_for_tuplelock(mode));
-			new_infomask |= GetMultiXactIdHintBits(xid);
-		}
-		else if (TransactionIdIsInProgress(keep_xmax))
-		{
-			MultiXactStatus		existing_lock_mode;
-
-			if (old_infomask & HEAP_XMAX_EXCL_LOCK)
-				existing_lock_mode = MultiXactStatusForUpdate;
-			else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
-				existing_lock_mode = MultiXactStatusForKeyShare;
-			else
-				/* it must be an update */
-				existing_lock_mode = MultiXactStatusUpdate;
-
-			xid = MultiXactIdCreate(keep_xmax, existing_lock_mode,
-									xid, get_mxact_status_for_tuplelock(mode));
-			new_infomask |= GetMultiXactIdHintBits(xid);
-		}
-		else
-		{
-			/*
-			 * Not multi, not in progress.  Use only our own Xid.
-			 */
-			switch (mode)
-			{
-				case LockTupleKeyShare:
-					new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-					break;
-				case LockTupleShare:
-					/* need a multixact here in any case */
-					xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
-					new_infomask |= GetMultiXactIdHintBits(xid);
-					break;
-				case LockTupleUpdate:
-					new_infomask |= HEAP_XMAX_EXCL_LOCK;
-					break;
-				default:
-					elog(ERROR, "invalid lock mode");
-			}
-		}
-	}
-	else
-	{
-		MultiXactStatus		new_mxact_status;
-
-		new_mxact_status = get_mxact_status_for_tuplelock(mode);
-
-		/*
-		 * Check to see if we need a MultiXactId because there are multiple
-		 * lockers.
-		 *
-		 * HeapTupleSatisfiesUpdate will have set the HEAP_XMAX_INVALID bit if
-		 * the xmax was a MultiXactId but it was not running anymore. There is
-		 * a race condition, which is that the MultiXactId may have finished
-		 * since then, but that uncommon case is handled within
-		 * MultiXactIdExpand.
-		 *
-		 * There is a similar race condition possible when the old xmax was a
-		 * regular TransactionId.  We test TransactionIdIsInProgress again
-		 * just to narrow the window, but it's still possible to end up
-		 * creating an unnecessary MultiXactId.  Fortunately this is harmless.
-		 */
-		if (!(old_infomask & (HEAP_XMAX_INVALID | HEAP_XMAX_COMMITTED)))
-		{
-			if (old_infomask & HEAP_XMAX_IS_MULTI)
-			{
-				/*
-				 * If the XMAX is already a MultiXactId, then we need to
-				 * expand it to include our own TransactionId.
-				 */
-				xid = MultiXactIdExpand((MultiXactId) xmax, xid, new_mxact_status);
-				new_infomask |= GetMultiXactIdHintBits(xid);
-				/* FIXME -- we need to add bits to the infomask here! */
-			}
-			else if (TransactionIdIsInProgress(xmax))
-			{
-				/*
-				 * If the XMAX is a valid TransactionId, then we need to
-				 * create a new MultiXactId that includes both the old locker
-				 * and our own TransactionId.
-				 */
-				MultiXactStatus status;
-
-				if (old_infomask & HEAP_XMAX_EXCL_LOCK)
-					status = MultiXactStatusForUpdate;
-				else if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
-					status = MultiXactStatusForKeyShare;
-				else
-				{
-					status = 0;		/* keep compiler quiet */
-					elog(ERROR, "no lock bit found on old infomask %u", old_infomask);
-				}
-
-				xid = MultiXactIdCreate(xmax, status, xid, new_mxact_status);
-				new_infomask |= GetMultiXactIdHintBits(xid);
-				/* FIXME -- we need to add bits to the infomask here! */
-			}
-			else if (mode == LockTupleShare)
-			{
-				/*
-				 * There's no hint bit for FOR SHARE, so we need a multixact
-				 * here no matter what.
-				 */
-				xid = MultiXactIdCreateSingleton(xid, new_mxact_status);
-				new_infomask |= GetMultiXactIdHintBits(xid);
-			}
-			else
-			{
-				/*
-				 * Can get here iff HeapTupleSatisfiesUpdate saw the old xmax
-				 * as running, but it finished before
-				 * TransactionIdIsInProgress() got to run.	Treat it like
-				 * there's no locker in the tuple.
-				 */
-				switch (mode)
-				{
-					case LockTupleKeyShare:
-						new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-						break;
-					case LockTupleShare:
-						/* need a multixact here in any case */
-						xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
-						new_infomask |= GetMultiXactIdHintBits(xid);
-						break;
-					case LockTupleUpdate:
-						new_infomask |= HEAP_XMAX_EXCL_LOCK;
-						break;
-					default:
-						elog(ERROR, "invalid lock mode");
-				}
-			}
-		}
-		else
-		{
-			/*
-			 * There was no previous locker, so just insert our own
-			 * TransactionId.
-			 */
-			switch (mode)
-			{
-				case LockTupleKeyShare:
-					new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-					break;
-				case LockTupleShare:
-					/* need a multixact here in any case */
-					xid = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
-					new_infomask |= GetMultiXactIdHintBits(xid);
-					break;
-				case LockTupleUpdate:
-					new_infomask |= HEAP_XMAX_EXCL_LOCK;
-					break;
-				default:
-					elog(ERROR, "invalid lock mode");
-			}
-		}
-	}
+	compute_new_xmax_infomask(xmax, old_infomask, GetCurrentTransactionId(),
+							  mode, &xid, &new_infomask);
 
 	START_CRIT_SECTION();
 
@@ -4291,8 +4100,8 @@ l3:
 	 * possibly generating a useless combo CID.  Moreover, if we're locking a
 	 * previously updated tuple, it's important to preserve the Cmax.
 	 *
-	 * Note we only reset the HOT UPDATE bit if there's no update; otherwise
-	 * we risk breaking the HOT chain.
+	 * Also reset the HOT UPDATE bit, but only if there's no update; otherwise
+	 * we would break the HOT chain.
 	 */
 	tuple->t_data->t_infomask = new_infomask;
 	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
@@ -4306,7 +4115,7 @@ l3:
 	 * updated, we need to follow the update chain to lock the new versions
 	 * of the tuple as well.
 	 *
-	 * FIXME -- not really sure of the implications of this.
+	 * FIXME -- not 100% sure of the implications of this.
 	 */
 	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
 		tuple->t_data->t_ctid = *tid;
@@ -4365,19 +4174,26 @@ l3:
 	END_CRIT_SECTION();
 
 	/*
-	 * Lock "future" versions of the tuple, if any.
-	 * XXX do we really need to hold the tuple lock while we do this?
+	 * Lock "future" versions of the tuple, if any.  Note we do this while
+	 * holding the tuple lock; this is because a future version of the tuple
+	 * might be key-updated by some other transaction, and we need to wait on
+	 * that one to finish; if it commits, this whole lock needs to be aborted.
+	 * And any locker behind us must wait until we're done.
 	 */
+	if (!HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
 	{
 		ItemPointerData		tid;
+
+		Assert(have_tuple_lock);
 
 		ItemPointerCopy(&(tuple->t_data->t_ctid), &tid);
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
-		if (!HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
-			heap_lock_updated_tuple(relation, &tid, GetCurrentTransactionId(),
-									mode);
+		heap_lock_updated_tuple(relation, &tid, GetCurrentTransactionId(),
+								mode);
 	}
+	else
+		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
 	/*
 	 * Don't update the visibility map here. Locking a tuple doesn't change
@@ -4394,79 +4210,56 @@ l3:
 	return HeapTupleMayBeUpdated;
 }
 
-#include "executor/tuptable.h"
-#include "access/printtup.h"
+/*
+ * Given an original set of Xmax and infomask, and a transaction acquiring a
+ * new lock of the given mode, compute the new Xmax and corresponding infomask
+ * to use on the tuple.
+ *
+ * Note that this might have side effects such as creating a new MultiXactId.
+ *
+ * Most callers will have called HeapTupleSatisfiesUpdate before this function;
+ * that will have set the HEAP_XMAX_INVALID bit if the xmax was a MultiXactId
+ * but it was not running anymore. There is a race condition, which is that the
+ * MultiXactId may have finished since then, but that uncommon case is handled
+ * within MultiXactIdExpand.
+ *
+ * There is a similar race condition possible when the old xmax was a regular
+ * TransactionId.  We test TransactionIdIsInProgress again just to narrow the
+ * window, but it's still possible to end up creating an unnecessary
+ * MultiXactId.  Fortunately this is harmless.
+ */
 static void
-heap_lock_updated_tuple(Relation rel, ItemPointer tid, TransactionId xid,
-						LockTupleMode mode)
+compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
+						  TransactionId add_to_xmax, LockTupleMode mode,
+						  TransactionId *result_xmax, uint16 *result_infomask)
 {
-	HeapTupleData	mytup;
-	Buffer			buf;
-	uint16			new_infomask,
-					old_infomask;
-	TransactionId	xmax,
-					new_xmax;
+	TransactionId	new_xmax;
+	uint16			new_infomask = old_infomask;
 
-	if (xid < 900)
-		abort();
-
-restart:
-	ItemPointerCopy(tid, &(mytup.t_self));
-	new_infomask = 0;
-	new_xmax = InvalidTransactionId;
-
-	printf("reporting tuple at %u/%u\n", ItemPointerGetBlockNumber(tid),
-		   ItemPointerGetOffsetNumber(tid));
-
-	if (!heap_fetch(rel, SnapshotAny, &mytup, &buf, false, NULL))
-		elog(ERROR, "unable to fetch updated version of tuple");
-
-	{
-		TupleTableSlot	*slot;
-
-		slot = MakeSingleTupleTableSlot(rel->rd_att);
-		ExecStoreTuple(&mytup, slot, buf, false);
-		debugtup(slot, NULL);
-		ExecDropSingleTupleTableSlot(slot);
-	}
-
-	/*
-	 * We've got a more recent (updated) version of a tuple we locked.
-	 * We need to propagate the lock to it; here we don't sleep at all
-	 * or try to check visibility, we just inconditionally mark it as
-	 * locked by us.  We only need to ensure we have buffer lock.
-	 */
-	LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-	old_infomask = mytup.t_data->t_infomask;
-	xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
-
-	elog(LOG, "original xmax is %u, infomask is %x on tuple %u/%u",
-		 xmax, old_infomask,
-		 ItemPointerGetBlockNumber(&mytup.t_self),
-		 ItemPointerGetOffsetNumber(&mytup.t_self));
-
-	if (old_infomask & HEAP_XMAX_INVALID)
+	if (old_infomask & (HEAP_XMAX_INVALID | HEAP_XMAX_COMMITTED))
 	{
 		/*
-		 * There was no previous locker, so just insert our own
+		 * No previous locker, or it already finished; we just insert our own
 		 * TransactionId.
 		 */
 		switch (mode)
 		{
 			case LockTupleKeyShare:
-				new_xmax = xid;
+				new_xmax = add_to_xmax;
 				new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
 				break;
 			case LockTupleShare:
 				/* need a multixact here in any case */
-				new_xmax = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
+				new_xmax = MultiXactIdCreateSingleton(add_to_xmax, MultiXactStatusForShare);
 				new_infomask |= GetMultiXactIdHintBits(new_xmax);
 				break;
 			case LockTupleUpdate:
 				new_infomask |= HEAP_XMAX_EXCL_LOCK;
+				new_xmax = xmax;
 				break;
 			default:
 				elog(ERROR, "invalid lock mode");
+				new_xmax = InvalidTransactionId;	/* keep compiler quiet */
 		}
 		/* no other updater; just add myself */
 	}
@@ -4479,7 +4272,7 @@ restart:
 		 * If the XMAX is already a MultiXactId, then we need to
 		 * expand it to include our own TransactionId.
 		 */
-		new_xmax = MultiXactIdExpand((MultiXactId) xmax, xid, new_mxact_status);
+		new_xmax = MultiXactIdExpand((MultiXactId) xmax, add_to_xmax, new_mxact_status);
 		new_infomask |= GetMultiXactIdHintBits(new_xmax);
 	}
 	else if (TransactionIdIsInProgress(xmax))
@@ -4489,7 +4282,7 @@ restart:
 		 * create a new MultiXactId that includes both the old locker and our
 		 * own TransactionId.
 		 */
-		MultiXactStatus status;
+		MultiXactStatus		status;
 		MultiXactStatus		new_mxact_status;
 
 		new_mxact_status = get_mxact_status_for_tuplelock(mode);
@@ -4505,7 +4298,7 @@ restart:
 
 		/* FIXME need to verify the KEY_INTACT bit, and block if it's set */
 
-		new_xmax = MultiXactIdCreate(xmax, status, xid, new_mxact_status);
+		new_xmax = MultiXactIdCreate(xmax, status, add_to_xmax, new_mxact_status);
 		new_infomask |= GetMultiXactIdHintBits(new_xmax);
 		/* FIXME -- we need to add bits to the infomask here! */
 	}
@@ -4513,49 +4306,95 @@ restart:
 	{
 		MultiXactStatus		new_mxact_status;
 
-		new_mxact_status = get_mxact_status_for_tuplelock(mode);
 		/*
 		 * There's no hint bit for FOR SHARE, so we need a multixact
 		 * here no matter what.
 		 */
-		new_xmax = MultiXactIdCreateSingleton(xid, new_mxact_status);
+		new_mxact_status = get_mxact_status_for_tuplelock(mode);
+		new_xmax = MultiXactIdCreateSingleton(add_to_xmax, new_mxact_status);
 		new_infomask |= GetMultiXactIdHintBits(new_xmax);
 	}
 	else
 	{
 		/*
-		 * Can get here iff the updating transaction was running when we were
-		 * called but finished before TransactionIdIsInProgress got to run.
-		 * Treat it like there's no locker in the tuple.
+		 * Can get here iff the updating transaction was running when the
+		 * infomask was extracted from the tuple, but finished before
+		 * TransactionIdIsInProgress got to run.  Treat it like there's no
+		 * locker in the tuple.
 		 */
 		switch (mode)
 		{
 			case LockTupleKeyShare:
 				new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
+				new_xmax = xmax;
 				break;
 			case LockTupleShare:
 				/* need a multixact here in any case */
-				new_xmax = MultiXactIdCreateSingleton(xid, MultiXactStatusForShare);
+				new_xmax = MultiXactIdCreateSingleton(add_to_xmax, MultiXactStatusForShare);
 				new_infomask |= GetMultiXactIdHintBits(new_xmax);
 				break;
 			case LockTupleUpdate:
 				new_infomask |= HEAP_XMAX_EXCL_LOCK;
+				new_xmax = xmax;
 				break;
 			default:
 				elog(ERROR, "invalid lock mode");
+				new_xmax = InvalidTransactionId;	/* keep compiler quiet */
 		}
 	}
 
-	/* And set them.  This is probably bogus: we need at least WAL */
-	HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
-	mytup.t_data->t_infomask |= new_infomask;
-	mytup.t_data->t_infomask &= ~HEAP_XMAX_INVALID;
+	/* must unset the XMAX_INVALID bit */
+	new_infomask &= ~HEAP_XMAX_INVALID;
 
-	elog(LOG, "setting xmax to %u, infomask to %x on tuple %u/%u",
-		 new_xmax, mytup.t_data->t_infomask,
-		 ItemPointerGetBlockNumber(&mytup.t_self),
-		 ItemPointerGetOffsetNumber(&mytup.t_self));
-	
+	*result_infomask = new_infomask;
+	*result_xmax = new_xmax;
+}
+
+static void
+heap_lock_updated_tuple(Relation rel, ItemPointer tid, TransactionId xid,
+						LockTupleMode mode)
+{
+	HeapTupleData	mytup;
+	Buffer			buf;
+	uint16			new_infomask,
+					old_infomask;
+	TransactionId	xmax,
+					new_xmax;
+
+restart:
+	new_infomask = 0;
+	new_xmax = InvalidTransactionId;
+	ItemPointerCopy(tid, &(mytup.t_self));
+
+	if (!heap_fetch(rel, SnapshotAny, &mytup, &buf, false, NULL))
+		elog(ERROR, "unable to fetch updated version of tuple");
+
+	/* FIXME -- do we need to do a LockTuple here? */
+
+	/*
+	 * We've got a more recent (updated) version of a tuple we locked.
+	 * We need to propagate the lock to it; here we don't sleep at all
+	 * or try to check visibility, we just inconditionally mark it as
+	 * locked by us.  We only need to ensure we have buffer lock.
+	 */
+	LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+
+	old_infomask = mytup.t_data->t_infomask;
+	xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
+
+	if (!(old_infomask & HEAP_XMAX_INVALID) &&
+		(!HeapTupleHeaderInfomaskIsOnlyLocked(old_infomask) &&
+		 !(mytup.t_data->t_infomask & HEAP_UPDATE_KEY_INTACT)) ||
+		 !ItemPointerEquals(&mytup.t_self, &mytup.t_data->t_ctid))
+		elog(ERROR, "tuple deleted??");
+
+	compute_new_xmax_infomask(xmax, old_infomask, xid, mode,
+							  &new_xmax, &new_infomask);
+
+	/* And set them. */
+	HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
+	mytup.t_data->t_infomask = new_infomask;
+
 	LockBuffer(buf, BUFFER_LOCK_UNLOCK);
 
 	/* found end of update chain? */
@@ -4567,7 +4406,7 @@ restart:
 		return;
 	}
 
-	/* almost tail recursion */
+	/* tail recursion */
 	ItemPointerCopy(&(mytup.t_data->t_ctid), tid);
 	ReleaseBuffer(buf);
 	goto restart;

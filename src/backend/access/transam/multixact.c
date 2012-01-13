@@ -547,13 +547,13 @@ MultiXactIdIsRunning(MultiXactId multi)
  * been added, since it is not legal to add members to an existing
  * MultiXactId).
  *
+ * But by the time we finish sleeping, someone else may have changed the Xmax
+ * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
  * We return the number of members that we did not test for.  This is dubbed
  * "remaining" as in "the number of members that remaing running", but this is
  * slightly incorrect, because lockers whose status did not conflict with ours
  * are not even considered and so might have gone away anyway.
- *
- * But by the time we finish sleeping, someone else may have changed the Xmax
- * of the containing tuple, so the caller needs to iterate on us somehow.
  */
 void
 MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)

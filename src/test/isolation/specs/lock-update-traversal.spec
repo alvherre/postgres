@@ -30,5 +30,3 @@ step "s2c"	{ COMMIT; }
 step "s2d"	{ DELETE FROM foo WHERE key = 1; }
 
 permutation "s1b" "s2b" "s1s" "s2u" "s1l" "s2c" "s2d" "s1c"
-permutation "s1b" "s2b" "s1s" "s2u" "s1l" "s2c" "s2d" "s1c" "s2v"
-permutation "s1b" "s2b" "s1s" "s2u" "s1l" "s2c" "s2d" "s1c"
