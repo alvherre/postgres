@@ -87,7 +87,9 @@ main(int argc, char *argv[])
 	Oid			set_oid = 0;
 	MultiXactId set_mxid = 0;
 	MultiXactOffset set_mxoff = (MultiXactOffset) -1;
-	TransactionId set_mxfreeze = FrozenTransactionId;
+	TransactionId set_mxactFreezeXid = 0;
+	uint32		set_mxactFreezeEpoch = (uint32) -1;
+	bool		set_mxactFreeze = false;
 	uint32		minXlogTli = 0,
 				minXlogId = 0,
 				minXlogSeg = 0;
@@ -205,20 +207,21 @@ main(int argc, char *argv[])
 				break;
 
 			case 'z':
-				set_mxfreeze = strtoul(optarg, &endptr, 0);
-				if (endptr == optarg || *endptr != '\0')
+				set_mxactFreezeEpoch = strtoul(optarg, &endptr, 0);
+				if (endptr == optarg || *endptr != ',')
 				{
 					fprintf(stderr, _("%s: invalid argument for option -z\n"), progname);
 					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 					exit(1);
 				}
-				/* InvalidTransactionId is allowed here */
-				if (set_mxfreeze == FrozenTransactionId ||
-					set_mxfreeze == BootstrapTransactionId)
+				set_mxactFreezeXid = strtoul(endptr + 1, &endptr2, 0);
+				if (endptr2 == endptr + 1 || *endptr2 != '\0')
 				{
-					fprintf(stderr, _("%s: multitransaction freezeXid (-z) must not be 1 or 2\n"), progname);
+					fprintf(stderr, _("%s: invalid argument for option -z\n"), progname);
+					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 					exit(1);
 				}
+				set_mxactFreeze = true;
 				break;
 
 			case 'l':
@@ -350,10 +353,11 @@ main(int argc, char *argv[])
 	if (set_mxoff != -1)
 		ControlFile.checkPointCopy.nextMultiOffset = set_mxoff;
 
-	/*
-	if (set_mxfreeze != -1)
-		ControlFile.checkPointCopy.mxactFreezeXid = set_mxfreeze;
-		*/
+	if (set_mxactFreeze)
+	{
+		ControlFile.checkPointCopy.oldestSegTruncateXidEpoch = set_mxactFreezeEpoch;
+		ControlFile.checkPointCopy.oldestSegTruncateXid = set_mxactFreezeXid;
+	}
 
 	if (minXlogTli > ControlFile.checkPointCopy.ThisTimeLineID)
 		ControlFile.checkPointCopy.ThisTimeLineID = minXlogTli;
@@ -601,10 +605,9 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.nextMulti);
 	printf(_("Latest checkpoint's NextMultiOffset:  %u\n"),
 		   ControlFile.checkPointCopy.nextMultiOffset);
-	/*
-	printf(_("Latest checkpoint's MultiXact freezeXid: %u\n"),
-		   ControlFile.checkPointCopy.mxactFreezeXid);
-		   */
+	printf(_("Latest checkpoint's MXact Truncate:   %u/%u\n"),
+		   ControlFile.checkPointCopy.oldestSegTruncateXidEpoch,
+		   ControlFile.checkPointCopy.oldestSegTruncateXid);
 	printf(_("Latest checkpoint's oldestXID:        %u\n"),
 		   ControlFile.checkPointCopy.oldestXid);
 	printf(_("Latest checkpoint's oldestXID's DB:   %u\n"),
@@ -1058,6 +1061,7 @@ usage(void)
 	printf(_("  -o OID          set next OID\n"));
 	printf(_("  -O OFFSET       set next multitransaction offset\n"));
 	printf(_("  -x XID          set next transaction ID\n"));
+	printf(_("  -z EPOCH,XID    set MultiXactId oldest segment truncate epoch/Xid\n"));
 	printf(_("  --help          show this help, then exit\n"));
 	printf(_("  --version       output version information, then exit\n"));
 	printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
