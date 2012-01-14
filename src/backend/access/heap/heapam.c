@@ -4402,6 +4402,7 @@ static HTSU_Result
 heap_lock_updated_tuple(Relation rel, ItemPointer tid, TransactionId xid,
 						LockTupleMode mode)
 {
+	ItemPointerData	tupid;
 	HeapTupleData	mytup;
 	Buffer			buf;
 	uint16			new_infomask,
@@ -4409,10 +4410,12 @@ heap_lock_updated_tuple(Relation rel, ItemPointer tid, TransactionId xid,
 	TransactionId	xmax,
 					new_xmax;
 
+	ItemPointerCopy(tid, &tupid);
+
 restart:
 	new_infomask = 0;
 	new_xmax = InvalidTransactionId;
-	ItemPointerCopy(tid, &(mytup.t_self));
+	ItemPointerCopy(&tupid, &(mytup.t_self));
 
 l5:
 	if (!heap_fetch(rel, SnapshotAny, &mytup, &buf, false, NULL))
@@ -4493,7 +4496,7 @@ l5:
 	}
 
 	/* tail recursion */
-	ItemPointerCopy(&(mytup.t_data->t_ctid), tid);
+	ItemPointerCopy(&(mytup.t_data->t_ctid), &tupid);
 	ReleaseBuffer(buf);
 	goto restart;
 }
