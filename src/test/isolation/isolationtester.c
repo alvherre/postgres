@@ -559,7 +559,7 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 			int j;
 
 			/*
-			 * This permutation is invalid: it can never happen in practice.
+			 * This permutation is invalid: it can never happen in real life.
 			 *
 			 * A session is blocked on an earlier step (waiting) and no further
 			 * steps from this session can run until it is unblocked, but it
