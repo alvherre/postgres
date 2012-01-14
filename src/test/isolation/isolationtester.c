@@ -559,14 +559,11 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 			int j;
 
 			/*
-			 * This permutation is invalid: it can never
-			 * happen in practice.
+			 * This permutation is invalid: it can never happen in practice.
 			 *
-			 * A session is blocked on an earlier step
-			 * (waiting) and no further steps from this
-			 * session can run until it is unblocked, but
-			 * it can only be unblocked by running steps
-			 * from other sessions.
+			 * A session is blocked on an earlier step (waiting) and no further
+			 * steps from this session can run until it is unblocked, but it
+			 * can only be unblocked by running steps from other sessions.
 			 */
 			fprintf(stderr, "invalid permutation detected\n");
 
@@ -586,9 +583,8 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 			}
 
 			/*
-			 * Now we really have to complete all the
-			 * running transactions to make sure teardown
-			 * doesn't block.
+			 * Now we really have to complete all the running transactions to
+			 * make sure teardown doesn't block.
 			 */
 			for (j = 1; j < nconns; j++)
 			{
