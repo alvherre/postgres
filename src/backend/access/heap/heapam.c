@@ -88,9 +88,6 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 				bool all_visible_cleared, bool new_all_visible_cleared);
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay);
-static HTSU_Result
-follow_the_update_chain(Relation relation, uint16 infomask, ItemPointer tid,
-						LockTupleMode mode);
 static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
 						  TransactionId add_to_xmax, LockTupleMode mode,
 						  TransactionId *result_xmax, uint16 *result_infomask);
@@ -3832,18 +3829,39 @@ l3:
 		 * If we're requesting KeyShare, and there's no update present, we
 		 * don't need to wait.  Even if there is an update, we can still
 		 * continue if the key hasn't been modified.
+		 *
+		 * However, if there are updates, we need to walk the update chain
+		 * to mark future versions of the row as locked, too.  That way, if
+		 * somebody deletes that future version, we're protected against the
+		 * key going away.  This locking of future versions could block
+		 * momentarily, if a concurrent transaction is deleting a key; or it
+		 * could return a value to the effect that the transaction deleting the
+		 * key has already committed.  So we do this before re-locking the
+		 * buffer; otherwise this would be prone to deadlocks.  Note that the TID
+		 * we're locking was grabbed before we unlocked the buffer.  For it to
+		 * change while we're not looking, the other properties we're testing
+		 * for below after re-locking the buffer would also change, in which
+		 * case we would restart this loop above.
 		 */
 		if ((mode == LockTupleKeyShare) &&
 			(HeapTupleHeaderInfomaskIsOnlyLocked(infomask) ||
 			 !(infomask2 & HEAP_UPDATE_KEY_REVOKED)))
 		{
-			HTSU_Result		res;
-
-			res = follow_the_update_chain(relation, infomask, &updated_tid, mode);
-			if (res != HeapTupleMayBeUpdated)
+			/* if there are updates, follow the update chain */
+			if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
 			{
-				result = res;
-				goto failed;
+				HTSU_Result		res;
+
+				res = heap_lock_updated_tuple(relation, tid,
+											  GetCurrentTransactionId(),
+											  mode);
+				if (res != HeapTupleMayBeUpdated)
+				{
+					result = res;
+					/* recovery code expects to have buffer lock held */
+					LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+					goto failed;
+				}
 			}
 
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3965,7 +3983,6 @@ l3:
 			{
 				MultiXactStatus status = get_mxact_status_for_tuplelock(mode);
 				int		remain;
-				HTSU_Result		res;
 
 				/* We only ever lock tuples, never update them */
 				if (status >= MultiXactStatusUpdate)
@@ -3983,11 +4000,21 @@ l3:
 				else
 					MultiXactIdWait((MultiXactId) xwait, status, &remain);
 
-				res = follow_the_update_chain(relation, infomask, &updated_tid, mode);
-				if (res != HeapTupleMayBeUpdated)
+				/* if there are updates, follow the update chain */
+				if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
 				{
-					result = res;
-					goto failed;
+					HTSU_Result		res;
+
+					res = heap_lock_updated_tuple(relation, tid,
+												  GetCurrentTransactionId(),
+												  mode);
+					if (res != HeapTupleMayBeUpdated)
+					{
+						result = res;
+						/* recovery code expects to have buffer lock held */
+						LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+						goto failed;
+					}
 				}
 
 				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -4014,8 +4041,6 @@ l3:
 			}
 			else
 			{
-				HTSU_Result		res;
-
 				/* wait for regular transaction to end */
 				if (nowait)
 				{
@@ -4028,11 +4053,21 @@ l3:
 				else
 					XactLockTableWait(xwait);
 
-				res = follow_the_update_chain(relation, infomask, &updated_tid, mode);
-				if (res != HeapTupleMayBeUpdated)
+				/* if there are updates, follow the update chain */
+				if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
 				{
-					result = res;
-					goto failed;
+					HTSU_Result		res;
+
+					res = heap_lock_updated_tuple(relation, tid,
+												  GetCurrentTransactionId(),
+												  mode);
+					if (res != HeapTupleMayBeUpdated)
+					{
+						result = res;
+						/* recovery code expects to have buffer lock held */
+						LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+						goto failed;
+					}
 				}
 
 				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -4221,20 +4256,6 @@ failed:
 		UnlockTupleTuplock(relation, tid, mode);
 
 	return HeapTupleMayBeUpdated;
-}
-
-/*
- * Lock "future" versions of the tuple, if any.
- */
-static HTSU_Result
-follow_the_update_chain(Relation relation, uint16 infomask, ItemPointer tid,
-						LockTupleMode mode)
-{
-	if (HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
-		return HeapTupleMayBeUpdated;
-
-	return heap_lock_updated_tuple(relation, tid,
-								   GetCurrentTransactionId(), mode);
 }
 
 /*
