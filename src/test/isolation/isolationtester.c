@@ -395,7 +395,7 @@ run_named_permutations(TestSpec * testspec)
 		Permutation *p = testspec->permutations[i];
 		Step	  **steps;
 
-		if (p->nsteps != nallsteps)
+		if (p->nsteps > nallsteps)
 		{
 			fprintf(stderr, "invalid number of steps in permutation %d\n", i + 1);
 			exit_nicely();
