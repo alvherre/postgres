@@ -365,7 +365,7 @@ heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rootoffnum,
 			 * HeapTupleHeaderIsHotUpdated will never return true for an
 			 * XMIN_INVALID tuple, so this code will work even when there were
 			 * sequential updates within the aborted transaction.)
-			 *HeapTupleHeaderIsLocked
+			 *
 			 * Note that we might first arrive at a dead heap-only tuple
 			 * either here or while following a chain below.  Whichever path
 			 * gets there first will mark the tuple unused.
