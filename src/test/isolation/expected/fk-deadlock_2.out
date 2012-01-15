@@ -14,6 +14,7 @@ step s1u: UPDATE parent SET aux = 'bar';
 step s2i: INSERT INTO child VALUES (2, 1);
 step s1c: COMMIT;
 step s2u: UPDATE parent SET aux = 'baz';
+ERROR:  could not serialize access due to concurrent update
 step s2c: COMMIT;
 
 starting permutation: s1i s2i s1u s2u s1c s2c
@@ -62,4 +63,5 @@ step s2u: UPDATE parent SET aux = 'baz';
 step s1i: INSERT INTO child VALUES (1, 1);
 step s2c: COMMIT;
 step s1u: UPDATE parent SET aux = 'bar';
+ERROR:  could not serialize access due to concurrent update
 step s1c: COMMIT;
