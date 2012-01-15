@@ -2456,7 +2456,6 @@ l1:
 		{
 			int		remain;
 
-
 			/* wait for multixact */
 			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate, &remain);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3784,7 +3783,7 @@ l3:
 					{
 						if (have_tuple_lock)
 							UnlockTupleTuplock(relation, tid, mode);
-		
+
 						pfree(members);
 						return HeapTupleMayBeUpdated;
 					}
@@ -4668,11 +4667,13 @@ heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 	 * exclusive lock.	(We don't need this pushup for xmin, because only
 	 * VACUUM could be interested in changing an existing tuple's xmin, and
 	 * there's only one VACUUM allowed on a table at a time.)
+	 *
+	 * Note that this code handles IS_MULTI Xmax values, too, but only to mark
+	 * the tuple frozen if the updating Xid in the mxact is below the freeze
+	 * cutoff; it doesn't remove dead members of a very old multixact.
 	 */
 recheck_xmax:
-	if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
-	{
-		xid = HeapTupleHeaderGetRawXmax(tuple);
+		xid = HeapTupleHeaderGetUpdateXid(tuple);
 		if (TransactionIdIsNormal(xid) &&
 			TransactionIdPrecedes(xid, cutoff_xid))
 		{
@@ -4688,36 +4689,18 @@ recheck_xmax:
 
 			/*
 			 * The tuple might be marked either XMAX_INVALID or XMAX_COMMITTED
-			 * + LOCKED.  Normalize to INVALID just to be sure no one gets
-			 * confused.
+			 * + LOCKED, possibly with IS_MULTI too.  Normalize to INVALID just
+			 * to be sure no one gets confused.  Also get rid of the
+			 * HEAP_UPDATE_KEY_REVOKED bit.
 			 */
-			tuple->t_infomask &= ~HEAP_XMAX_COMMITTED;
+			tuple->t_infomask &= ~(HEAP_XMAX_COMMITTED | HEAP_LOCK_BITS |
+								   HEAP_XMAX_IS_MULTI);
+			tuple->t_infomask &= ~HEAP_LOCK_BITS;
 			tuple->t_infomask |= HEAP_XMAX_INVALID;
 			HeapTupleHeaderClearHotUpdated(tuple);
+			tuple->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
 			changed = true;
 		}
-	}
-	else
-	{
-		/*----------
-		 * XXX perhaps someday we should zero out very old MultiXactIds here?
-		 *
-		 * The only way a stale MultiXactId could pose a problem is if a
-		 * tuple, having once been multiply-share-locked, is not touched by
-		 * any vacuum or attempted lock or deletion for just over 4G MultiXact
-		 * creations, and then in the probably-narrow window where its xmax
-		 * is again a live MultiXactId, someone tries to lock or delete it.
-		 * Even then, another share-lock attempt would work fine.  An
-		 * exclusive-lock or delete attempt would face unexpected delay, or
-		 * in the very worst case get a deadlock error.  This seems an
-		 * extremely low-probability scenario with minimal downside even if
-		 * it does happen, so for now we don't do the extra bookkeeping that
-		 * would be needed to clean out MultiXactIds.
-		 *
-		 * FIXME -- today is that day.  Figure this out.
-		 *----------
-		 */
-	}
 
 	/*
 	 * Although xvac per se could only be set by old-style VACUUM FULL, it
