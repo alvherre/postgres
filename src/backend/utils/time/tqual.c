@@ -1356,7 +1356,20 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 		TransactionId xmax;
 
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
-			return HEAPTUPLE_LIVE;
+		{
+			if (tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)
+				return HEAPTUPLE_LIVE;
+			else
+			{
+				xmax = HeapTupleGetUpdateXid(tuple);
+				if (TransactionIdDidCommit(xmax))
+					return HEAPTUPLE_RECENTLY_DEAD;
+				else if (TransactionIdIsInProgress(xmax) ||
+						 TransactionIdIsCurrentTransactionId(xmax))
+					return HEAPTUPLE_DELETE_IN_PROGRESS;
+				return HEAPTUPLE_LIVE;
+			}
+		}
 
 		xmax = HeapTupleGetUpdateXid(tuple);
 		if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
