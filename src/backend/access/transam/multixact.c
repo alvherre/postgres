@@ -921,9 +921,9 @@ HandleMxactOffsetCornerCases(MultiXactId multi)
  * GetMultiXactIdMembers
  *		Returns the set of MultiXactMembers that make up a MultiXactId
  *
- * We return -1 if the MultiXactId is too old to possibly have any members
- * still running; in that case we have not actually looked them up, and
- * *members is not set.
+ * We used to return -1 if the MultiXactId was too old to possibly have any
+ * members still running, but no longer, because that's a dangerous condition;
+ * see comments below.
  */
 int
 GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)

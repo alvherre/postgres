@@ -167,7 +167,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
-#define HEAP_XMAX_LOCK_ONLY	0x0080	/* xmax, if valid, is only a locker.
+#define HEAP_XMAX_LOCK_ONLY		0x0080	/* xmax, if valid, is only a locker.
 										 * Note this is not set unless
 										 * XMAX_IS_MULTI is also set. */
 
