@@ -1357,7 +1357,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 		{
-			if (tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)
+			if (tuple->t_infomask & HEAP_XMAX_LOCK_ONLY)
 				return HEAPTUPLE_LIVE;
 			else
 			{

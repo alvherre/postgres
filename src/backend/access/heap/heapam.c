@@ -2935,7 +2935,7 @@ l2:
 			 * subxact aborts.
 			 */
 			update_xact = InvalidTransactionId;
-			if (!(oldtup.t_data->t_infomask & HEAP_XMAX_IS_NOT_UPDATE))
+			if (!(oldtup.t_data->t_infomask & HEAP_XMAX_LOCK_ONLY))
 				update_xact = HeapTupleGetUpdateXid(oldtup.t_data);
 
 			/* there was no UPDATE in the MultiXact; or it aborted. */
@@ -3886,7 +3886,7 @@ l3:
 		 * there's no update and no exclusive lock present.
 		 */
 		if (mode == LockTupleShare &&
-			(infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_NOT_UPDATE)) &&
+			(infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) &&
 			!(infomask & HEAP_XMAX_EXCL_LOCK))
 		{
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
@@ -3896,7 +3896,7 @@ l3:
 			 * above about allowing xmax to change.
 			 */
 			if (!(tuple->t_data->t_infomask &
-				  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_IS_NOT_UPDATE)) ||
+				  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) ||
 				(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
 				goto l3;
 			require_sleep = false;
@@ -4213,8 +4213,8 @@ failed:
 		xlrec.infobits_set =
 			(((new_infomask & HEAP_XMAX_IS_MULTI) != 0) ?
 			 XLHL_XMAX_IS_MULTI : 0) |
-			(((new_infomask & HEAP_XMAX_IS_NOT_UPDATE) != 0) ?
-			 XLHL_XMAX_IS_NOT_UPDATE : 0) |
+			(((new_infomask & HEAP_XMAX_LOCK_ONLY) != 0) ?
+			 XLHL_XMAX_LOCK_ONLY : 0) |
 			(((new_infomask & HEAP_XMAX_EXCL_LOCK) != 0) ?
 			 XLHL_XMAX_EXCL_LOCK : 0) |
 			(((new_infomask & HEAP_XMAX_KEYSHR_LOCK) != 0) ?
@@ -4792,7 +4792,7 @@ GetMultiXactIdHintBits(MultiXactId multi)
 		}
 	}
 	if (!has_update)
-		bits |= HEAP_XMAX_IS_NOT_UPDATE;
+		bits |= HEAP_XMAX_LOCK_ONLY;
 
 	if (nmembers > 0)
 		pfree(members);
@@ -4804,7 +4804,7 @@ GetMultiXactIdHintBits(MultiXactId multi)
  * HeapTupleGetUpdateXid
  *
  * Given a tuple with a multixact Xmax, and which does not have the
- * HEAP_XMAX_IS_NOT_UPDATE bit set, obtain and return the Xid of the updating
+ * HEAP_XMAX_LOCK_ONLY bit set, obtain and return the Xid of the updating
  * transaction.
  *
  * See also HeapTupleHeaderGetUpdateXid, which can be used without previously
@@ -4817,7 +4817,7 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 	MultiXactMember	*members;
 	int				nmembers;
 
-	Assert(!(tuple->t_infomask & HEAP_XMAX_IS_NOT_UPDATE));
+	Assert(!(tuple->t_infomask & HEAP_XMAX_LOCK_ONLY));
 	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
 
 	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetRawXmax(tuple), &members);
@@ -6191,8 +6191,8 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 						  HEAP_MOVED);
 	if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
 		htup->t_infomask |= HEAP_XMAX_IS_MULTI;
-	if (xlrec->infobits_set & XLHL_XMAX_IS_NOT_UPDATE)
-		htup->t_infomask |= HEAP_XMAX_IS_NOT_UPDATE;
+	if (xlrec->infobits_set & XLHL_XMAX_LOCK_ONLY)
+		htup->t_infomask |= HEAP_XMAX_LOCK_ONLY;
 	if (xlrec->infobits_set & XLHL_XMAX_EXCL_LOCK)
 		htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
 	if (xlrec->infobits_set & XLHL_XMAX_KEYSHR_LOCK)
@@ -6410,8 +6410,8 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 		appendStringInfoChar(buf, ' ');
 		if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
 			appendStringInfo(buf, "XMAX_IS_MULTI ");
-		if (xlrec->infobits_set & XLHL_XMAX_IS_NOT_UPDATE)
-			appendStringInfo(buf, "XMAX_IS_NOT_UPDATE ");
+		if (xlrec->infobits_set & XLHL_XMAX_LOCK_ONLY)
+			appendStringInfo(buf, "XMAX_LOCK_ONLY ");
 		if (xlrec->infobits_set & XLHL_XMAX_EXCL_LOCK)
 			appendStringInfo(buf, "XMAX_EXCL_LOCK ");
 		if (xlrec->infobits_set & XLHL_XMAX_KEYSHR_LOCK)

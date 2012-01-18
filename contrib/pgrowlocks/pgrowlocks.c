@@ -144,8 +144,8 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				strcat(values[Atnum_type], "KeyShare ");
 			if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
 				strcat(values[Atnum_type], "Exclusive ");
-			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)
-				strcat(values[Atnum_type], "IsNotUpdate ");
+			if (tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY)
+				strcat(values[Atnum_type], "LockOnly ");
 
 			values[Atnum_xmax] = palloc(NCHARS * sizeof(char));
 			snprintf(values[Atnum_xmax], NCHARS, "%d", HeapTupleHeaderGetRawXmax(tuple->t_data));

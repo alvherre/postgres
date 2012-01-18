@@ -167,11 +167,11 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
-#define HEAP_XMAX_IS_NOT_UPDATE	0x0080	/* xmax, if valid, is only a locker.
+#define HEAP_XMAX_LOCK_ONLY	0x0080	/* xmax, if valid, is only a locker.
 										 * Note this is not set unless
 										 * XMAX_IS_MULTI is also set. */
 
-#define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_IS_NOT_UPDATE | \
+#define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY | \
 						 HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */
@@ -199,7 +199,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
 	((!((infomask) & HEAP_XMAX_IS_MULTI) && \
 	  (infomask) & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) || \
-	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_IS_NOT_UPDATE)))
+	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_LOCK_ONLY)))
 
 #define HeapTupleHeaderIsOnlyLocked(tup) \
 	HeapTupleHeaderInfomaskIsOnlyLocked((tup)->t_infomask)
@@ -252,7 +252,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 ( \
 	(!((tup)->t_infomask & HEAP_XMAX_INVALID) && \
 	 ((tup)->t_infomask & HEAP_XMAX_IS_MULTI) && \
-	 !((tup)->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)) ? \
+	 !((tup)->t_infomask & HEAP_XMAX_LOCK_ONLY)) ? \
 		HeapTupleGetUpdateXid(tup) \
 	: \
 		HeapTupleHeaderGetRawXmax(tup) \
@@ -791,7 +791,7 @@ typedef struct xl_heap_newpage
 
 /* flags for xl_heap_lock.infobits_set */
 #define XLHL_XMAX_IS_MULTI		0x01
-#define XLHL_XMAX_IS_NOT_UPDATE	0x02
+#define XLHL_XMAX_LOCK_ONLY		0x02
 #define XLHL_XMAX_EXCL_LOCK		0x04
 #define XLHL_XMAX_KEYSHR_LOCK	0x08
 #define XLHL_UPDATE_KEY_REVOKED	0x10
