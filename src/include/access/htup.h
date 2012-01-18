@@ -187,7 +187,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 										 * upgrade support */
 #define HEAP_MOVED (HEAP_MOVED_OFF | HEAP_MOVED_IN)
 
-#define HEAP_XACT_MASK			0xFFE0	/* visibility-related bits */
+#define HEAP_XACT_MASK			0xFFF0	/* visibility-related bits */
 
 /*
  * A tuple is only locked (i.e. not updated by its Xmax) if it the Xmax is not
