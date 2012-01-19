@@ -4325,9 +4325,9 @@ l6:
 		 * If the XMAX is already a MultiXactId, then we need to expand it to
 		 * include add_to_xmax; but if all the members were lockers and are all
 		 * gone, we can do away with the IS_MULTI bit and just set add_to_xmax
-		 * as the only locked.  In any case, the cost of doing
-		 * GetMultiXactIdMembers would be paid by MultiXactIdExpand anyway if
-		 * we weren't to do this, so it's not going to cause a performance hit.
+		 * as the only locked.  The cost of doing GetMultiXactIdMembers would
+		 * be paid by MultiXactIdExpand if we weren't to do this, so this check
+		 * is not incurring extra work anyhow.
 		 *
 		 * If all lockers are gone and we have an updater that aborted,
 		 * we could also do without a multi.  However, if the locker aborted,
@@ -4335,33 +4335,16 @@ l6:
 		 * only lockers would remain.  So next time around things would clear
 		 * up.
 		 */
-		if (old_infomask & HEAP_XMAX_LOCK_ONLY)
+		if ((old_infomask & HEAP_XMAX_LOCK_ONLY) &&
+			!MultiXactIdIsRunning(xmax))
 		{
-			MultiXactMember *members;
-			int		nmembers;
-			bool	running = false;
-			int		i;
-
-			nmembers = GetMultiXactIdMembers(xmax, &members);
-			for (i = 0; i < nmembers; i++)
-			{
-				if (TransactionIdIsInProgress(members[i].xid))
-				{
-					running = true;
-					break;
-				}
-			}
-			pfree(members);
-			if (!running)
-			{
-				/*
-				 * Reset these bits and let the conditional block above handle
-				 * it.  Otherwise fall through.
-				 */
-				old_infomask &= ~HEAP_XMAX_IS_MULTI;
-				old_infomask |= HEAP_XMAX_INVALID;
-				goto l6;
-			}
+			/*
+			 * Reset these bits and let the conditional block above handle
+			 * it.  Otherwise fall through to create a new multi below.
+			 */
+			old_infomask &= ~HEAP_XMAX_IS_MULTI;
+			old_infomask |= HEAP_XMAX_INVALID;
+			goto l6;
 		}
 
 		new_xmax = MultiXactIdExpand((MultiXactId) xmax, add_to_xmax,
