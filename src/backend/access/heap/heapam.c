@@ -3993,7 +3993,7 @@ l3:
 
 				/* We only ever lock tuples, never update them */
 				if (status >= MultiXactStatusUpdate)
-					elog(ERROR, "invalid lock mode in heap_tuple_lock");
+					elog(ERROR, "invalid lock mode in heap_lock_tuple");
 
 				/* wait for multixact to end */
 				if (nowait)
