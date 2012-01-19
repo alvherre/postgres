@@ -3,7 +3,7 @@
  * parse_relation.c
  *	  parser support routines dealing with relations
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -282,7 +282,7 @@ searchRangeTable(ParseState *pstate, RangeVar *relation)
 	if (!relation->schemaname)
 		cte = scanNameSpaceForCTE(pstate, refname, &ctelevelsup);
 	if (!cte)
-		relId = RangeVarGetRelid(relation, NoLock, true, false);
+		relId = RangeVarGetRelid(relation, NoLock, true);
 
 	/* Now look for RTEs matching either the relation/CTE or the alias */
 	for (levelsup = 0;

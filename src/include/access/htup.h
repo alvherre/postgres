@@ -4,7 +4,7 @@
  *	  POSTGRES heap tuple definitions.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/htup.h
@@ -167,11 +167,11 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
-#define HEAP_XMAX_IS_NOT_UPDATE	0x0080	/* xmax, if valid, is only a locker.
+#define HEAP_XMAX_LOCK_ONLY		0x0080	/* xmax, if valid, is only a locker.
 										 * Note this is not set unless
 										 * XMAX_IS_MULTI is also set. */
 
-#define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_IS_NOT_UPDATE | \
+#define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY | \
 						 HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */
@@ -187,7 +187,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 										 * upgrade support */
 #define HEAP_MOVED (HEAP_MOVED_OFF | HEAP_MOVED_IN)
 
-#define HEAP_XACT_MASK			0xFFE0	/* visibility-related bits */
+#define HEAP_XACT_MASK			0xFFF0	/* visibility-related bits */
 
 /*
  * A tuple is only locked (i.e. not updated by its Xmax) if it the Xmax is not
@@ -196,20 +196,21 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
  *
  * Beware of multiple evaluation of arguments.
  */
-#define HeapTupleHeaderInfomaskIsLocked(infomask) \
+#define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
 	((!((infomask) & HEAP_XMAX_IS_MULTI) && \
 	  (infomask) & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) || \
-	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_IS_NOT_UPDATE)))
+	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_LOCK_ONLY)))
 
-#define HeapTupleHeaderIsLocked(tup) \
-	HeapTupleHeaderInfomaskIsLocked((tup)->t_infomask)
+#define HeapTupleHeaderIsOnlyLocked(tup) \
+	HeapTupleHeaderInfomaskIsOnlyLocked((tup)->t_infomask)
 
 /*
  * information stored in t_infomask2:
  */
 #define HEAP_NATTS_MASK			0x07FF	/* 11 bits for number of attributes */
 /* bits 0x1800 are available */
-#define HEAP_UPDATE_KEY_INTACT	0x2000	/* tuple updated, key cols untouched */
+#define HEAP_UPDATE_KEY_REVOKED	0x2000	/* tuple was updated and key cols modified,
+										 * or tuple deleted */
 #define HEAP_HOT_UPDATED		0x4000	/* tuple was HOT-updated */
 #define HEAP_ONLY_TUPLE			0x8000	/* this is heap-only tuple */
 
@@ -241,7 +242,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 )
 
 /*
- * HeapTupleHeaderGetXmax gets you the raw Xmax field.  To find out the Xid
+ * HeapTupleHeaderGetRawXmax gets you the raw Xmax field.  To find out the Xid
  * that updated a tuple, you might need to resolve the MultiXactId if certain
  * bits are set.  HeapTupleHeaderGetUpdateXid checks those bits and takes care
  * to resolve the MultiXactId if necessary.  This might involve multixact I/O,
@@ -251,13 +252,13 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 ( \
 	(!((tup)->t_infomask & HEAP_XMAX_INVALID) && \
 	 ((tup)->t_infomask & HEAP_XMAX_IS_MULTI) && \
-	 !((tup)->t_infomask & HEAP_XMAX_IS_NOT_UPDATE)) ? \
+	 !((tup)->t_infomask & HEAP_XMAX_LOCK_ONLY)) ? \
 		HeapTupleGetUpdateXid(tup) \
 	: \
-		HeapTupleHeaderGetXmax(tup) \
+		HeapTupleHeaderGetRawXmax(tup) \
 )
 
-#define HeapTupleHeaderGetXmax(tup) \
+#define HeapTupleHeaderGetRawXmax(tup) \
 ( \
 	(tup)->t_choice.t_heap.t_xmax \
 )
@@ -790,10 +791,10 @@ typedef struct xl_heap_newpage
 
 /* flags for xl_heap_lock.infobits_set */
 #define XLHL_XMAX_IS_MULTI		0x01
-#define XLHL_XMAX_IS_NOT_UPDATE	0x02
+#define XLHL_XMAX_LOCK_ONLY		0x02
 #define XLHL_XMAX_EXCL_LOCK		0x04
 #define XLHL_XMAX_KEYSHR_LOCK	0x08
-#define XLHL_UPDATE_KEY_INTACT	0x10
+#define XLHL_UPDATE_KEY_REVOKED	0x10
 
 /* This is what we need to know about lock */
 typedef struct xl_heap_lock

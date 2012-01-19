@@ -12,7 +12,7 @@
  * postgresql.conf and recovery.conf.  An extension also has an installation
  * script file, containing SQL commands to create the extension's objects.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1576,6 +1576,23 @@ RemoveExtensionById(Oid extId)
 	SysScanDesc scandesc;
 	HeapTuple	tuple;
 	ScanKeyData entry[1];
+
+	/*
+	 * Disallow deletion of any extension that's currently open for insertion;
+	 * else subsequent executions of recordDependencyOnCurrentExtension()
+	 * could create dangling pg_depend records that refer to a no-longer-valid
+	 * pg_extension OID.  This is needed not so much because we think people
+	 * might write "DROP EXTENSION foo" in foo's own script files, as because
+	 * errors in dependency management in extension script files could give
+	 * rise to cases where an extension is dropped as a result of recursing
+	 * from some contained object.  Because of that, we must test for the case
+	 * here, not at some higher level of the DROP EXTENSION command.
+	 */
+	if (extId == CurrentExtensionObject)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("cannot drop extension \"%s\" because it is being modified",
+						get_extension_name(extId))));
 
 	rel = heap_open(ExtensionRelationId, RowExclusiveLock);
 

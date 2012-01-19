@@ -8,7 +8,7 @@
  *	  Structs that need to be client-visible are in pqcomm.h.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/libpq/libpq-be.h
@@ -160,7 +160,7 @@ typedef struct Port
 #if defined(ENABLE_GSS) || defined(ENABLE_SSPI)
 
 	/*
-	 * If GSSAPI is supported, store GSSAPI information. Oterwise, store a
+	 * If GSSAPI is supported, store GSSAPI information. Otherwise, store a
 	 * NULL pointer to make sure offsets in the struct remain the same.
 	 */
 	pg_gssinfo *gss;

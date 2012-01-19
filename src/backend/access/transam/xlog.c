@@ -4,7 +4,7 @@
  *		PostgreSQL transaction log manager
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/xlog.c
@@ -452,6 +452,9 @@ typedef struct XLogCtlData
 	XLogRecPtr	recoveryLastRecPtr;
 	/* timestamp of last COMMIT/ABORT record replayed (or being replayed) */
 	TimestampTz recoveryLastXTime;
+	/* timestamp of when we started replaying the current chunk of WAL data,
+	 * only relevant for replication or archive recovery */
+	TimestampTz currentChunkStartTime;
 	/* end of the last record restored from the archive */
 	XLogRecPtr	restoreLastRecPtr;
 	/* Are we requested to pause recovery? */
@@ -562,7 +565,13 @@ static TimeLineID lastPageTLI = 0;
 static XLogRecPtr minRecoveryPoint;		/* local copy of
 										 * ControlFile->minRecoveryPoint */
 static bool updateMinRecoveryPoint = true;
-static bool reachedMinRecoveryPoint = false;
+
+/*
+ * Have we reached a consistent database state? In crash recovery, we have
+ * to replay all the WAL, so reachedConsistency is never set. During archive
+ * recovery, the database is consistent once minRecoveryPoint is reached.
+ */
+bool reachedConsistency = false;
 
 static bool InRedo = false;
 
@@ -600,6 +609,7 @@ static void exitArchiveRecovery(TimeLineID endTLI,
 static bool recoveryStopsHere(XLogRecord *record, bool *includeThis);
 static void recoveryPausesHere(void);
 static void SetLatestXTime(TimestampTz xtime);
+static void SetCurrentChunkStartTime(TimestampTz xtime);
 static void CheckRequiredParameterValues(void);
 static void XLogReportParameters(void);
 static void LocalSetXLogInsertAllowed(void);
@@ -684,6 +694,7 @@ XLogInsert(RmgrId rmid, uint8 info, XLogRecData *rdata)
 	uint32		freespace;
 	int			curridx;
 	XLogRecData *rdt;
+	XLogRecData *rdt_lastnormal;
 	Buffer		dtbuf[XLR_MAX_BKP_BLOCKS];
 	bool		dtbuf_bkp[XLR_MAX_BKP_BLOCKS];
 	BkpBlock	dtbuf_xlg[XLR_MAX_BKP_BLOCKS];
@@ -698,6 +709,7 @@ XLogInsert(RmgrId rmid, uint8 info, XLogRecData *rdata)
 	bool		updrqst;
 	bool		doPageWrites;
 	bool		isLogSwitch = (rmid == RM_XLOG_ID && info == XLOG_SWITCH);
+	uint8		info_orig = info;
 
 	/* cross-check on whether we should be here or not */
 	if (!XLogInsertAllowed())
@@ -721,23 +733,18 @@ XLogInsert(RmgrId rmid, uint8 info, XLogRecData *rdata)
 	}
 
 	/*
-	 * Here we scan the rdata chain, determine which buffers must be backed
-	 * up, and compute the CRC values for the data.  Note that the record
-	 * header isn't added into the CRC initially since we don't know the final
-	 * length or info bits quite yet.  Thus, the CRC will represent the CRC of
-	 * the whole record in the order "rdata, then backup blocks, then record
-	 * header".
+	 * Here we scan the rdata chain, to determine which buffers must be backed
+	 * up.
 	 *
 	 * We may have to loop back to here if a race condition is detected below.
 	 * We could prevent the race by doing all this work while holding the
 	 * insert lock, but it seems better to avoid doing CRC calculations while
-	 * holding the lock.  This means we have to be careful about modifying the
-	 * rdata chain until we know we aren't going to loop back again.  The only
-	 * change we allow ourselves to make earlier is to set rdt->data = NULL in
-	 * chain items we have decided we will have to back up the whole buffer
-	 * for.  This is OK because we will certainly decide the same thing again
-	 * for those items if we do it over; doing it here saves an extra pass
-	 * over the chain later.
+	 * holding the lock.
+	 *
+	 * We add entries for backup blocks to the chain, so that they don't
+	 * need any special treatment in the critical section where the chunks are
+	 * copied into the WAL buffers. Those entries have to be unlinked from the
+	 * chain if we have to loop back here.
 	 */
 begin:;
 	for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
@@ -754,7 +761,6 @@ begin:;
 	 */
 	doPageWrites = fullPageWrites || Insert->forcePageWrites;
 
-	INIT_CRC32(rdata_crc);
 	len = 0;
 	for (rdt = rdata;;)
 	{
@@ -762,7 +768,6 @@ begin:;
 		{
 			/* Simple data, just include it */
 			len += rdt->len;
-			COMP_CRC32(rdata_crc, rdt->data, rdt->len);
 		}
 		else
 		{
@@ -773,12 +778,12 @@ begin:;
 				{
 					/* Buffer already referenced by earlier chain item */
 					if (dtbuf_bkp[i])
-						rdt->data = NULL;
-					else if (rdt->data)
 					{
-						len += rdt->len;
-						COMP_CRC32(rdata_crc, rdt->data, rdt->len);
+						rdt->data = NULL;
+						rdt->len = 0;
 					}
+					else if (rdt->data)
+						len += rdt->len;
 					break;
 				}
 				if (dtbuf[i] == InvalidBuffer)
@@ -790,12 +795,10 @@ begin:;
 					{
 						dtbuf_bkp[i] = true;
 						rdt->data = NULL;
+						rdt->len = 0;
 					}
 					else if (rdt->data)
-					{
 						len += rdt->len;
-						COMP_CRC32(rdata_crc, rdt->data, rdt->len);
-					}
 					break;
 				}
 			}
@@ -810,39 +813,6 @@ begin:;
 	}
 
 	/*
-	 * Now add the backup block headers and data into the CRC
-	 */
-	for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
-	{
-		if (dtbuf_bkp[i])
-		{
-			BkpBlock   *bkpb = &(dtbuf_xlg[i]);
-			char	   *page;
-
-			COMP_CRC32(rdata_crc,
-					   (char *) bkpb,
-					   sizeof(BkpBlock));
-			page = (char *) BufferGetBlock(dtbuf[i]);
-			if (bkpb->hole_length == 0)
-			{
-				COMP_CRC32(rdata_crc,
-						   page,
-						   BLCKSZ);
-			}
-			else
-			{
-				/* must skip the hole */
-				COMP_CRC32(rdata_crc,
-						   page,
-						   bkpb->hole_offset);
-				COMP_CRC32(rdata_crc,
-						   page + (bkpb->hole_offset + bkpb->hole_length),
-						   BLCKSZ - (bkpb->hole_offset + bkpb->hole_length));
-			}
-		}
-	}
-
-	/*
 	 * NOTE: We disallow len == 0 because it provides a useful bit of extra
 	 * error checking in ReadRecord.  This means that all callers of
 	 * XLogInsert must supply at least some not-in-a-buffer data.  However, we
@@ -852,70 +822,20 @@ begin:;
 	if (len == 0 && !isLogSwitch)
 		elog(PANIC, "invalid xlog record length %u", len);
 
-	START_CRIT_SECTION();
-
-	/* Now wait to get insert lock */
-	LWLockAcquire(WALInsertLock, LW_EXCLUSIVE);
-
-	/*
-	 * Check to see if my RedoRecPtr is out of date.  If so, may have to go
-	 * back and recompute everything.  This can only happen just after a
-	 * checkpoint, so it's better to be slow in this case and fast otherwise.
-	 *
-	 * If we aren't doing full-page writes then RedoRecPtr doesn't actually
-	 * affect the contents of the XLOG record, so we'll update our local copy
-	 * but not force a recomputation.
-	 */
-	if (!XLByteEQ(RedoRecPtr, Insert->RedoRecPtr))
-	{
-		Assert(XLByteLT(RedoRecPtr, Insert->RedoRecPtr));
-		RedoRecPtr = Insert->RedoRecPtr;
-
-		if (doPageWrites)
-		{
-			for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
-			{
-				if (dtbuf[i] == InvalidBuffer)
-					continue;
-				if (dtbuf_bkp[i] == false &&
-					XLByteLE(dtbuf_lsn[i], RedoRecPtr))
-				{
-					/*
-					 * Oops, this buffer now needs to be backed up, but we
-					 * didn't think so above.  Start over.
-					 */
-					LWLockRelease(WALInsertLock);
-					END_CRIT_SECTION();
-					goto begin;
-				}
-			}
-		}
-	}
-
-	/*
-	 * Also check to see if forcePageWrites was just turned on; if we weren't
-	 * already doing full-page writes then go back and recompute. (If it was
-	 * just turned off, we could recompute the record without full pages, but
-	 * we choose not to bother.)
-	 */
-	if (Insert->forcePageWrites && !doPageWrites)
-	{
-		/* Oops, must redo it with full-page data */
-		LWLockRelease(WALInsertLock);
-		END_CRIT_SECTION();
-		goto begin;
-	}
-
 	/*
 	 * Make additional rdata chain entries for the backup blocks, so that we
-	 * don't need to special-case them in the write loop.  Note that we have
-	 * now irrevocably changed the input rdata chain.  At the exit of this
-	 * loop, write_len includes the backup block data.
+	 * don't need to special-case them in the write loop.  This modifies the
+	 * original rdata chain, but we keep a pointer to the last regular entry,
+	 * rdt_lastnormal, so that we can undo this if we have to loop back to the
+	 * beginning.
+	 *
+	 * At the exit of this loop, write_len includes the backup block data.
 	 *
 	 * Also set the appropriate info bits to show which buffers were backed
 	 * up. The i'th XLR_SET_BKP_BLOCK bit corresponds to the i'th distinct
 	 * buffer value (ignoring InvalidBuffer) appearing in the rdata chain.
 	 */
+	rdt_lastnormal = rdt;
 	write_len = len;
 	for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
 	{
@@ -965,17 +885,74 @@ begin:;
 	}
 
 	/*
-	 * If we backed up any full blocks and online backup is not in progress,
-	 * mark the backup blocks as removable.  This allows the WAL archiver to
-	 * know whether it is safe to compress archived WAL data by transforming
-	 * full-block records into the non-full-block format.
+	 * Calculate CRC of the data, including all the backup blocks
 	 *
-	 * Note: we could just set the flag whenever !forcePageWrites, but
-	 * defining it like this leaves the info bit free for some potential other
-	 * use in records without any backup blocks.
+	 * Note that the record header isn't added into the CRC initially since
+	 * we don't know the prev-link yet.  Thus, the CRC will represent the CRC
+	 * of the whole record in the order: rdata, then backup blocks, then
+	 * record header.
 	 */
-	if ((info & XLR_BKP_BLOCK_MASK) && !Insert->forcePageWrites)
-		info |= XLR_BKP_REMOVABLE;
+	INIT_CRC32(rdata_crc);
+	for (rdt = rdata; rdt != NULL; rdt = rdt->next)
+		COMP_CRC32(rdata_crc, rdt->data, rdt->len);
+
+	START_CRIT_SECTION();
+
+	/* Now wait to get insert lock */
+	LWLockAcquire(WALInsertLock, LW_EXCLUSIVE);
+
+	/*
+	 * Check to see if my RedoRecPtr is out of date.  If so, may have to go
+	 * back and recompute everything.  This can only happen just after a
+	 * checkpoint, so it's better to be slow in this case and fast otherwise.
+	 *
+	 * If we aren't doing full-page writes then RedoRecPtr doesn't actually
+	 * affect the contents of the XLOG record, so we'll update our local copy
+	 * but not force a recomputation.
+	 */
+	if (!XLByteEQ(RedoRecPtr, Insert->RedoRecPtr))
+	{
+		Assert(XLByteLT(RedoRecPtr, Insert->RedoRecPtr));
+		RedoRecPtr = Insert->RedoRecPtr;
+
+		if (doPageWrites)
+		{
+			for (i = 0; i < XLR_MAX_BKP_BLOCKS; i++)
+			{
+				if (dtbuf[i] == InvalidBuffer)
+					continue;
+				if (dtbuf_bkp[i] == false &&
+					XLByteLE(dtbuf_lsn[i], RedoRecPtr))
+				{
+					/*
+					 * Oops, this buffer now needs to be backed up, but we
+					 * didn't think so above.  Start over.
+					 */
+					LWLockRelease(WALInsertLock);
+					END_CRIT_SECTION();
+					rdt_lastnormal->next = NULL;
+					info = info_orig;
+					goto begin;
+				}
+			}
+		}
+	}
+
+	/*
+	 * Also check to see if forcePageWrites was just turned on; if we weren't
+	 * already doing full-page writes then go back and recompute. (If it was
+	 * just turned off, we could recompute the record without full pages, but
+	 * we choose not to bother.)
+	 */
+	if (Insert->forcePageWrites && !doPageWrites)
+	{
+		/* Oops, must redo it with full-page data. */
+		LWLockRelease(WALInsertLock);
+		END_CRIT_SECTION();
+		rdt_lastnormal->next = NULL;
+		info = info_orig;
+		goto begin;
+	}
 
 	/*
 	 * If there isn't enough space on the current XLOG page for a record
@@ -1594,6 +1571,21 @@ AdvanceXLInsertBuffer(bool new_segment)
 	NewPage   ->xlp_tli = ThisTimeLineID;
 	NewPage   ->xlp_pageaddr.xlogid = NewPageEndPtr.xlogid;
 	NewPage   ->xlp_pageaddr.xrecoff = NewPageEndPtr.xrecoff - XLOG_BLCKSZ;
+
+	/*
+	 * If online backup is not in progress, mark the header to indicate that
+	 * WAL records beginning in this page have removable backup blocks.  This
+	 * allows the WAL archiver to know whether it is safe to compress archived
+	 * WAL data by transforming full-block records into the non-full-block
+	 * format.  It is sufficient to record this at the page level because we
+	 * force a page switch (in fact a segment switch) when starting a backup,
+	 * so the flag will be off before any records can be written during the
+	 * backup.  At the end of a backup, the last page will be marked as all
+	 * unsafe when perhaps only part is unsafe, but at worst the archiver
+	 * would miss the opportunity to compress a few records.
+	 */
+	if (!Insert->forcePageWrites)
+		NewPage->xlp_info |= XLP_BKP_REMOVABLE;
 
 	/*
 	 * If first page of an XLOG segment file, make it a long header.
@@ -5840,6 +5832,41 @@ GetLatestXTime(void)
 }
 
 /*
+ * Save timestamp of the next chunk of WAL records to apply.
+ *
+ * We keep this in XLogCtl, not a simple static variable, so that it can be
+ * seen by all backends.
+ */
+static void
+SetCurrentChunkStartTime(TimestampTz xtime)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	xlogctl->currentChunkStartTime = xtime;
+	SpinLockRelease(&xlogctl->info_lck);
+}
+
+/*
+ * Fetch timestamp of latest processed commit/abort record.
+ * Startup process maintains an accurate local copy in XLogReceiptTime
+ */
+TimestampTz
+GetCurrentChunkReplayStartTime(void)
+{
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+	TimestampTz xtime;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	xtime = xlogctl->currentChunkStartTime;
+	SpinLockRelease(&xlogctl->info_lck);
+
+	return xtime;
+}
+
+/*
  * Returns time of receipt of current chunk of XLOG data, as well as
  * whether it was received from streaming replication or from archives.
  */
@@ -6380,8 +6407,9 @@ StartupXLOG(void)
 		 */
 		SpinLockAcquire(&xlogctl->info_lck);
 		xlogctl->replayEndRecPtr = ReadRecPtr;
-		xlogctl->recoveryLastRecPtr = ReadRecPtr;
+		xlogctl->recoveryLastRecPtr = EndRecPtr;
 		xlogctl->recoveryLastXTime = 0;
+		xlogctl->currentChunkStartTime = 0;
 		xlogctl->recoveryPause = false;
 		SpinLockRelease(&xlogctl->info_lck);
 
@@ -6759,12 +6787,6 @@ StartupXLOG(void)
 		LocalXLogInsertAllowed = -1;
 
 		/*
-		 * Check to see if the XLOG sequence contained any unresolved
-		 * references to uninitialized pages.
-		 */
-		XLogCheckInvalidPages();
-
-		/*
 		 * Perform a checkpoint to update all our recovery activity to disk.
 		 *
 		 * Note that we write a shutdown checkpoint rather than an on-line
@@ -6900,13 +6922,26 @@ static void
 CheckRecoveryConsistency(void)
 {
 	/*
+	 * During crash recovery, we don't reach a consistent state until we've
+	 * replayed all the WAL.
+	 */
+	if (XLogRecPtrIsInvalid(minRecoveryPoint))
+		return;
+
+	/*
 	 * Have we passed our safe starting point?
 	 */
-	if (!reachedMinRecoveryPoint &&
+	if (!reachedConsistency &&
 		XLByteLE(minRecoveryPoint, EndRecPtr) &&
 		XLogRecPtrIsInvalid(ControlFile->backupStartPoint))
 	{
-		reachedMinRecoveryPoint = true;
+		/*
+		 * Check to see if the XLOG sequence contained any unresolved
+		 * references to uninitialized pages.
+		 */
+		XLogCheckInvalidPages();
+
+		reachedConsistency = true;
 		ereport(LOG,
 				(errmsg("consistent recovery state reached at %X/%X",
 						EndRecPtr.xlogid, EndRecPtr.xrecoff)));
@@ -6919,7 +6954,7 @@ CheckRecoveryConsistency(void)
 	 */
 	if (standbyState == STANDBY_SNAPSHOT_READY &&
 		!LocalHotStandbyActive &&
-		reachedMinRecoveryPoint &&
+		reachedConsistency &&
 		IsUnderPostmaster)
 	{
 		/* use volatile pointer to prevent code rearrangement */
@@ -7919,7 +7954,7 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 	volatile XLogCtlData *xlogctl = XLogCtl;
 
 	/*
-	 * Is it safe to checkpoint?  We must ask each of the resource managers
+	 * Is it safe to restartpoint?  We must ask each of the resource managers
 	 * whether they have any partial state information that might prevent a
 	 * correct restart from this point.  If so, we skip this opportunity, but
 	 * return at the next checkpoint record for another try.
@@ -7936,6 +7971,22 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 					 checkPoint->redo.xrecoff);
 				return;
 			}
+	}
+
+	/*
+	 * Also refrain from creating a restartpoint if we have seen any references
+	 * to non-existent pages. Restarting recovery from the restartpoint would
+	 * not see the references, so we would lose the cross-check that the pages
+	 * belonged to a relation that was dropped later.
+	 */
+	if (XLogHaveInvalidPages())
+	{
+		elog(trace_recovery(DEBUG2),
+			 "could not record restart point at %X/%X because there "
+			 "are unresolved references to invalid pages",
+			 checkPoint->redo.xlogid,
+			 checkPoint->redo.xrecoff);
+		return;
 	}
 
 	/*
@@ -8833,19 +8884,6 @@ do_pg_start_backup(const char *backupidstr, bool fast, char **labelfile)
 						MAXPGPATH)));
 
 	/*
-	 * Force an XLOG file switch before the checkpoint, to ensure that the WAL
-	 * segment the checkpoint is written to doesn't contain pages with old
-	 * timeline IDs. That would otherwise happen if you called
-	 * pg_start_backup() right after restoring from a PITR archive: the first
-	 * WAL segment containing the startup checkpoint has pages in the
-	 * beginning with the old timeline ID. That can cause trouble at recovery:
-	 * we won't have a history file covering the old timeline if pg_xlog
-	 * directory was not included in the base backup and the WAL archive was
-	 * cleared too before starting the backup.
-	 */
-	RequestXLogSwitch();
-
-	/*
 	 * Mark backup active in shared memory.  We must do full-page WAL writes
 	 * during an on-line backup even if not doing so at other times, because
 	 * it's quite possible for the backup dump to obtain a "torn" (partially
@@ -8884,6 +8922,25 @@ do_pg_start_backup(const char *backupidstr, bool fast, char **labelfile)
 	PG_ENSURE_ERROR_CLEANUP(pg_start_backup_callback, (Datum) BoolGetDatum(exclusive));
 	{
 		bool		gotUniqueStartpoint = false;
+
+		/*
+		 * Force an XLOG file switch before the checkpoint, to ensure that the
+		 * WAL segment the checkpoint is written to doesn't contain pages with
+		 * old timeline IDs.  That would otherwise happen if you called
+		 * pg_start_backup() right after restoring from a PITR archive: the
+		 * first WAL segment containing the startup checkpoint has pages in
+		 * the beginning with the old timeline ID.  That can cause trouble at
+		 * recovery: we won't have a history file covering the old timeline if
+		 * pg_xlog directory was not included in the base backup and the WAL
+		 * archive was cleared too before starting the backup.
+		 *
+		 * This also ensures that we have emitted a WAL page header that has
+		 * XLP_BKP_REMOVABLE off before we emit the checkpoint record.
+		 * Therefore, if a WAL archiver (such as pglesslog) is trying to
+		 * compress out removable backup blocks, it won't remove any that
+		 * occur after this point.
+		 */
+		RequestXLogSwitch();
 
 		do
 		{
@@ -9366,16 +9423,14 @@ GetStandbyFlushRecPtr(void)
  * Get latest WAL insert pointer
  */
 XLogRecPtr
-GetXLogInsertRecPtr(bool needlock)
+GetXLogInsertRecPtr(void)
 {
 	XLogCtlInsert *Insert = &XLogCtl->Insert;
 	XLogRecPtr	current_recptr;
 
-	if (needlock)
-		LWLockAcquire(WALInsertLock, LW_SHARED);
+	LWLockAcquire(WALInsertLock, LW_SHARED);
 	INSERT_RECPTR(current_recptr, Insert, Insert->curridx);
-	if (needlock)
-		LWLockRelease(WALInsertLock);
+	LWLockRelease(WALInsertLock);
 
 	return current_recptr;
 }
@@ -9671,7 +9726,10 @@ retry:
 						{
 							havedata = true;
 							if (!XLByteLT(*RecPtr, latestChunkStart))
+							{
 								XLogReceiptTime = GetCurrentTimestamp();
+								SetCurrentChunkStartTime(XLogReceiptTime);
+							}
 						}
 						else
 							havedata = false;

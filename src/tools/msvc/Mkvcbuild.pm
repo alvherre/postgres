@@ -13,6 +13,9 @@ use Project;
 use Solution;
 use Cwd;
 use File::Copy;
+use Config;
+use VSObjectFactory;
+use List::Util qw(first);
 
 use Exporter;
 our (@ISA, @EXPORT_OK);
@@ -45,7 +48,9 @@ sub mkvcbuild
     chdir('..\..\..') if (-d '..\msvc' && -d '..\..\..\src');
     die 'Must run from root or msvc directory' unless (-d 'src\tools\msvc' && -d 'src');
 
-    $solution = new Solution($config);
+    my $vsVersion = DetermineVisualStudioVersion();
+
+    $solution = CreateSolution($vsVersion, $config);
 
     our @pgportfiles = qw(
       chklocale.c crypt.c fseeko.c getrusage.c inet_aton.c random.c srandom.c
@@ -106,11 +111,11 @@ sub mkvcbuild
             (my $xsc = $xs) =~ s/\.xs/.c/;
             if (Solution::IsNewer("$plperlsrc$xsc","$plperlsrc$xs"))
             {
+                my $xsubppdir = first { -e "$_\\ExtUtils\\xsubpp" } @INC;
                 print "Building $plperlsrc$xsc...\n";
                 system( $solution->{options}->{perl}
                       . '/bin/perl '
-                      . $solution->{options}->{perl}
-                      . '/lib/ExtUtils/xsubpp -typemap '
+                      . "$xsubppdir/ExtUtils/xsubpp -typemap "
                       . $solution->{options}->{perl}
                       . '/lib/ExtUtils/typemap '
                       . "$plperlsrc$xs "
@@ -342,9 +347,19 @@ sub mkvcbuild
     $pgdump->AddFile('src\backend\parser\kwlookup.c');
 
     my $pgdumpall = AddSimpleFrontend('pg_dump', 1);
+
+    # pg_dumpall doesn't use the files in the Makefile's $(OBJS), unlike
+    # pg_dump and pg_restore.
+    # So remove their sources from the object, keeping the other setup that
+    # AddSimpleFrontend() has done.
+    my @nodumpall = grep  { m/src\\bin\\pg_dump\\.*\.c$/ }
+      keys %{$pgdumpall->{files}};
+    delete @{$pgdumpall->{files}}{@nodumpall};
     $pgdumpall->{name} = 'pg_dumpall';
     $pgdumpall->AddIncludeDir('src\backend');
     $pgdumpall->AddFile('src\bin\pg_dump\pg_dumpall.c');
+    $pgdumpall->AddFile('src\bin\pg_dump\dumputils.c');
+    $pgdumpall->AddFile('src\bin\pg_dump\dumpmem.c');
     $pgdumpall->AddFile('src\bin\pg_dump\keywords.c');
     $pgdumpall->AddFile('src\backend\parser\kwlookup.c');
 
@@ -497,6 +512,7 @@ sub mkvcbuild
     $pgregress->AddReference($libpgport);
 
     $solution->Save();
+    return $solution->{vcver};
 }
 
 #####################

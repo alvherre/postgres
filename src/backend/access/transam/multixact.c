@@ -39,7 +39,7 @@
  * anything we saw during replay.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/access/transam/multixact.c
@@ -495,9 +495,11 @@ MultiXactIdIsRunning(MultiXactId multi)
 	}
 
 	/*
-	 * Checking for myself is cheap compared to looking in shared memory, so
-	 * first do the equivalent of MultiXactIdIsCurrent().  This is not needed
-	 * for correctness, it's just a fast path.
+	 * Checking for myself is cheap compared to looking in shared memory;
+	 * return true if any live subtransaction of the current top-level
+	 * transaction is a member.
+	 *
+	 * This is not needed for correctness, it's just a fast path.
 	 */
 	for (i = 0; i < nmembers; i++)
 	{
@@ -545,13 +547,13 @@ MultiXactIdIsRunning(MultiXactId multi)
  * been added, since it is not legal to add members to an existing
  * MultiXactId).
  *
+ * But by the time we finish sleeping, someone else may have changed the Xmax
+ * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
  * We return the number of members that we did not test for.  This is dubbed
  * "remaining" as in "the number of members that remaing running", but this is
  * slightly incorrect, because lockers whose status did not conflict with ours
  * are not even considered and so might have gone away anyway.
- *
- * But by the time we finish sleeping, someone else may have changed the Xmax
- * of the containing tuple, so the caller needs to iterate on us somehow.
  */
 void
 MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
@@ -652,7 +654,7 @@ CreateMultiXactId(int nmembers, MultiXactMember *members)
 				mxid_to_string(InvalidMultiXactId, nmembers, members));
 
 	/*
-	 * See if the same set of XIDs already exists in our cache; if so, just
+	 * See if the same set of members already exists in our cache; if so, just
 	 * re-use that MultiXactId.  (Note: it might seem that looking in our
 	 * cache is insufficient, and we ought to search disk to see if a
 	 * duplicate definition already exists.  But since we only ever create
@@ -775,6 +777,9 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			flagsoff;
 		int			memberoff;
 
+		if (members[i].xid < 900)
+			abort();
+
 		/* this status value is not representable on disk */
 		Assert(members[i].status < MultiXactStatusKeyUpdate);
 
@@ -875,7 +880,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 *
 	 * We don't care about MultiXactId wraparound here; it will be handled by
 	 * the next iteration.	But note that nextMXact may be InvalidMultiXactId
-	 * or the first value on a segment-beggining page after this routine exits,
+	 * or the first value on a segment-beginning page after this routine exits,
 	 * so anyone else looking at the variable must be prepared to deal with
 	 * either case.  Similarly, nextOffset may be zero, but we won't use that
 	 * as the actual start offset of the next multixact.
@@ -916,9 +921,9 @@ HandleMxactOffsetCornerCases(MultiXactId multi)
  * GetMultiXactIdMembers
  *		Returns the set of MultiXactMembers that make up a MultiXactId
  *
- * We return -1 if the MultiXactId is too old to possibly have any members
- * still running; in that case we have not actually looked them up, and
- * *members is not set.
+ * We used to return -1 if the MultiXactId was too old to possibly have any
+ * members still running, but no longer, because that's a dangerous condition;
+ * see comments below.
  */
 int
 GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
@@ -956,12 +961,14 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	 *
 	 * An ID older than MultiXactState->oldestMultiXactId cannot possibly be
 	 * useful; it should have already been frozen by vacuum.  We've truncated
-	 * the on-disk structures anyway, so we return empty if such a value is
-	 * queried.
+	 * the on-disk structures anyway.  Since returning the wrong state could
+	 * lead to an incorrect visibility result, this now raises an error.
+	 * Versions prior to 9.2 silently returned an empty array, but this is no
+	 * longer safe.
 	 *
 	 * Conversely, an ID >= nextMXact shouldn't ever be seen here; if it is
-	 * seen, it implies undetected ID wraparound has occurred.	We just
-	 * silently assume that such an ID is no longer running.
+	 * seen, it implies undetected ID wraparound has occurred.	This raises
+	 * an error, as in the case above.
 	 *
 	 * Shared lock is enough here since we aren't modifying any global state.
 	 *
@@ -977,18 +984,16 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	LWLockRelease(MultiXactGenLock);
 
 	if (MultiXactIdPrecedes(multi, oldestMXact))
-	{
-		debug_elog2(DEBUG2, "GetMembers: it's too old");
-		*members = NULL;
-		return -1;
-	}
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("MultiXactId %u does no longer exist -- apparent wraparound",
+						multi)));
 
 	if (!MultiXactIdPrecedes(multi, nextMXact))
-	{
-		debug_elog2(DEBUG2, "GetMembers: it's too new!");
-		*members = NULL;
-		return -1;
-	}
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("MultiXactId %u has not been created yet -- apparent wraparound",
+						multi)));
 
 	/*
 	 * Find out the offset at which we need to start reading MultiXactMembers
@@ -1303,8 +1308,13 @@ mxstatus_to_string(MultiXactStatus status)
 static char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
-	char	   *str = palloc(15 * (nmembers + 1) + 4);
+	static char	   *str = NULL;
 	int			i;
+
+	if (str != NULL)
+		pfree(str);
+
+	str = MemoryContextAlloc(TopMemoryContext, 15 * (nmembers + 1) + 4);
 
 	snprintf(str, 47, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
 			 mxstatus_to_string(members[0].status));

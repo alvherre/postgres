@@ -6,7 +6,7 @@
  *	  message integrity and endpoint authentication.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1013,7 +1013,7 @@ initialize_SSL(PGconn *conn)
 		 * might or might not accept the connection.  Any other error,
 		 * however, is grounds for complaint.
 		 */
-		if (errno != ENOENT)
+		if (errno != ENOENT && errno != ENOTDIR)
 		{
 			printfPQExpBuffer(&conn->errorMessage,
 			   libpq_gettext("could not open certificate file \"%s\": %s\n"),
@@ -1291,6 +1291,16 @@ initialize_SSL(PGconn *conn)
 			return -1;
 		}
 	}
+
+	/*
+	 * If the OpenSSL version used supports it (from 1.0.0 on)
+	 * and the user requested it, disable SSL compression.
+	 */
+#ifdef SSL_OP_NO_COMPRESSION
+	if (conn->sslcompression && conn->sslcompression[0] == '0') {
+		SSL_set_options(conn->ssl, SSL_OP_NO_COMPRESSION);
+	}
+#endif
 
 	return 0;
 }

@@ -3,7 +3,7 @@
  * timestamp.h
  *	  Definitions for the SQL92 "timestamp" and "interval" types.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/timestamp.h
@@ -109,6 +109,7 @@ extern Datum timestamp_ge(PG_FUNCTION_ARGS);
 extern Datum timestamp_gt(PG_FUNCTION_ARGS);
 extern Datum timestamp_finite(PG_FUNCTION_ARGS);
 extern Datum timestamp_cmp(PG_FUNCTION_ARGS);
+extern Datum timestamp_sortsupport(PG_FUNCTION_ARGS);
 extern Datum timestamp_hash(PG_FUNCTION_ARGS);
 extern Datum timestamp_smaller(PG_FUNCTION_ARGS);
 extern Datum timestamp_larger(PG_FUNCTION_ARGS);

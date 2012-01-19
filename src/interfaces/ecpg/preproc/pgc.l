@@ -7,7 +7,7 @@
  * This is a modified version of src/backend/parser/scan.l
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1319,7 +1319,7 @@ parse_include(void)
 		yyin = fopen(inc_file, "r");
 		if (!yyin)
 		{
-			if (strcmp(inc_file + strlen(inc_file) - 2, ".h"))
+			if (strcmp(inc_file + strlen(inc_file) - 2, ".h") != 0)
 			{
 				strcat(inc_file, ".h");
 				yyin = fopen(inc_file, "r");
@@ -1346,7 +1346,7 @@ parse_include(void)
 			yyin = fopen(inc_file, "r");
 			if (!yyin)
 			{
-				if (strcmp(inc_file + strlen(inc_file) - 2, ".h"))
+				if (strcmp(inc_file + strlen(inc_file) - 2, ".h") != 0)
 				{
 					strcat(inc_file, ".h");
 					yyin = fopen( inc_file, "r" );

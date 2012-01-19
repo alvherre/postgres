@@ -4,7 +4,7 @@
  *	  WAL replay logic for inverted index.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -528,6 +528,8 @@ ginRedoUpdateMetapage(XLogRecPtr lsn, XLogRecord *record)
 							elog(ERROR, "failed to add item to index page");
 
 						tuples = (IndexTuple) (((char *) tuples) + tupsize);
+
+						off++;
 					}
 
 					/*

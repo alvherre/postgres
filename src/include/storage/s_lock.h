@@ -83,7 +83,7 @@
  *	when using the SysV semaphore code.
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	  src/include/storage/s_lock.h
@@ -275,12 +275,32 @@ tas(volatile slock_t *lock)
 #endif	 /* __ia64__ || __ia64 */
 
 
+/*
+ * On ARM, we use __sync_lock_test_and_set(int *, int) if available, and if
+ * not fall back on the SWPB instruction.  SWPB does not work on ARMv6 or
+ * later, so the compiler builtin is preferred if available.  Note also that
+ * the int-width variant of the builtin works on more chips than other widths.
+ */
 #if defined(__arm__) || defined(__arm)
 #define HAS_TEST_AND_SET
 
-typedef unsigned char slock_t;
-
 #define TAS(lock) tas(lock)
+
+#ifdef HAVE_GCC_INT_ATOMICS
+
+typedef int slock_t;
+
+static __inline__ int
+tas(volatile slock_t *lock)
+{
+	return __sync_lock_test_and_set(lock, 1);
+}
+
+#define S_UNLOCK(lock) __sync_lock_release(lock)
+
+#else /* !HAVE_GCC_INT_ATOMICS */
+
+typedef unsigned char slock_t;
 
 static __inline__ int
 tas(volatile slock_t *lock)
@@ -295,6 +315,7 @@ tas(volatile slock_t *lock)
 	return (int) _res;
 }
 
+#endif	 /* HAVE_GCC_INT_ATOMICS */
 #endif	 /* __arm__ */
 
 
@@ -354,16 +375,17 @@ tas(volatile slock_t *lock)
 #if defined(__ppc__) || defined(__powerpc__) || defined(__ppc64__) || defined(__powerpc64__)
 #define HAS_TEST_AND_SET
 
-#if defined(__ppc64__) || defined(__powerpc64__)
-typedef unsigned long slock_t;
-#else
 typedef unsigned int slock_t;
-#endif
 
 #define TAS(lock) tas(lock)
+
+/* On PPC, it's a win to use a non-locking test before the lwarx */
+#define TAS_SPIN(lock)	(*(lock) ? 1 : TAS(lock))
+
 /*
  * NOTE: per the Enhanced PowerPC Architecture manual, v1.0 dated 7-May-2002,
  * an isync is a sufficient synchronization barrier after a lwarx/stwcx loop.
+ * On newer machines, we can use lwsync instead for better performance.
  */
 static __inline__ int
 tas(volatile slock_t *lock)
@@ -372,7 +394,11 @@ tas(volatile slock_t *lock)
 	int _res;
 
 	__asm__ __volatile__(
+#ifdef USE_PPC_LWARX_MUTEX_HINT
+"	lwarx   %0,0,%3,1	\n"
+#else
 "	lwarx   %0,0,%3		\n"
+#endif
 "	cmpwi   %0,0		\n"
 "	bne     1f			\n"
 "	addi    %0,%0,1		\n"
@@ -381,7 +407,11 @@ tas(volatile slock_t *lock)
 "1:	li      %1,1		\n"
 "	b		3f			\n"
 "2:						\n"
+#ifdef USE_PPC_LWSYNC
+"	lwsync				\n"
+#else
 "	isync				\n"
+#endif
 "	li      %1,0		\n"
 "3:						\n"
 
@@ -391,13 +421,25 @@ tas(volatile slock_t *lock)
 	return _res;
 }
 
-/* PowerPC S_UNLOCK is almost standard but requires a "sync" instruction */
+/*
+ * PowerPC S_UNLOCK is almost standard but requires a "sync" instruction.
+ * On newer machines, we can use lwsync instead for better performance.
+ */
+#ifdef USE_PPC_LWSYNC
+#define S_UNLOCK(lock)	\
+do \
+{ \
+	__asm__ __volatile__ ("	lwsync \n"); \
+	*((volatile slock_t *) (lock)) = 0; \
+} while (0)
+#else
 #define S_UNLOCK(lock)	\
 do \
 { \
 	__asm__ __volatile__ ("	sync \n"); \
 	*((volatile slock_t *) (lock)) = 0; \
 } while (0)
+#endif /* USE_PPC_LWSYNC */
 
 #endif /* powerpc */
 

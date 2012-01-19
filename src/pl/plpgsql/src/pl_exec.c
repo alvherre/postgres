@@ -3,7 +3,7 @@
  * pl_exec.c		- Executor for the PL/pgSQL
  *			  procedural language
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -5850,8 +5850,7 @@ exec_simple_recheck_plan(PLpgSQL_expr *expr, CachedPlan *cplan)
 }
 
 /* ----------
- * exec_set_found			Set the global found variable
- *					to true/false
+ * exec_set_found			Set the global found variable to true/false
  * ----------
  */
 static void
@@ -5860,7 +5859,7 @@ exec_set_found(PLpgSQL_execstate *estate, bool state)
 	PLpgSQL_var *var;
 
 	var = (PLpgSQL_var *) (estate->datums[estate->found_varno]);
-	var->value = PointerGetDatum(state);
+	var->value = BoolGetDatum(state);
 	var->isnull = false;
 }
 

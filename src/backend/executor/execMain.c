@@ -26,7 +26,7 @@
  *	before ExecutorEnd.  This can be omitted only in case of EXPLAIN,
  *	which should also omit ExecutorRun.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -47,6 +47,7 @@
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
 #include "executor/execdebug.h"
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "optimizer/clauses.h"
 #include "parser/parse_clause.h"
@@ -85,6 +86,8 @@ static void ExecutePlan(EState *estate, PlanState *planstate,
 			DestReceiver *dest);
 static bool ExecCheckRTEPerms(RangeTblEntry *rte);
 static void ExecCheckXactReadOnly(PlannedStmt *plannedstmt);
+static char *ExecBuildSlotValueDescription(TupleTableSlot *slot,
+										   int maxfieldlen);
 static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate,
 				  Plan *planTree);
 static void OpenIntoRel(QueryDesc *queryDesc);
@@ -1574,7 +1577,9 @@ ExecConstraints(ResultRelInfo *resultRelInfo,
 				ereport(ERROR,
 						(errcode(ERRCODE_NOT_NULL_VIOLATION),
 						 errmsg("null value in column \"%s\" violates not-null constraint",
-						NameStr(rel->rd_att->attrs[attrChk - 1]->attname))));
+						NameStr(rel->rd_att->attrs[attrChk - 1]->attname)),
+						 errdetail("Failing row contains %s.",
+								   ExecBuildSlotValueDescription(slot, 64))));
 		}
 	}
 
@@ -1586,8 +1591,69 @@ ExecConstraints(ResultRelInfo *resultRelInfo,
 			ereport(ERROR,
 					(errcode(ERRCODE_CHECK_VIOLATION),
 					 errmsg("new row for relation \"%s\" violates check constraint \"%s\"",
-							RelationGetRelationName(rel), failed)));
+							RelationGetRelationName(rel), failed),
+					 errdetail("Failing row contains %s.",
+							   ExecBuildSlotValueDescription(slot, 64))));
 	}
+}
+
+/*
+ * ExecBuildSlotValueDescription -- construct a string representing a tuple
+ *
+ * This is intentionally very similar to BuildIndexValueDescription, but
+ * unlike that function, we truncate long field values.  That seems necessary
+ * here since heap field values could be very long, whereas index entries
+ * typically aren't so wide.
+ */
+static char *
+ExecBuildSlotValueDescription(TupleTableSlot *slot, int maxfieldlen)
+{
+	StringInfoData buf;
+	TupleDesc	tupdesc = slot->tts_tupleDescriptor;
+	int			i;
+
+	/* Make sure the tuple is fully deconstructed */
+	slot_getallattrs(slot);
+
+	initStringInfo(&buf);
+
+	appendStringInfoChar(&buf, '(');
+
+	for (i = 0; i < tupdesc->natts; i++)
+	{
+		char	   *val;
+		int			vallen;
+
+		if (slot->tts_isnull[i])
+			val = "null";
+		else
+		{
+			Oid			foutoid;
+			bool		typisvarlena;
+
+			getTypeOutputInfo(tupdesc->attrs[i]->atttypid,
+							  &foutoid, &typisvarlena);
+			val = OidOutputFunctionCall(foutoid, slot->tts_values[i]);
+		}
+
+		if (i > 0)
+			appendStringInfoString(&buf, ", ");
+
+		/* truncate if needed */
+		vallen = strlen(val);
+		if (vallen <= maxfieldlen)
+			appendStringInfoString(&buf, val);
+		else
+		{
+			vallen = pg_mbcliplen(val, vallen, maxfieldlen);
+			appendBinaryStringInfo(&buf, val, vallen);
+			appendStringInfoString(&buf, "...");
+		}
+	}
+
+	appendStringInfoChar(&buf, ')');
+
+	return buf.data;
 }
 
 
@@ -2380,6 +2446,7 @@ typedef struct
 {
 	DestReceiver pub;			/* publicly-known function pointers */
 	EState	   *estate;			/* EState we are working with */
+	DestReceiver *origdest;		/* QueryDesc's original receiver */
 	Relation	rel;			/* Relation to write to */
 	int			hi_options;		/* heap_insert performance options */
 	BulkInsertState bistate;	/* bulk insert state */
@@ -2424,6 +2491,21 @@ OpenIntoRel(QueryDesc *queryDesc)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 				 errmsg("ON COMMIT can only be used on temporary tables")));
+
+	{
+		AclResult aclresult;
+		int i;
+
+		for (i = 0; i < intoTupDesc->natts; i++)
+		{
+			Oid atttypid = intoTupDesc->attrs[i]->atttypid;
+
+			aclresult = pg_type_aclcheck(atttypid, GetUserId(), ACL_USAGE);
+			if (aclresult != ACLCHECK_OK)
+				aclcheck_error(aclresult, ACL_KIND_TYPE,
+							   format_type_be(atttypid));
+		}
+	}
 
 	/*
 	 * If a column name list was specified in CREATE TABLE AS, override the
@@ -2571,11 +2653,13 @@ OpenIntoRel(QueryDesc *queryDesc)
 	/*
 	 * Now replace the query's DestReceiver with one for SELECT INTO
 	 */
-	queryDesc->dest = CreateDestReceiver(DestIntoRel);
-	myState = (DR_intorel *) queryDesc->dest;
+	myState = (DR_intorel *) CreateDestReceiver(DestIntoRel);
 	Assert(myState->pub.mydest == DestIntoRel);
 	myState->estate = estate;
+	myState->origdest = queryDesc->dest;
 	myState->rel = intoRelationDesc;
+
+	queryDesc->dest = (DestReceiver *) myState;
 
 	/*
 	 * We can skip WAL-logging the insertions, unless PITR or streaming
@@ -2597,8 +2681,11 @@ CloseIntoRel(QueryDesc *queryDesc)
 {
 	DR_intorel *myState = (DR_intorel *) queryDesc->dest;
 
-	/* OpenIntoRel might never have gotten called */
-	if (myState && myState->pub.mydest == DestIntoRel && myState->rel)
+	/*
+	 * OpenIntoRel might never have gotten called, and we also want to guard
+	 * against double destruction.
+	 */
+	if (myState && myState->pub.mydest == DestIntoRel)
 	{
 		FreeBulkInsertState(myState->bistate);
 
@@ -2609,7 +2696,11 @@ CloseIntoRel(QueryDesc *queryDesc)
 		/* close rel, but keep lock until commit */
 		heap_close(myState->rel, NoLock);
 
-		myState->rel = NULL;
+		/* restore the receiver belonging to executor's caller */
+		queryDesc->dest = myState->origdest;
+
+		/* might as well invoke my destructor */
+		intorel_destroy((DestReceiver *) myState);
 	}
 }
 

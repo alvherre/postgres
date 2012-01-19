@@ -3,7 +3,7 @@
  * varlena.c
  *	  Functions for the variable-length built-in types.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -396,6 +396,53 @@ byteasend(PG_FUNCTION_ARGS)
 	PG_RETURN_BYTEA_P(vlena);
 }
 
+Datum
+bytea_agg_transfn(PG_FUNCTION_ARGS)
+{
+	StringInfo	state;
+
+	state = PG_ARGISNULL(0) ? NULL : (StringInfo) PG_GETARG_POINTER(0);
+
+	/* Append the value unless null. */
+	if (!PG_ARGISNULL(1))
+	{
+		bytea	   *value = PG_GETARG_BYTEA_PP(1);
+
+		if (state == NULL)
+			state = makeStringAggState(fcinfo);
+
+		appendBinaryStringInfo(state, VARDATA_ANY(value), VARSIZE_ANY_EXHDR(value));
+	}
+
+	/*
+	 * The transition type for bytea_agg() is declared to be "internal",
+	 * which is a pass-by-value type the same size as a pointer.
+	 */
+	PG_RETURN_POINTER(state);
+}
+
+Datum
+bytea_agg_finalfn(PG_FUNCTION_ARGS)
+{
+	StringInfo	state;
+
+	/* cannot be called directly because of internal-type argument */
+	Assert(AggCheckCallContext(fcinfo, NULL));
+
+	state = PG_ARGISNULL(0) ? NULL : (StringInfo) PG_GETARG_POINTER(0);
+
+	if (state != NULL)
+	{
+		bytea	   *result;
+
+		result = (bytea *) palloc(state->len + VARHDRSZ);
+		SET_VARSIZE(result, state->len + VARHDRSZ);
+		memcpy(VARDATA(result), state->data, state->len);
+		PG_RETURN_BYTEA_P(result);
+	}
+	else
+		PG_RETURN_NULL();
+}
 
 /*
  *		textin			- converts "..." to internal representation
@@ -1299,7 +1346,9 @@ varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid)
 		char		a2buf[STACKBUFLEN];
 		char	   *a1p,
 				   *a2p;
+#ifdef HAVE_LOCALE_T
 		pg_locale_t mylocale = 0;
+#endif
 
 		if (collid != DEFAULT_COLLATION_OID)
 		{
@@ -1314,7 +1363,9 @@ varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid)
 						 errmsg("could not determine which collation to use for string comparison"),
 						 errhint("Use the COLLATE clause to set the collation explicitly.")));
 			}
+#ifdef HAVE_LOCALE_T
 			mylocale = pg_newlocale_from_collation(collid);
+#endif
 		}
 
 #ifdef WIN32
@@ -3617,7 +3668,7 @@ string_agg_finalfn(PG_FUNCTION_ARGS)
 	state = PG_ARGISNULL(0) ? NULL : (StringInfo) PG_GETARG_POINTER(0);
 
 	if (state != NULL)
-		PG_RETURN_TEXT_P(cstring_to_text(state->data));
+		PG_RETURN_TEXT_P(cstring_to_text_with_len(state->data, state->len));
 	else
 		PG_RETURN_NULL();
 }

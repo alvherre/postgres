@@ -3,7 +3,7 @@
  * pl_comp.c		- Compiler part of the PL/pgSQL
  *			  procedural language
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -1707,7 +1707,7 @@ plpgsql_parse_cwordtype(List *idents)
 							  strVal(lsecond(idents)),
 							  -1);
 		/* Can't lock relation - we might not have privileges. */
-		classOid = RangeVarGetRelid(relvar, NoLock, true, false);
+		classOid = RangeVarGetRelid(relvar, NoLock, true);
 		if (!OidIsValid(classOid))
 			goto done;
 		fldname = strVal(lthird(idents));
@@ -1808,7 +1808,7 @@ plpgsql_parse_cwordrowtype(List *idents)
 	relvar = makeRangeVar(strVal(linitial(idents)),
 						  strVal(lsecond(idents)),
 						  -1);
-	classOid = RangeVarGetRelid(relvar, NoLock, false, false);
+	classOid = RangeVarGetRelid(relvar, NoLock, false);
 
 	MemoryContextSwitchTo(oldCxt);
 

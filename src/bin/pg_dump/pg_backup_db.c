@@ -11,6 +11,7 @@
  */
 
 #include "pg_backup_db.h"
+#include "dumpmem.h"
 #include "dumputils.h"
 
 #include <unistd.h>
@@ -55,7 +56,7 @@ _check_database_version(ArchiveHandle *AH)
 
 	remoteversion = _parse_version(AH, remoteversion_str);
 
-	AH->public.remoteVersionStr = strdup(remoteversion_str);
+	AH->public.remoteVersionStr = pg_strdup(remoteversion_str);
 	AH->public.remoteVersion = remoteversion;
 	if (!AH->archiveRemoteVersion)
 		AH->archiveRemoteVersion = AH->public.remoteVersionStr;
@@ -150,11 +151,8 @@ _connectDB(ArchiveHandle *AH, const char *reqdb, const char *requser)
 	do
 	{
 #define PARAMS_ARRAY_SIZE	7
-		const char **keywords = malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
-		const char **values = malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
-
-		if (!keywords || !values)
-			die_horribly(AH, modulename, "out of memory\n");
+		const char **keywords = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
+		const char **values = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
 
 		keywords[0] = "host";
 		values[0] = PQhost(AH->connection);
@@ -257,11 +255,8 @@ ConnectDatabase(Archive *AHX,
 	do
 	{
 #define PARAMS_ARRAY_SIZE	7
-		const char **keywords = malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
-		const char **values = malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
-
-		if (!keywords || !values)
-			die_horribly(AH, modulename, "out of memory\n");
+		const char **keywords = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*keywords));
+		const char **values = pg_malloc(PARAMS_ARRAY_SIZE * sizeof(*values));
 
 		keywords[0] = "host";
 		values[0] = pghost;
@@ -370,14 +365,92 @@ ExecuteSqlCommand(ArchiveHandle *AH, const char *qry, const char *desc)
 
 
 /*
+ * Process non-COPY table data (that is, INSERT commands).
+ *
+ * The commands have been run together as one long string for compressibility,
+ * and we are receiving them in bufferloads with arbitrary boundaries, so we
+ * have to locate command boundaries and save partial commands across calls.
+ * All state must be kept in AH->sqlparse, not in local variables of this
+ * routine.  We assume that AH->sqlparse was filled with zeroes when created.
+ *
+ * We have to lex the data to the extent of identifying literals and quoted
+ * identifiers, so that we can recognize statement-terminating semicolons.
+ * We assume that INSERT data will not contain SQL comments, E'' literals,
+ * or dollar-quoted strings, so this is much simpler than a full SQL lexer.
+ */
+static void
+ExecuteInsertCommands(ArchiveHandle *AH, const char *buf, size_t bufLen)
+{
+	const char *qry = buf;
+	const char *eos = buf + bufLen;
+
+	/* initialize command buffer if first time through */
+	if (AH->sqlparse.curCmd == NULL)
+		AH->sqlparse.curCmd = createPQExpBuffer();
+
+	for (; qry < eos; qry++)
+	{
+		char	ch = *qry;
+
+		/* For neatness, we skip any newlines between commands */
+		if (!(ch == '\n' && AH->sqlparse.curCmd->len == 0))
+			appendPQExpBufferChar(AH->sqlparse.curCmd, ch);
+
+		switch (AH->sqlparse.state)
+		{
+			case SQL_SCAN:		/* Default state == 0, set in _allocAH */
+				if (ch == ';')
+				{
+					/*
+					 * We've found the end of a statement. Send it and reset
+					 * the buffer.
+					 */
+					ExecuteSqlCommand(AH, AH->sqlparse.curCmd->data,
+									  "could not execute query");
+					resetPQExpBuffer(AH->sqlparse.curCmd);
+				}
+				else if (ch == '\'')
+				{
+					AH->sqlparse.state = SQL_IN_SINGLE_QUOTE;
+					AH->sqlparse.backSlash = false;
+				}
+				else if (ch == '"')
+				{
+					AH->sqlparse.state = SQL_IN_DOUBLE_QUOTE;
+				}
+				break;
+
+			case SQL_IN_SINGLE_QUOTE:
+				/* We needn't handle '' specially */
+				if (ch == '\'' && !AH->sqlparse.backSlash)
+					AH->sqlparse.state = SQL_SCAN;
+				else if (ch == '\\' && !AH->public.std_strings)
+					AH->sqlparse.backSlash = !AH->sqlparse.backSlash;
+				else
+					AH->sqlparse.backSlash = false;
+				break;
+
+			case SQL_IN_DOUBLE_QUOTE:
+				/* We needn't handle "" specially */
+				if (ch == '"')
+					AH->sqlparse.state = SQL_SCAN;
+				break;
+		}
+	}
+}
+
+
+/*
  * Implement ahwrite() for direct-to-DB restore
  */
 int
 ExecuteSqlCommandBuf(ArchiveHandle *AH, const char *buf, size_t bufLen)
 {
-	if (AH->writingCopyData)
+	if (AH->outputKind == OUTPUT_COPYDATA)
 	{
 		/*
+		 * COPY data.
+		 *
 		 * We drop the data on the floor if libpq has failed to enter COPY
 		 * mode; this allows us to behave reasonably when trying to continue
 		 * after an error in a COPY command.
@@ -387,9 +460,19 @@ ExecuteSqlCommandBuf(ArchiveHandle *AH, const char *buf, size_t bufLen)
 			die_horribly(AH, modulename, "error returned by PQputCopyData: %s",
 						 PQerrorMessage(AH->connection));
 	}
+	else if (AH->outputKind == OUTPUT_OTHERDATA)
+	{
+		/*
+		 * Table data expressed as INSERT commands.
+		 */
+		ExecuteInsertCommands(AH, buf, bufLen);
+	}
 	else
 	{
 		/*
+		 * General SQL commands; we assume that commands will not be split
+		 * across calls.
+		 *
 		 * In most cases the data passed to us will be a null-terminated
 		 * string, but if it's not, we have to add a trailing null.
 		 */
@@ -397,10 +480,8 @@ ExecuteSqlCommandBuf(ArchiveHandle *AH, const char *buf, size_t bufLen)
 			ExecuteSqlCommand(AH, buf, "could not execute query");
 		else
 		{
-			char   *str = (char *) malloc(bufLen + 1);
+			char   *str = (char *) pg_malloc(bufLen + 1);
 
-			if (!str)
-				die_horribly(AH, modulename, "out of memory\n");
 			memcpy(str, buf, bufLen);
 			str[bufLen] = '\0';
 			ExecuteSqlCommand(AH, str, "could not execute query");

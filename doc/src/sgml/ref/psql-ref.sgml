@@ -1048,7 +1048,7 @@ testdb=&gt;
         pattern or the <literal>S</literal> modifier to include system
         objects.
         If <literal>+</literal> is appended to the command name, each object
-        is listed with its associated description.
+        is listed with its associated permissions and description.
         </para>
         </listitem>
       </varlistentry>
@@ -1387,8 +1387,8 @@ testdb=&gt;
         If <replaceable class="parameter">pattern</replaceable> is
         specified, only types whose names match the pattern are listed.
         If <literal>+</literal> is appended to the command name, each type is
-        listed with its internal name and size, as well as its allowed values
-        if it is an <type>enum</> type.
+        listed with its internal name and size, its allowed values
+        if it is an <type>enum</> type, and its associated permissions.
         By default, only user-created objects are shown;  supply a
         pattern or the <literal>S</literal> modifier to include system
         objects.
@@ -2240,6 +2240,24 @@ lo_import 152801
         </listitem>
       </varlistentry>
 
+
+      <varlistentry>
+        <term><literal>\setenv [ <replaceable class="parameter">name</replaceable> [ <replaceable class="parameter">value</replaceable> ] ]</literal></term>
+
+        <listitem>
+        <para>
+        Sets the environment variable <replaceable
+        class="parameter">name</replaceable> to <replaceable
+        class="parameter">value</replaceable>, or if the
+        <replaceable class="parameter">value</replaceable> is
+        not supplied, unsets the environment variable. Example:
+<programlisting>
+testdb=&gt; <userinput>\setenv PAGER less</userinput>
+testdb=&gt; <userinput>\setenv LESS -imx4F</userinput>
+</programlisting>
+        </para>
+        </listitem>
+      </varlistentry>
 
       <varlistentry>
         <term><literal>\sf[+] <replaceable class="parameter">function_description</> </literal></term>

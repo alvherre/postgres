@@ -20,7 +20,7 @@ teardown
 session "s1"
 step "s1b"	{ BEGIN ISOLATION LEVEL REPEATABLE READ; }
 step "s1s"	{ SELECT * FROM foo; }	# obtain snapshot
-step "s1l"	{ SELECT * FROM foo FOR KEY SHARE; }
+step "s1l"	{ SELECT * FROM foo FOR KEY SHARE; } # obtain lock
 step "s1c"	{ COMMIT; }
 
 session "s2"

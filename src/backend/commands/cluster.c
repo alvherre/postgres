@@ -6,7 +6,7 @@
  * There is hardly anything left of Paul Brown's original implementation...
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
  *
  *
@@ -25,6 +25,7 @@
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
+#include "catalog/namespace.h"
 #include "catalog/toasting.h"
 #include "commands/cluster.h"
 #include "commands/tablecmds.h"
@@ -106,15 +107,12 @@ cluster(ClusterStmt *stmt, bool isTopLevel)
 					indexOid = InvalidOid;
 		Relation	rel;
 
-		/* Find and lock the table */
-		rel = heap_openrv(stmt->relation, AccessExclusiveLock);
-
-		tableOid = RelationGetRelid(rel);
-
-		/* Check permissions */
-		if (!pg_class_ownercheck(tableOid, GetUserId()))
-			aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
-						   RelationGetRelationName(rel));
+		/* Find, lock, and check permissions on the table */
+		tableOid = RangeVarGetRelidExtended(stmt->relation,
+											AccessExclusiveLock,
+											false, false,
+											RangeVarCallbackOwnsTable, NULL);
+		rel = heap_open(tableOid, NoLock);
 
 		/*
 		 * Reject clustering a remote temp table ... their local buffer
@@ -789,16 +787,19 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 		 * When doing swap by content, any toast pointers written into NewHeap
 		 * must use the old toast table's OID, because that's where the toast
 		 * data will eventually be found.  Set this up by setting rd_toastoid.
-		 * This also tells tuptoaster.c to preserve the toast value OIDs,
-		 * which we want so as not to invalidate toast pointers in system
-		 * catalog caches.
+		 * This also tells toast_save_datum() to preserve the toast value
+		 * OIDs, which we want so as not to invalidate toast pointers in
+		 * system catalog caches, and to avoid making multiple copies of a
+		 * single toast value.
 		 *
 		 * Note that we must hold NewHeap open until we are done writing data,
 		 * since the relcache will not guarantee to remember this setting once
 		 * the relation is closed.	Also, this technique depends on the fact
 		 * that no one will try to read from the NewHeap until after we've
 		 * finished writing it and swapping the rels --- otherwise they could
-		 * follow the toast pointers to the wrong place.
+		 * follow the toast pointers to the wrong place.  (It would actually
+		 * work for values copied over from the old toast table, but not for
+		 * any values that we toast which were previously not toasted.)
 		 */
 		NewHeap->rd_toastoid = OldHeap->rd_rel->reltoastrelid;
 	}
@@ -958,7 +959,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 				 */
 				Assert(!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
 				if (!is_system_catalog &&
-					!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(tuple->t_data)))
+					!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple->t_data)))
 					elog(WARNING, "concurrent delete in progress within table \"%s\"",
 						 RelationGetRelationName(OldHeap));
 				/* treat as recently dead */
@@ -1474,28 +1475,24 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 		{
 			Relation	toastrel;
 			Oid			toastidx;
-			Oid			toastnamespace;
 			char		NewToastName[NAMEDATALEN];
 
 			toastrel = relation_open(newrel->rd_rel->reltoastrelid,
 									 AccessShareLock);
 			toastidx = toastrel->rd_rel->reltoastidxid;
-			toastnamespace = toastrel->rd_rel->relnamespace;
 			relation_close(toastrel, AccessShareLock);
 
 			/* rename the toast table ... */
 			snprintf(NewToastName, NAMEDATALEN, "pg_toast_%u",
 					 OIDOldHeap);
 			RenameRelationInternal(newrel->rd_rel->reltoastrelid,
-								   NewToastName,
-								   toastnamespace);
+								   NewToastName);
 
 			/* ... and its index too */
 			snprintf(NewToastName, NAMEDATALEN, "pg_toast_%u_index",
 					 OIDOldHeap);
 			RenameRelationInternal(toastidx,
-								   NewToastName,
-								   toastnamespace);
+								   NewToastName);
 		}
 		relation_close(newrel, NoLock);
 	}

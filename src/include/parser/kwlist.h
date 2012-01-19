@@ -7,7 +7,7 @@
  * by the PG_KEYWORD macro, which is not defined in this file; it can
  * be defined by the caller for special purposes.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -373,6 +373,7 @@ PG_KEYWORD("true", TRUE_P, RESERVED_KEYWORD)
 PG_KEYWORD("truncate", TRUNCATE, UNRESERVED_KEYWORD)
 PG_KEYWORD("trusted", TRUSTED, UNRESERVED_KEYWORD)
 PG_KEYWORD("type", TYPE_P, UNRESERVED_KEYWORD)
+PG_KEYWORD("types", TYPES_P, UNRESERVED_KEYWORD)
 PG_KEYWORD("unbounded", UNBOUNDED, UNRESERVED_KEYWORD)
 PG_KEYWORD("uncommitted", UNCOMMITTED, UNRESERVED_KEYWORD)
 PG_KEYWORD("unencrypted", UNENCRYPTED, UNRESERVED_KEYWORD)

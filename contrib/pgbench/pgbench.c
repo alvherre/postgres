@@ -5,7 +5,7 @@
  * Originally written by Tatsuo Ishii and enhanced by many contributors.
  *
  * contrib/pgbench/pgbench.c
- * Copyright (c) 2000-2011, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  * ALL RIGHTS RESERVED;
  *
  * Permission to use, copy, modify, and distribute this software and its
@@ -1579,7 +1579,7 @@ process_commands(char *buf)
 			{
 				if (pg_strcasecmp(my_commands->argv[2], "us") != 0 &&
 					pg_strcasecmp(my_commands->argv[2], "ms") != 0 &&
-					pg_strcasecmp(my_commands->argv[2], "s"))
+					pg_strcasecmp(my_commands->argv[2], "s") != 0)
 				{
 					fprintf(stderr, "%s: unknown time unit '%s' - must be us, ms or s\n",
 							my_commands->argv[0], my_commands->argv[2]);

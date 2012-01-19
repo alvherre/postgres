@@ -3,7 +3,7 @@
  * index.c
  *	  code to create and destroy POSTGRES index relations
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -111,7 +111,6 @@ static void validate_index_heapscan(Relation heapRelation,
 						IndexInfo *indexInfo,
 						Snapshot snapshot,
 						v_i_state *state);
-static Oid	IndexGetRelation(Oid indexId);
 static bool ReindexIsCurrentlyProcessingIndex(Oid indexOid);
 static void SetReindexProcessing(Oid heapOid, Oid indexOid);
 static void ResetReindexProcessing(void);
@@ -1156,7 +1155,8 @@ index_constraint_create(Relation heapRelation,
 								   NULL,
 								   NULL,
 								   true,		/* islocal */
-								   0);	/* inhcount */
+								   0,			/* inhcount */
+								   false);		/* isonly */
 
 	/*
 	 * Register the index as internally dependent on the constraint.
@@ -1301,7 +1301,7 @@ index_drop(Oid indexId)
 	 * proceeding until we commit and send out a shared-cache-inval notice
 	 * that will make them update their index lists.
 	 */
-	heapId = IndexGetRelation(indexId);
+	heapId = IndexGetRelation(indexId, false);
 	userHeapRelation = heap_open(heapId, AccessExclusiveLock);
 
 	userIndexRelation = index_open(indexId, AccessExclusiveLock);
@@ -2112,7 +2112,7 @@ IndexBuildHeapScan(Relation heapRelation,
 					 * unless it's our own deletion or a system catalog.
 					 */
 					Assert(!(heapTuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
-					xwait = HeapTupleHeaderGetXmax(heapTuple->t_data);
+					xwait = HeapTupleHeaderGetRawXmax(heapTuple->t_data);
 					if (!TransactionIdIsCurrentTransactionId(xwait))
 					{
 						if (!is_system_catalog)
@@ -2763,8 +2763,8 @@ validate_index_heapscan(Relation heapRelation,
  * IndexGetRelation: given an index's relation OID, get the OID of the
  * relation it is an index on.	Uses the system cache.
  */
-static Oid
-IndexGetRelation(Oid indexId)
+Oid
+IndexGetRelation(Oid indexId, bool missing_ok)
 {
 	HeapTuple	tuple;
 	Form_pg_index index;
@@ -2772,7 +2772,11 @@ IndexGetRelation(Oid indexId)
 
 	tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexId));
 	if (!HeapTupleIsValid(tuple))
+	{
+		if (missing_ok)
+			return InvalidOid;
 		elog(ERROR, "cache lookup failed for index %u", indexId);
+	}
 	index = (Form_pg_index) GETSTRUCT(tuple);
 	Assert(index->indexrelid == indexId);
 
@@ -2800,7 +2804,7 @@ reindex_index(Oid indexId, bool skip_constraint_checks)
 	 * Open and lock the parent heap relation.	ShareLock is sufficient since
 	 * we only need to be sure no schema or data changes are going on.
 	 */
-	heapId = IndexGetRelation(indexId);
+	heapId = IndexGetRelation(indexId, false);
 	heapRelation = heap_open(heapId, ShareLock);
 
 	/*

@@ -3,7 +3,7 @@
  * rewriteDefine.c
  *	  routines for defining a rewrite rule
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -203,8 +203,7 @@ DefineRule(RuleStmt *stmt, const char *queryString)
 	 * Find and lock the relation.  Lock level should match
 	 * DefineQueryRewrite.
 	 */
-	relId = RangeVarGetRelid(stmt->relation, AccessExclusiveLock, false,
-							 false);
+	relId = RangeVarGetRelid(stmt->relation, AccessExclusiveLock, false);
 
 	/* ... and execute */
 	DefineQueryRewrite(stmt->rulename,

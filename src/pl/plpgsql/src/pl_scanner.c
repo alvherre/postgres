@@ -4,7 +4,7 @@
  *	  lexical scanning for PL/pgSQL
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -421,6 +421,36 @@ plpgsql_append_source_text(StringInfo buf,
 	Assert(startlocation <= endlocation);
 	appendBinaryStringInfo(buf, scanorig + startlocation,
 						   endlocation - startlocation);
+}
+
+/*
+ * Peek two tokens ahead in the input stream. The first token and its
+ * location the query are returned in *tok1_p and *tok1_loc, second token
+ * and its location in *tok2_p and *tok2_loc.
+ *
+ * NB: no variable or unreserved keyword lookup is performed here, they will
+ * be returned as IDENT. Reserved keywords are resolved as usual.
+ */
+void
+plpgsql_peek2(int *tok1_p, int *tok2_p, int *tok1_loc, int *tok2_loc)
+{
+	int			tok1,
+				tok2;
+	TokenAuxData aux1,
+				aux2;
+
+	tok1 = internal_yylex(&aux1);
+	tok2 = internal_yylex(&aux2);
+
+	*tok1_p = tok1;
+	if (tok1_loc)
+		*tok1_loc = aux1.lloc;
+	*tok2_p = tok2;
+	if (tok2_loc)
+		*tok2_loc = aux2.lloc;
+
+	push_back_token(tok2, &aux2);
+	push_back_token(tok1, &aux1);
 }
 
 /*

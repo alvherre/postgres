@@ -3,7 +3,7 @@
  * sequence.c
  *	  PostgreSQL sequences support code.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -425,7 +425,7 @@ AlterSequence(AlterSeqStmt *stmt)
 	List	   *owned_by;
 
 	/* Open and lock sequence. */
-	relid = RangeVarGetRelid(stmt->sequence, AccessShareLock, false, false);
+	relid = RangeVarGetRelid(stmt->sequence, AccessShareLock, false);
 	init_sequence(relid, &elm, &seqrel);
 
 	/* allow ALTER to sequence owner only */
@@ -513,7 +513,7 @@ nextval(PG_FUNCTION_ARGS)
 	 * whether the performance penalty is material in practice, but for now,
 	 * we do it this way.
 	 */
-	relid = RangeVarGetRelid(sequence, NoLock, false, false);
+	relid = RangeVarGetRelid(sequence, NoLock, false);
 
 	PG_RETURN_INT64(nextval_internal(relid));
 }
@@ -1091,7 +1091,7 @@ read_info(SeqTable elm, Relation rel, Buffer *buf)
 	 * this again if the update gets lost.
 	 */
 	Assert(!(tuple.t_data->t_infomask & HEAP_XMAX_IS_MULTI));
-	if (HeapTupleHeaderGetXmax(tuple.t_data) != InvalidTransactionId)
+	if (HeapTupleHeaderGetRawXmax(tuple.t_data) != InvalidTransactionId)
 	{
 		HeapTupleHeaderSetXmax(tuple.t_data, InvalidTransactionId);
 		tuple.t_data->t_infomask &= ~HEAP_XMAX_COMMITTED;

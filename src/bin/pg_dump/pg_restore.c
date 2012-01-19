@@ -40,6 +40,8 @@
  */
 
 #include "pg_backup_archiver.h"
+
+#include "dumpmem.h"
 #include "dumputils.h"
 
 #include <ctype.h>
@@ -116,6 +118,7 @@ main(int argc, char **argv)
 		{"no-data-for-failed-tables", no_argument, &no_data_for_failed_tables, 1},
 		{"no-tablespaces", no_argument, &outputNoTablespaces, 1},
 		{"role", required_argument, NULL, 2},
+		{"section", required_argument, NULL, 3},
 		{"use-set-session-authorization", no_argument, &use_setsessauth, 1},
 		{"no-security-labels", no_argument, &no_security_labels, 1},
 
@@ -159,21 +162,21 @@ main(int argc, char **argv)
 				opts->createDB = 1;
 				break;
 			case 'd':
-				opts->dbname = strdup(optarg);
+				opts->dbname = pg_strdup(optarg);
 				break;
 			case 'e':
 				opts->exit_on_error = true;
 				break;
 			case 'f':			/* output file name */
-				opts->filename = strdup(optarg);
+				opts->filename = pg_strdup(optarg);
 				break;
 			case 'F':
 				if (strlen(optarg) != 0)
-					opts->formatName = strdup(optarg);
+					opts->formatName = pg_strdup(optarg);
 				break;
 			case 'h':
 				if (strlen(optarg) != 0)
-					opts->pghost = strdup(optarg);
+					opts->pghost = pg_strdup(optarg);
 				break;
 			case 'i':
 				/* ignored, deprecated option */
@@ -188,11 +191,11 @@ main(int argc, char **argv)
 				break;
 
 			case 'L':			/* input TOC summary file name */
-				opts->tocFile = strdup(optarg);
+				opts->tocFile = pg_strdup(optarg);
 				break;
 
 			case 'n':			/* Dump data for this schema only */
-				opts->schemaNames = strdup(optarg);
+				opts->schemaNames = pg_strdup(optarg);
 				break;
 
 			case 'O':
@@ -201,7 +204,7 @@ main(int argc, char **argv)
 
 			case 'p':
 				if (strlen(optarg) != 0)
-					opts->pgport = strdup(optarg);
+					opts->pgport = pg_strdup(optarg);
 				break;
 			case 'R':
 				/* no-op, still accepted for backwards compatibility */
@@ -209,29 +212,29 @@ main(int argc, char **argv)
 			case 'P':			/* Function */
 				opts->selTypes = 1;
 				opts->selFunction = 1;
-				opts->functionNames = strdup(optarg);
+				opts->functionNames = pg_strdup(optarg);
 				break;
 			case 'I':			/* Index */
 				opts->selTypes = 1;
 				opts->selIndex = 1;
-				opts->indexNames = strdup(optarg);
+				opts->indexNames = pg_strdup(optarg);
 				break;
 			case 'T':			/* Trigger */
 				opts->selTypes = 1;
 				opts->selTrigger = 1;
-				opts->triggerNames = strdup(optarg);
+				opts->triggerNames = pg_strdup(optarg);
 				break;
 			case 's':			/* dump schema only */
 				opts->schemaOnly = 1;
 				break;
 			case 'S':			/* Superuser username */
 				if (strlen(optarg) != 0)
-					opts->superuser = strdup(optarg);
+					opts->superuser = pg_strdup(optarg);
 				break;
 			case 't':			/* Dump data for this table only */
 				opts->selTypes = 1;
 				opts->selTable = 1;
-				opts->tableNames = strdup(optarg);
+				opts->tableNames = pg_strdup(optarg);
 				break;
 
 			case 'U':
@@ -270,6 +273,10 @@ main(int argc, char **argv)
 				opts->use_role = optarg;
 				break;
 
+			case 3:				/* section */
+				set_section(optarg, &(opts->dumpSections));
+				break;
+
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 				exit(1);
@@ -290,6 +297,30 @@ main(int argc, char **argv)
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
 				progname);
 		exit(1);
+	}
+
+	if (opts->dataOnly && opts->schemaOnly)
+	{
+		fprintf(stderr, _("%s: options -s/--schema-only and -a/--data-only cannot be used together\n"),
+			progname);
+		exit(1);
+	}
+
+	if ((opts->dataOnly || opts->schemaOnly) && (opts->dumpSections != DUMP_UNSECTIONED))
+	{
+		fprintf(stderr, _("%s: options -s/--schema-only and -a/--data-only cannot be used with --section\n"),
+			progname);
+		exit(1);
+	}
+
+	if (opts->dataOnly)
+		opts->dumpSections = DUMP_DATA;
+	else if (opts->schemaOnly)
+		opts->dumpSections = DUMP_PRE_DATA | DUMP_POST_DATA;
+	else if ( opts->dumpSections != DUMP_UNSECTIONED)
+	{
+		opts->dataOnly = opts->dumpSections == DUMP_DATA;
+		opts->schemaOnly = !(opts->dumpSections & DUMP_DATA);
 	}
 
 	/* Should get at most one of -d and -f, else user is confused */
@@ -432,6 +463,7 @@ usage(const char *progname)
 			 "                           created\n"));
 	printf(_("  --no-security-labels     do not restore security labels\n"));
 	printf(_("  --no-tablespaces         do not restore tablespace assignments\n"));
+	printf(_("  --section=SECTION        restore named section (pre-data, data or post-data)\n"));
 	printf(_("  --use-set-session-authorization\n"
 			 "                           use SET SESSION AUTHORIZATION commands instead of\n"
 	  "                           ALTER OWNER commands to set ownership\n"));

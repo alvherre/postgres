@@ -3,7 +3,7 @@
  * user.c
  *	  Commands for manipulating roles (formerly called users).
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/backend/commands/user.c
@@ -239,16 +239,7 @@ CreateRole(CreateRoleStmt *stmt)
 	if (dpassword && dpassword->arg)
 		password = strVal(dpassword->arg);
 	if (dissuper)
-	{
 		issuper = intVal(dissuper->arg) != 0;
-
-		/*
-		 * Superusers get replication by default, but only if NOREPLICATION
-		 * wasn't explicitly mentioned
-		 */
-		if (issuper && !(disreplication && intVal(disreplication->arg) == 0))
-			isreplication = 1;
-	}
 	if (dinherit)
 		inherit = intVal(dinherit->arg) != 0;
 	if (dcreaterole)

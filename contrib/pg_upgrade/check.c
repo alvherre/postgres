@@ -3,7 +3,7 @@
  *
  *	server checks and output routines
  *
- *	Copyright (c) 2010-2011, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2012, PostgreSQL Global Development Group
  *	contrib/pg_upgrade/check.c
  */
 
@@ -242,10 +242,8 @@ check_cluster_versions(void)
 	 * We can't allow downgrading because we use the target pg_dumpall, and
 	 * pg_dumpall cannot operate on new database versions, only older versions.
 	 */
-#ifndef ENABLE_SAME_CATVERSION_UPGRADES	/* does not allow tablespace upgrades */
 	if (old_cluster.major_version > new_cluster.major_version)
 		pg_log(PG_FATAL, "This utility cannot be used to downgrade to older major PostgreSQL versions.\n");
-#endif
 
 	/* get old and new binary versions */
 	get_bin_version(&old_cluster);
@@ -613,11 +611,11 @@ check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster)
 /*
  * check_for_reg_data_type_usage()
  *	pg_upgrade only preserves these system values:
- *		pg_class.relfilenode
+ *		pg_class.oid
  *		pg_type.oid
  *		pg_enum.oid
  *
- *	Most of the reg* data types reference system catalog info that is
+ *	Many of the reg* data types reference system catalog info that is
  *	not preserved, and hence these data types cannot be used in user
  *	tables upgraded by pg_upgrade.
  */
@@ -655,16 +653,16 @@ check_for_reg_data_type_usage(ClusterInfo *cluster)
 								"		NOT a.attisdropped AND "
 								"		a.atttypid IN ( "
 		  "			'pg_catalog.regproc'::pg_catalog.regtype, "
-								"			'pg_catalog.regprocedure'::pg_catalog.regtype, "
+		  "			'pg_catalog.regprocedure'::pg_catalog.regtype, "
 		  "			'pg_catalog.regoper'::pg_catalog.regtype, "
-								"			'pg_catalog.regoperator'::pg_catalog.regtype, "
-		 "			'pg_catalog.regclass'::pg_catalog.regtype, "
+		  "			'pg_catalog.regoperator'::pg_catalog.regtype, "
+		/* regclass.oid is preserved, so 'regclass' is OK */
 		/* regtype.oid is preserved, so 'regtype' is OK */
-		"			'pg_catalog.regconfig'::pg_catalog.regtype, "
-								"			'pg_catalog.regdictionary'::pg_catalog.regtype) AND "
-								"		c.relnamespace = n.oid AND "
-							  "		n.nspname != 'pg_catalog' AND "
-						 "		n.nspname != 'information_schema'");
+		  "			'pg_catalog.regconfig'::pg_catalog.regtype, "
+		  "			'pg_catalog.regdictionary'::pg_catalog.regtype) AND "
+		  "		c.relnamespace = n.oid AND "
+		  "		n.nspname != 'pg_catalog' AND "
+		  "		n.nspname != 'information_schema'");
 
 		ntups = PQntuples(res);
 		i_nspname = PQfnumber(res, "nspname");

@@ -18,7 +18,7 @@
 #include "pgtypes_date.h"
 
 
-int PGTYPEStimestamp_defmt_scan(char **, char *, timestamp *, int *, int *, int *,
+int PGTYPEStimestamp_defmt_scan(char **, const char *, timestamp *, int *, int *, int *,
 							int *, int *, int *, int *);
 
 #ifdef HAVE_INT64_TIMESTAMP
@@ -130,9 +130,8 @@ timestamp2tm(timestamp dt, int *tzp, struct tm * tm, fsec_t *fsec, char **tzn)
 				date0;
 	double		time;
 #endif
-	time_t		utime;
-
 #if defined(HAVE_TM_ZONE) || defined(HAVE_INT_TIMEZONE)
+	time_t		utime;
 	struct tm  *tx;
 #endif
 
@@ -202,6 +201,8 @@ recalc_t:
 		 */
 		if (IS_VALID_UTIME(tm->tm_year, tm->tm_mon, tm->tm_mday))
 		{
+#if defined(HAVE_TM_ZONE) || defined(HAVE_INT_TIMEZONE)
+
 #ifdef HAVE_INT64_TIMESTAMP
 			utime = dt / USECS_PER_SEC +
 				((date0 - date2j(1970, 1, 1)) * INT64CONST(86400));
@@ -209,7 +210,6 @@ recalc_t:
 			utime = dt + (date0 - date2j(1970, 1, 1)) * SECS_PER_DAY;
 #endif
 
-#if defined(HAVE_TM_ZONE) || defined(HAVE_INT_TIMEZONE)
 			tx = localtime(&utime);
 			tm->tm_year = tx->tm_year + 1900;
 			tm->tm_mon = tx->tm_mon + 1;
@@ -384,12 +384,12 @@ PGTYPEStimestamp_current(timestamp * ts)
 
 static int
 dttofmtasc_replace(timestamp * ts, date dDate, int dow, struct tm * tm,
-				   char *output, int *pstr_len, char *fmtstr)
+				   char *output, int *pstr_len, const char *fmtstr)
 {
 	union un_fmt_comb replace_val;
 	int			replace_type;
 	int			i;
-	char	   *p = fmtstr;
+	const char *p = fmtstr;
 	char	   *q = output;
 
 	while (*p)
@@ -866,7 +866,7 @@ dttofmtasc_replace(timestamp * ts, date dDate, int dow, struct tm * tm,
 
 
 int
-PGTYPEStimestamp_fmt_asc(timestamp * ts, char *output, int str_len, char *fmtstr)
+PGTYPEStimestamp_fmt_asc(timestamp * ts, char *output, int str_len, const char *fmtstr)
 {
 	struct tm	tm;
 	fsec_t		fsec;
@@ -894,7 +894,7 @@ PGTYPEStimestamp_sub(timestamp * ts1, timestamp * ts2, interval * iv)
 }
 
 int
-PGTYPEStimestamp_defmt_asc(char *str, char *fmt, timestamp * d)
+PGTYPEStimestamp_defmt_asc(char *str, const char *fmt, timestamp * d)
 {
 	int			year,
 				month,

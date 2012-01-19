@@ -494,6 +494,28 @@ PGconn *PQconnectdbParams(const char * const *keywords,
          </listitem>
         </varlistentry>
 
+        <varlistentry id="libpq-connect-sslcompression" xreflabel="sslcompression">
+         <term><literal>sslcompression</literal></term>
+         <listitem>
+          <para>
+           If set to 1 (default), data sent over SSL connections will be
+           compressed (this requires <productname>OpenSSL</> version
+           0.9.8 or later).
+           If set to 0, compression will be disabled (this requires
+           <productname>OpenSSL</> 1.0.0 or later).
+           This parameter is ignored if a connection without SSL is made,
+           or if the version of <productname>OpenSSL</> used does not support
+           it.
+          </para>
+          <para>
+           Compression uses CPU time, but can improve throughput if
+           the network is the bottleneck.
+           Disabling compression can improve response time and throughput
+           if CPU performance is the limiting factor.
+          </para>
+         </listitem>
+        </varlistentry>
+
         <varlistentry id="libpq-connect-sslcert" xreflabel="sslcert">
          <term><literal>sslcert</literal></term>
          <listitem>
@@ -6311,6 +6333,16 @@ myEventProc(PGEventId evtId, void *evtInfo, void *passThrough)
     <listitem>
      <para>
       <indexterm>
+       <primary><envar>PGSSLCOMPRESSION</envar></primary>
+      </indexterm>
+      <envar>PGSSLCOMPRESSION</envar> behaves the same as the <xref
+      linkend="libpq-connect-sslcompression"> connection parameter.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      <indexterm>
        <primary><envar>PGSSLCERT</envar></primary>
       </indexterm>
       <envar>PGSSLCERT</envar> behaves the same as the <xref
@@ -6749,7 +6781,7 @@ ldap://ldap.acme.com/cn=dbserver,cn=hosts?pgconnectinfo?base?(objectclass=*)
     as that of <literal>verify-ca</literal>, meaning the sever certificate
     is validated against the CA. Relying on this behavior is discouraged,
     and applications that need certificate validation should always use
-    <literal>validate-ca</literal> or <literal>validate-full</literal>.
+    <literal>verify-ca</literal> or <literal>verify-full</literal>.
    </para>
   </note>
  </sect2>
@@ -7165,8 +7197,12 @@ int PQisthreadsafe();
   </para>
 
   <para>
-   <structname>PGresult</> objects are read-only after creation, and so
-   can be passed around freely between threads.
+   <structname>PGresult</> objects are normally read-only after creation,
+   and so can be passed around freely between threads.  However, if you use
+   any of the <structname>PGresult</>-modifying functions described in
+   <xref linkend="libpq-misc"> or <xref linkend="libpq-events">, it's up
+   to you to avoid concurrent operations on the same <structname>PGresult</>,
+   too.
   </para>
 
   <para>

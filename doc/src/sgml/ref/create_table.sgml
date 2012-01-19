@@ -24,7 +24,7 @@ PostgreSQL documentation
 CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] <replaceable class="PARAMETER">table_name</replaceable> ( [
   { <replaceable class="PARAMETER">column_name</replaceable> <replaceable class="PARAMETER">data_type</replaceable> [ COLLATE <replaceable>collation</replaceable> ] [ <replaceable class="PARAMETER">column_constraint</replaceable> [ ... ] ]
     | <replaceable>table_constraint</replaceable>
-    | LIKE <replaceable>parent_table</replaceable> [ <replaceable>like_option</replaceable> ... ] }
+    | LIKE <replaceable>source_table</replaceable> [ <replaceable>like_option</replaceable> ... ] }
     [, ... ]
 ] )
 [ INHERITS ( <replaceable>parent_table</replaceable> [, ... ] ) ]
@@ -123,6 +123,12 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
    Every column constraint can also be written as a table constraint;
    a column constraint is only a notational convenience for use when the
    constraint only affects one column.
+  </para>
+
+  <para>
+   To be able to create a table, you must have <literal>USAGE</literal>
+   privilege on all column types or the type in the <literal>OF</literal>
+   clause, respectively.
   </para>
  </refsect1>
 
@@ -306,7 +312,7 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
    </varlistentry>
 
    <varlistentry>
-    <term><literal>LIKE <replaceable>parent_table</replaceable> [ <replaceable>like_option</replaceable> ... ]</literal></term>
+    <term><literal>LIKE <replaceable>source_table</replaceable> [ <replaceable>like_option</replaceable> ... ]</literal></term>
     <listitem>
      <para>
       The <literal>LIKE</literal> clause specifies a table from which
@@ -361,6 +367,11 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
       named columns and constraints.
       If the same name is specified explicitly or in another
       <literal>LIKE</literal> clause, an error is signalled.
+     </para>
+     <para>
+      The <literal>LIKE</literal> clause can also be used to copy columns from
+      views or foreign tables.  Inapplicable options (e.g., <literal>INCLUDING
+      INDEXES</literal> from a view) are ignored.
      </para>
     </listitem>
    </varlistentry>
@@ -540,7 +551,8 @@ CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXI
       cannot be used.  Although it's allowed, there is little point in using
       B-tree or hash indexes with an exclusion constraint, because this
       does nothing that an ordinary unique constraint doesn't do better.
-      So in practice the access method will always be <acronym>GiST</>.
+      So in practice the access method will always be <acronym>GiST</> or
+      <acronym>SP-GiST</>.
      </para>
 
      <para>

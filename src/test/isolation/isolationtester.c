@@ -395,18 +395,27 @@ run_named_permutations(TestSpec * testspec)
 		Permutation *p = testspec->permutations[i];
 		Step	  **steps;
 
+		if (p->nsteps > nallsteps)
+		{
+			fprintf(stderr, "invalid number of steps in permutation %d\n", i + 1);
+			exit_nicely();
+		}
+
 		steps = malloc(p->nsteps * sizeof(Step *));
 
 		/* Find all the named steps from the lookup table */
 		for (j = 0; j < p->nsteps; j++)
 		{
-			steps[j] = *((Step **) bsearch(p->stepnames[j], allsteps, nallsteps,
-										 sizeof(Step *), &step_bsearch_cmp));
-			if (steps[j] == NULL)
+			Step	**this = (Step **) bsearch(p->stepnames[j], allsteps,
+											   nallsteps, sizeof(Step *),
+											   &step_bsearch_cmp);
+			if (this == NULL)
 			{
-				fprintf(stderr, "undefined step \"%s\" specified in permutation\n", p->stepnames[j]);
+				fprintf(stderr, "undefined step \"%s\" specified in permutation\n",
+						p->stepnames[j]);
 				exit_nicely();
 			}
+			steps[j] = *this;
 		}
 
 		run_permutation(testspec, p->nsteps, steps);
@@ -550,15 +559,13 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 			int j;
 
 			/*
-			 * This permutation is invalid: it can never
-			 * happen in practice.
+			 * This permutation is invalid: it can never happen in real life.
 			 *
-			 * A session is blocked on an earlier step
-			 * (waiting) and no further steps from this
-			 * session can run until it is unblocked, but
-			 * it can only be unblocked by running steps
-			 * from other sessions.
+			 * A session is blocked on an earlier step (waiting) and no further
+			 * steps from this session can run until it is unblocked, but it
+			 * can only be unblocked by running steps from other sessions.
 			 */
+			fflush(stdout);
 			fprintf(stderr, "invalid permutation detected\n");
 
 			/* Cancel the waiting statement from this session. */
@@ -577,9 +584,8 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 			}
 
 			/*
-			 * Now we really have to complete all the
-			 * running transactions to make sure teardown
-			 * doesn't block.
+			 * Now we really have to complete all the running transactions to
+			 * make sure teardown doesn't block.
 			 */
 			for (j = 1; j < nconns; j++)
 			{

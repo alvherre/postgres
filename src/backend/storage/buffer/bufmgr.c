@@ -3,7 +3,7 @@
  * bufmgr.c
  *	  buffer manager interface routines
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -340,6 +340,7 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		{
 			/* Just need to update stats before we exit */
 			*hit = true;
+			VacuumPageHit++;
 
 			if (VacuumCostActive)
 				VacuumCostBalance += VacuumCostPageHit;
@@ -471,6 +472,7 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		TerminateBufferIO(bufHdr, false, BM_VALID);
 	}
 
+	VacuumPageMiss++;
 	if (VacuumCostActive)
 		VacuumCostBalance += VacuumCostPageMiss;
 
@@ -972,10 +974,14 @@ MarkBufferDirty(Buffer buffer)
 	Assert(bufHdr->refcount > 0);
 
 	/*
-	 * If the buffer was not dirty already, do vacuum cost accounting.
+	 * If the buffer was not dirty already, do vacuum accounting.
 	 */
-	if (!(bufHdr->flags & BM_DIRTY) && VacuumCostActive)
-		VacuumCostBalance += VacuumCostPageDirty;
+	if (!(bufHdr->flags & BM_DIRTY))
+	{
+		VacuumPageDirty++;
+		if (VacuumCostActive)
+			VacuumCostBalance += VacuumCostPageDirty;
+	}
 
 	bufHdr->flags |= (BM_DIRTY | BM_JUST_DIRTIED);
 
@@ -1185,7 +1191,7 @@ BufferSync(int flags)
 	 * buffers.  But at shutdown time, we write all dirty buffers.
 	 */
 	if (!(flags & CHECKPOINT_IS_SHUTDOWN))
-		flags |= BM_PERMANENT;
+		mask |= BM_PERMANENT;
 
 	/*
 	 * Loop over all buffers, and mark the ones that need to be written with
@@ -2337,8 +2343,12 @@ SetBufferCommitInfoNeedsSave(Buffer buffer)
 	{
 		LockBufHdr(bufHdr);
 		Assert(bufHdr->refcount > 0);
-		if (!(bufHdr->flags & BM_DIRTY) && VacuumCostActive)
-			VacuumCostBalance += VacuumCostPageDirty;
+		if (!(bufHdr->flags & BM_DIRTY))
+		{
+			VacuumPageDirty++;
+			if (VacuumCostActive)
+				VacuumCostBalance += VacuumCostPageDirty;
+		}
 		bufHdr->flags |= (BM_DIRTY | BM_JUST_DIRTIED);
 		UnlockBufHdr(bufHdr);
 	}

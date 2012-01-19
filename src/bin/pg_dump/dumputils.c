@@ -5,7 +5,7 @@
  *	Lately it's also being used by psql and bin/scripts/ ...
  *
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/bin/pg_dump/dumputils.c
@@ -17,11 +17,14 @@
 #include <ctype.h>
 
 #include "dumputils.h"
+#include "pg_backup.h"
 
 #include "parser/keywords.h"
 
 
+/* Globals exported by this file */
 int			quote_all_identifiers = 0;
+const char *progname = NULL;
 
 
 #define supports_grant_options(version) ((version) >= 70400)
@@ -1208,5 +1211,84 @@ emitShSecLabels(PGconn *conn, PGresult *res, PQExpBuffer buffer,
 						  fmtId(objname));
 		appendStringLiteralConn(buffer, label, conn);
         appendPQExpBuffer(buffer, ";\n");
+	}
+}
+
+
+/*
+ * Write a printf-style message to stderr.
+ *
+ * The program name is prepended, if "progname" has been set.
+ * Also, if modulename isn't NULL, that's included too.
+ * Note that we'll try to translate the modulename and the fmt string.
+ */
+void
+write_msg(const char *modulename, const char *fmt,...)
+{
+	va_list		ap;
+
+	va_start(ap, fmt);
+	vwrite_msg(modulename, fmt, ap);
+	va_end(ap);
+}
+
+/*
+ * As write_msg, but pass a va_list not variable arguments.
+ */
+void
+vwrite_msg(const char *modulename, const char *fmt, va_list ap)
+{
+	if (progname)
+	{
+		if (modulename)
+			fprintf(stderr, "%s: [%s] ", progname, _(modulename));
+		else
+			fprintf(stderr, "%s: ", progname);
+	}
+	vfprintf(stderr, _(fmt), ap);
+}
+
+
+/*
+ * Fail and die, with a message to stderr.  Parameters as for write_msg.
+ */
+void
+exit_horribly(const char *modulename, const char *fmt,...)
+{
+	va_list		ap;
+
+	va_start(ap, fmt);
+	vwrite_msg(modulename, fmt, ap);
+	va_end(ap);
+
+	exit(1);
+}
+
+/*
+ * Set the bitmask in dumpSections according to the first argument.
+ * dumpSections is initialised as DUMP_UNSECTIONED by pg_dump and
+ * pg_restore so they can know if this has even been called.
+ */
+
+void
+set_section (const char *arg, int *dumpSections)
+{
+	/* if this is the first, clear all the bits */
+	if (*dumpSections == DUMP_UNSECTIONED)
+		*dumpSections = 0;
+
+	if (strcmp(arg,"pre-data") == 0)
+		*dumpSections |= DUMP_PRE_DATA;
+	else if (strcmp(arg,"data") == 0)
+		*dumpSections |= DUMP_DATA;
+	else if (strcmp(arg,"post-data") == 0)
+		*dumpSections |= DUMP_POST_DATA;
+	else
+	{
+		fprintf(stderr, _("%s: unknown section name \"%s\")\n"),
+				progname, arg);
+		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
+				progname);
+		exit(1);
 	}
 }

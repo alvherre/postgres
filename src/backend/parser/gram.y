@@ -6,7 +6,7 @@
  * gram.y
  *	  POSTGRESQL BISON rules/actions
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -558,7 +558,7 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 
 	TABLE TABLES TABLESPACE TEMP TEMPLATE TEMPORARY TEXT_P THEN TIME TIMESTAMP
 	TO TRAILING TRANSACTION TREAT TRIGGER TRIM TRUE_P
-	TRUNCATE TRUSTED TYPE_P
+	TRUNCATE TRUSTED TYPE_P TYPES_P
 
 	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLISTEN UNLOGGED
 	UNTIL UPDATE USER USING
@@ -2718,18 +2718,10 @@ ConstraintAttr:
 		;
 
 
-/*
- * SQL99 supports wholesale borrowing of a table definition via the LIKE clause.
- * This seems to be a poor man's inheritance capability, with the resulting
- * tables completely decoupled except for the original commonality in definitions.
- *
- * This is very similar to CREATE TABLE AS except for the INCLUDING DEFAULTS extension
- * which is a part of SQL:2003.
- */
 TableLikeClause:
 			LIKE qualified_name TableLikeOptionList
 				{
-					InhRelation *n = makeNode(InhRelation);
+					TableLikeClause *n = makeNode(TableLikeClause);
 					n->relation = $2;
 					n->options = $3;
 					$$ = (Node *)n;
@@ -5434,6 +5426,14 @@ privilege_target:
 					n->objs = $2;
 					$$ = n;
 				}
+			| DOMAIN_P any_name_list
+				{
+					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
+					n->targtype = ACL_TARGET_OBJECT;
+					n->objtype = ACL_OBJECT_DOMAIN;
+					n->objs = $2;
+					$$ = n;
+				}
 			| LANGUAGE name_list
 				{
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
@@ -5463,6 +5463,14 @@ privilege_target:
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
 					n->targtype = ACL_TARGET_OBJECT;
 					n->objtype = ACL_OBJECT_TABLESPACE;
+					n->objs = $2;
+					$$ = n;
+				}
+			| TYPE_P any_name_list
+				{
+					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
+					n->targtype = ACL_TARGET_OBJECT;
+					n->objtype = ACL_OBJECT_TYPE;
 					n->objs = $2;
 					$$ = n;
 				}
@@ -5680,6 +5688,7 @@ defacl_privilege_target:
 			TABLES			{ $$ = ACL_OBJECT_RELATION; }
 			| FUNCTIONS		{ $$ = ACL_OBJECT_FUNCTION; }
 			| SEQUENCES		{ $$ = ACL_OBJECT_SEQUENCE; }
+			| TYPES_P		{ $$ = ACL_OBJECT_TYPE; }
 		;
 
 
@@ -6434,6 +6443,22 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->newname = $6;
 					$$ = (Node *)n;
 				}
+			| ALTER DOMAIN_P any_name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_DOMAIN;
+					n->object = $3;
+					n->newname = $6;
+					$$ = (Node *)n;
+				}
+			| ALTER FOREIGN DATA_P WRAPPER name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_FDW;
+					n->subname = $5;
+					n->newname = $8;
+					$$ = (Node *)n;
+				}
 			| ALTER FUNCTION function_with_argtypes RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
@@ -6481,6 +6506,14 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
 					n->renameType = OBJECT_SCHEMA;
+					n->subname = $3;
+					n->newname = $6;
+					$$ = (Node *)n;
+				}
+			| ALTER SERVER name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_FOREIGN_SERVER;
 					n->subname = $3;
 					n->newname = $6;
 					$$ = (Node *)n;
@@ -7281,26 +7314,28 @@ transaction_mode_list_or_empty:
  *
  *****************************************************************************/
 
-ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list
+ViewStmt: CREATE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 				AS SelectStmt opt_check_option
 				{
 					ViewStmt *n = makeNode(ViewStmt);
 					n->view = $4;
 					n->view->relpersistence = $2;
 					n->aliases = $5;
-					n->query = $7;
+					n->query = $8;
 					n->replace = false;
+					n->options = $6;
 					$$ = (Node *) n;
 				}
-		| CREATE OR REPLACE OptTemp VIEW qualified_name opt_column_list
+		| CREATE OR REPLACE OptTemp VIEW qualified_name opt_column_list opt_reloptions
 				AS SelectStmt opt_check_option
 				{
 					ViewStmt *n = makeNode(ViewStmt);
 					n->view = $6;
 					n->view->relpersistence = $4;
 					n->aliases = $7;
-					n->query = $9;
+					n->query = $10;
 					n->replace = true;
+					n->options = $8;
 					$$ = (Node *) n;
 				}
 		;
@@ -7573,6 +7608,18 @@ AlterDomainStmt:
 					n->typeName = $3;
 					n->name = $6;
 					n->behavior = $7;
+					n->missing_ok = false;
+					$$ = (Node *)n;
+				}
+			/* ALTER DOMAIN <domain> DROP CONSTRAINT IF EXISTS <name> [RESTRICT|CASCADE] */
+			| ALTER DOMAIN_P any_name DROP CONSTRAINT IF_P EXISTS name opt_drop_behavior
+				{
+					AlterDomainStmt *n = makeNode(AlterDomainStmt);
+					n->subtype = 'X';
+					n->typeName = $3;
+					n->name = $8;
+					n->behavior = $9;
+					n->missing_ok = true;
 					$$ = (Node *)n;
 				}
 			/* ALTER DOMAIN <domain> VALIDATE CONSTRAINT <name> */
