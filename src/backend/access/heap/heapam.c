@@ -4323,11 +4323,17 @@ l6:
 	{
 		/*
 		 * If the XMAX is already a MultiXactId, then we need to expand it to
-		 * include our own TransactionId; but if all the members were lockers
-		 * and are all gone, it's probably worthwhile to remove the IS_MULTI
-		 * bit first.  In any case, the cost of doing GetMultiXactIdMembers
-		 * would be paid by MultiXactIdExpand anyway if we weren't to do this,
-		 * so it doesn't matter much.
+		 * include add_to_xmax; but if all the members were lockers and are all
+		 * gone, we can do away with the IS_MULTI bit and just set add_to_xmax
+		 * as the only locked.  In any case, the cost of doing
+		 * GetMultiXactIdMembers would be paid by MultiXactIdExpand anyway if
+		 * we weren't to do this, so it's not going to cause a performance hit.
+		 *
+		 * If all lockers are gone and we have an updater that aborted,
+		 * we could also do without a multi.  However, if the locker aborted,
+		 * even if there are lockers, we would remove all traces of it, and
+		 * only lockers would remain.  So next time around things would clear
+		 * up.
 		 */
 		if (old_infomask & HEAP_XMAX_LOCK_ONLY)
 		{
@@ -4357,14 +4363,6 @@ l6:
 				goto l6;
 			}
 		}
-
-		/*
-		 * If all lockers are gone and we have an updater that aborted,
-		 * we could also do without a multi.  However, if the locker aborted,
-		 * even if there are lockers, we would remove all traces of it, and
-		 * only lockers would remain.  So next time around things would clear
-		 * up.
-		 */
 
 		new_xmax = MultiXactIdExpand((MultiXactId) xmax, add_to_xmax,
 									 get_mxact_status_for_tuplelock(mode));
