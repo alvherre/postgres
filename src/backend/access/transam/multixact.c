@@ -550,10 +550,8 @@ MultiXactIdIsRunning(MultiXactId multi)
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
  *
- * We return the number of members that we did not test for.  This is dubbed
- * "remaining" as in "the number of members that remaing running", but this is
- * slightly incorrect, because lockers whose status did not conflict with ours
- * are not even considered and so might have gone away anyway.
+ * We return the number of members that are still running, including any
+ * (non-aborted) subtransactions of our own transaction.
  */
 void
 MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
@@ -570,15 +568,21 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
-						i, members[i].xid);
-			if (TransactionIdIsCurrentTransactionId(members[i].xid) ||
-				!MultiXactStatusConflict(members[i].status, status))
+			if (TransactionIdIsCurrentTransactionId(members[i].xid))
 			{
 				remain++;
 				continue;
 			}
 
+			if (!MultiXactStatusConflict(members[i].status, status))
+			{
+				if (TransactionIdIsInProgress(members[i].xid))
+					remain++;
+				continue;
+			}
+
+			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
+						i, members[i].xid);
 			XactLockTableWait(members[i].xid);
 		}
 	}
