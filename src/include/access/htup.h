@@ -167,9 +167,7 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XMAX_KEYSHR_LOCK	0x0010	/* xmax is a key-shared locker */
 #define HEAP_COMBOCID			0x0020	/* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
-#define HEAP_XMAX_LOCK_ONLY		0x0080	/* xmax, if valid, is only a locker.
-										 * Note this is not set unless
-										 * XMAX_IS_MULTI is also set. */
+#define HEAP_XMAX_LOCK_ONLY		0x0080	/* xmax, if valid, is only a locker */
 
 #define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY | \
 						 HEAP_XMAX_KEYSHR_LOCK)
@@ -190,16 +188,13 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HEAP_XACT_MASK			0xFFF0	/* visibility-related bits */
 
 /*
- * A tuple is only locked (i.e. not updated by its Xmax) if it the Xmax is not
- * a multixact and it has either the EXCL_LOCK or KEYSHR_LOCK bits set, or if
- * the xmax is a multi that doesn't contain an update.
+ * A tuple is only locked (i.e. not updated by its Xmax) if it the
+ * HEAP_XMAX_LOCK_ONLY bit is set.
  *
- * Beware of multiple evaluation of arguments.
+ * XXX should we AssertMacro() that HEAP_XMAX_INVALID is not set?
  */
 #define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
-	((!((infomask) & HEAP_XMAX_IS_MULTI) && \
-	  (infomask) & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) || \
-	 (((infomask) & HEAP_XMAX_IS_MULTI) && ((infomask) & HEAP_XMAX_LOCK_ONLY)))
+	((infomask) & HEAP_XMAX_LOCK_ONLY)
 
 #define HeapTupleHeaderIsOnlyLocked(tup) \
 	HeapTupleHeaderInfomaskIsOnlyLocked((tup)->t_infomask)
