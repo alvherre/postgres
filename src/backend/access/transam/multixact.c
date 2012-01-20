@@ -254,7 +254,6 @@ static const bool MultiXactConflicts[5][5] =
 	MultiXactConflicts[status1][status2]
 
 
-#define MULTIXACT_DEBUG
 #ifdef MULTIXACT_DEBUG
 #define debug_elog2(a,b) elog(a,b)
 #define debug_elog3(a,b,c) elog(a,b,c)
@@ -780,9 +779,6 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			bshift;
 		int			flagsoff;
 		int			memberoff;
-
-		if (members[i].xid < 900)
-			abort();
 
 		/* this status value is not representable on disk */
 		Assert(members[i].status < MultiXactStatusKeyUpdate);
