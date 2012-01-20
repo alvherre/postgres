@@ -2847,7 +2847,7 @@ l2:
 		TransactionId	xwait;
 		uint16		infomask;
 		bool		can_continue = false;
-		
+
 		checked_lockers = true;
 
 		/*
@@ -3065,8 +3065,8 @@ l2:
 	 * transactions finished.
 	 */
 	compute_new_update_xmax(HeapTupleHeaderGetRawXmax(oldtup.t_data),
-					  		oldtup.t_data->t_infomask, xid, tuplock,
-				   			&xmax_old_tuple, &infomask_old_tuple);
+							oldtup.t_data->t_infomask, xid, tuplock,
+							&xmax_old_tuple, &infomask_old_tuple);
 
 	if ((oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
 		(checked_lockers && !locker_remains))
