@@ -3,12 +3,18 @@
  * multixact.c
  *		PostgreSQL multi-transaction-log manager
  *
- * The pg_multixact manager is a pg_clog-like manager that stores an array
- * of MultiXactMember for each MultiXactId.	It is a fundamental part of the
- * shared-row-lock implementation.	A share-locked tuple stores a
- * MultiXactId in its Xmax, and a transaction that needs to wait for the
- * tuple to be unlocked can sleep on the potentially-several TransactionIds
- * that compose the MultiXactId.
+ * The pg_multixact manager is a pg_clog-like manager that stores an array of
+ * MultiXactMember for each MultiXactId.  It is a fundamental part of the
+ * shared-row-lock implementation.  Each MultiXactMember is comprised of a
+ * TransactionId and a set of flag bits.  The name is a bit historical:
+ * originally, a MultiXactId consisted of more than one TransactionId (except
+ * in rare corner cases), hence "multi".  Nowadays, however, it's perfectly
+ * legitimate to have MultiXactIds that only include a single Xid.
+ *
+ * The meaning of the flag bits is opaque to this module, but they are mostly
+ * used in heapam.c to identify lock modes that each of the member transactions
+ * is holding on any given tuple.  This module just contains support to store
+ * and retrieve the arrays.
  *
  * We use two SLRU areas, one for storing the offsets at which the data
  * starts for each MultiXactId in the other one.  This trick allows us to
@@ -69,13 +75,13 @@
  * Defines for MultiXactOffset page sizes.	A page is the same BLCKSZ as is
  * used everywhere else in Postgres.
  *
- * Note: because both MultiXactOffsets and TransactionIds are 32 bits and
- * wrap around at 0xFFFFFFFF, MultiXact page numbering also wraps around at
- * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE, and segment numbering at
- * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need take no
- * explicit notice of that fact in this module, except when comparing segment
- * and page numbers in TruncateMultiXact
- * (see MultiXact{Offset,Member}PagePrecedes).
+ * Note: because MultiXactOffsets are 32 bits and wrap around at 0xFFFFFFFF,
+ * MultiXact page numbering also wraps around at
+ * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE, and segment numbering at
+ * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need
+ * take no explicit notice of that fact in this module, except when comparing
+ * segment and page numbers in TruncateMultiXact (see
+ * MultiXactOffsetPagePrecedes).
  */
 
 /* We need four bytes per offset */
@@ -87,7 +93,7 @@
 	((xid) % (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
 
 /*
- * The situation for members is a bit more complex: we need to store two
+ * The situation for members is a bit more complex: we store two
  * additional flag bits for each TransactionId.  To do this without getting
  * into alignment issues, we store four bytes of flags (so 16 bit pairs), and
  * then the corresponding 16 Xids.  Each such 17-word (68-byte) set we call a
@@ -2104,7 +2110,7 @@ MultiXactOffsetPagePrecedes(int page1, int page2)
 
 /*
  * Decide which of two MultiXactMember page numbers is "older" for truncation
- * purposes.  There is no "invalid offset number" so use the numbers verbatim.
+ * purposes.  There is no "invalid number" so use the numbers verbatim.
  */
 static bool
 MultiXactMemberPagePrecedes(int page1, int page2)
