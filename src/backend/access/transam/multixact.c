@@ -1309,21 +1309,24 @@ static char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
 	static char	   *str = NULL;
+	StringInfoData	buf;
 	int			i;
 
 	if (str != NULL)
 		pfree(str);
 
-	str = MemoryContextAlloc(TopMemoryContext, 15 * (nmembers + 1) + 4);
+	initStringInfo(&buf);
 
-	snprintf(str, 47, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
-			 mxstatus_to_string(members[0].status));
+	appendStringInfo(&buf, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
+					 mxstatus_to_string(members[0].status));
 
 	for (i = 1; i < nmembers; i++)
-		snprintf(str + strlen(str), 17, ", %u (%s)", members[i].xid,
-				 mxstatus_to_string(members[i].status));
+		appendStringInfo(&buf, ", %u (%s)", members[i].xid,
+						 mxstatus_to_string(members[i].status));
 
-	strcat(str, "]");
+	appendStringInfoChar(&buf, ']');
+	str = MemoryContextStrdup(TopMemoryContext, buf.data);
+	pfree(buf.data);
 	return str;
 }
 #endif
