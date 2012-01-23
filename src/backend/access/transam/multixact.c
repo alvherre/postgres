@@ -290,6 +290,10 @@ static void WriteMZeroMemberPageXlogRec(int pageno);
  * MultiXactIdCreateSingleton
  * 		Construct a MultiXactId representing a single transaction.
  *
+ * This is used when a tuple is marked FOR SHARE; there is no purely-hint-bit
+ * representation of that, so we have to resort to always using a multi.  Other
+ * lock modes have dedicated hint bits, so they don't have this problem.
+ *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
  */
