@@ -1355,63 +1355,6 @@ AtEOXact_MultiXact(void)
 }
 
 /*
- * AtPrepare_MultiXact
- *		Save multixact state at 2PC tranasction prepare
- */
-void
-AtPrepare_MultiXact(void)
-{
-	/* nothing to do */
-}
-
-/*
- * PostPrepare_MultiXact
- *		Clean up after successful PREPARE TRANSACTION
- */
-void
-PostPrepare_MultiXact(TransactionId xid)
-{
-	/*
-	 * Discard the local MultiXactId cache like in AtEOX_MultiXact
-	 */
-	MXactContext = NULL;
-	MXactCache = NULL;
-}
-
-/*
- * multixact_twophase_recover
- *		Recover the state of a prepared transaction at startup
- */
-void
-multixact_twophase_recover(TransactionId xid, uint16 info,
-						   void *recdata, uint32 len)
-{
-	/* nothing to do */
-}
-
-/*
- * multixact_twophase_postcommit
- *		Similar to AtEOX_MultiXact but for COMMIT PREPARED
- */
-void
-multixact_twophase_postcommit(TransactionId xid, uint16 info,
-							  void *recdata, uint32 len)
-{
-	/* nothing to do */
-}
-
-/*
- * multixact_twophase_postabort
- *		This is actually just the same as the COMMIT case.
- */
-void
-multixact_twophase_postabort(TransactionId xid, uint16 info,
-							 void *recdata, uint32 len)
-{
-	/* nothing to do */
-}
-
-/*
  * Initialization of shared memory for MultiXact.  We use two SLRU areas,
  * thus double memory.	Also, reserve space for the shared MultiXactState
  * struct and the per-backend MultiXactId arrays (two of those, too).
