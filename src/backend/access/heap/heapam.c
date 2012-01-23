@@ -97,7 +97,33 @@ static void compute_new_update_xmax(TransactionId xmax, uint16 old_infomask,
 static HTSU_Result heap_lock_updated_tuple(Relation rel, ItemPointer tid,
 						TransactionId xid, LockTupleMode mode);
 static uint16 GetMultiXactIdHintBits(MultiXactId multi);
+static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+				int *remaining);
+static bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+						   int *remaining);
 
+/* multixact status conflict table */
+static const bool MultiXactConflicts[5][5] =
+{
+	{	/* ForKeyShare */
+		false, false, false, false, true
+	},
+	{	/* ForShare */
+		false, false, true, true, true
+	},
+	{	/* ForUpdate */
+		false, true, true, true, true
+	},
+	{	/* Update */
+		false, true, true, true, true
+	},
+	{	/* KeyUpdate */
+		true, true, true, true, true
+	}
+};
+
+#define MultiXactStatusConflict(status1, status2) \
+	MultiXactConflicts[status1][status2]
 
 /*
  * Some convenience macros to hide calls to get_lockmode_for_tuplelock().
@@ -4874,6 +4900,111 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 	}
 
 	return update_xact;
+}
+
+/*
+ * MultiXactIdWait
+ *		Sleep on a MultiXactId.
+ *
+ * We do this by sleeping on each member using XactLockTableWait.  Any
+ * members that belong to the current backend are *not* waited for, however;
+ * this would not merely be useless but would lead to Assert failure inside
+ * XactLockTableWait.  By the time this returns, it is certain that all
+ * transactions *of other backends* that were members of the MultiXactId
+ * that conflict with the requested status are dead (and no new ones can have
+ * been added, since it is not legal to add members to an existing
+ * MultiXactId).
+ *
+ * But by the time we finish sleeping, someone else may have changed the Xmax
+ * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
+ * We return the number of members that are still running, including any
+ * (non-aborted) subtransactions of our own transaction.
+ */
+static void
+MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
+{
+	MultiXactMember *members;
+	int			nmembers;
+	int			remain = 0;
+
+	nmembers = GetMultiXactIdMembers(multi, &members);
+
+	if (nmembers >= 0)
+	{
+		int			i;
+
+		for (i = 0; i < nmembers; i++)
+		{
+			if (TransactionIdIsCurrentTransactionId(members[i].xid))
+			{
+				remain++;
+				continue;
+			}
+
+			if (!MultiXactStatusConflict(members[i].status, status))
+			{
+				if (TransactionIdIsInProgress(members[i].xid))
+					remain++;
+				continue;
+			}
+
+			XactLockTableWait(members[i].xid);
+		}
+	}
+
+	*remaining = remain;
+}
+
+/*
+ * ConditionalMultiXactIdWait
+ *		As above, but only lock if we can get the lock without blocking.
+ *
+ * Note that in case we return false, the number of remaining members is
+ * not to be trusted.
+ */
+static bool
+ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+						   int *remaining)
+{
+	bool		result = true;
+	MultiXactMember *members;
+	int			nmembers;
+	int			remain = 0;
+
+	nmembers = GetMultiXactIdMembers(multi, &members);
+
+	if (nmembers >= 0)
+	{
+		int			i;
+
+		for (i = 0; i < nmembers; i++)
+		{
+			TransactionId member = members[i].xid;
+
+			if (TransactionIdIsCurrentTransactionId(member))
+			{
+				remain++;
+				continue;
+			}
+
+			if (!MultiXactStatusConflict(members[i].status, status))
+			{
+				if (TransactionIdIsInProgress(members[i].xid))
+					remain++;
+				continue;
+			}
+			result = ConditionalXactLockTableWait(member);
+			if (!result)
+				break;
+		}
+
+		pfree(members);
+	}
+
+	*remaining = remain;
+
+	return result;
 }
 
 /*
