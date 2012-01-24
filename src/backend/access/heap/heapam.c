@@ -4137,8 +4137,8 @@ failed:
 						  HEAP_XMAX_IS_MULTI)) &&
 		(mode == LockTupleKeyShare ?
 		 (old_infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_EXCL_LOCK)) :
-		 (old_infomask & HEAP_XMAX_EXCL_LOCK) &&
-		TransactionIdIsCurrentTransactionId(xmax)))
+		 (old_infomask & HEAP_XMAX_EXCL_LOCK)) &&
+		TransactionIdIsCurrentTransactionId(xmax))
 	{
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 		/* Probably can't hold tuple lock here, but may as well check */
@@ -4167,6 +4167,7 @@ failed:
 	 * Also reset the HOT UPDATE bit, but only if there's no update; otherwise
 	 * we would break the HOT chain.
 	 */
+	tuple->t_data->t_infomask &= ~(HEAP_LOCK_BITS | HEAP_XMAX_IS_MULTI);
 	tuple->t_data->t_infomask = new_infomask;
 	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
 		HeapTupleHeaderClearHotUpdated(tuple->t_data);
@@ -4281,11 +4282,7 @@ compute_new_lock_xmax(TransactionId xmax, uint16 old_infomask,
 	uint16			new_infomask;
 
 l6:
-	/*
-	 * FIXME in the version below we initialize new_infomask to 0 instead.
-	 * Should we do likewise here?
-	 */
-	new_infomask = old_infomask;
+	new_infomask = 0;
 	if (old_infomask & HEAP_XMAX_INVALID)
 	{
 		/*
