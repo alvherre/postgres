@@ -209,19 +209,26 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				snprintf(values[Atnum_xids], NCHARS, "{%d}", HeapTupleHeaderGetRawXmax(tuple->t_data));
 
 				values[Atnum_modes] = palloc(NCHARS);
-				if ((tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY) &&
-					(tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK))
-					snprintf(values[Atnum_modes], NCHARS, "{Key Share}");
-				else if ((tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY) &&
-						 (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
-					snprintf(values[Atnum_modes], NCHARS, "{For Update}");
-				else if (tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY)
-					snprintf(values[Atnum_modes], NCHARS, "{transient pg_upgrade status}");
+				if (tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY)
+				{
+					if ((tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK) &&
+						(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
+						/* both bits set: invalid combination */
+						snprintf(values[Atnum_modes], NCHARS, "{invalid two lock bits}");
+					else if (tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK)
+						snprintf(values[Atnum_modes], NCHARS, "{Key Share}");
+					else if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
+						snprintf(values[Atnum_modes], NCHARS, "{For Update}");
+					else
+						/* neither keyshare nor exclusive bit it set */
+						snprintf(values[Atnum_modes], NCHARS, "{transient upgrade status}");
+				}
 				else
 					snprintf(values[Atnum_modes], NCHARS, "{infomask %x}", tuple->t_data->t_infomask);
 
 				values[Atnum_pids] = palloc(NCHARS * sizeof(char));
-				snprintf(values[Atnum_pids], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetRawXmax(tuple->t_data)));
+				snprintf(values[Atnum_pids], NCHARS, "{%d}",
+						 BackendXidGetPid(HeapTupleHeaderGetRawXmax(tuple->t_data)));
 			}
 
 			LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
