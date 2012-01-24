@@ -294,6 +294,9 @@ static void WriteMZeroMemberPageXlogRec(int pageno);
  * representation of that, so we have to resort to always using a multi.  Other
  * lock modes have dedicated hint bits, so they don't have this problem.
  *
+ * Note that MultiXactIdExpand can also create singleton MultiXactIds in some
+ * cases.
+ *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
  */
@@ -320,7 +323,7 @@ MultiXactIdCreateSingleton(TransactionId xid, MultiXactStatus status)
  * MultiXactIdCreate
  *		Construct a MultiXactId representing two TransactionIds.
  *
- * The two XIDs must be different, or be requesting different lock modes.
+ * The two XIDs must be different, or be requesting different statuses.
  *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
