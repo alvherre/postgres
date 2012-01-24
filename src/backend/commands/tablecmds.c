@@ -451,10 +451,12 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId)
 
 	/*
 	 * Look up the namespace in which we are supposed to create the relation,
-	 * and check we have permission to create there.
+	 * check we have permission to create there, lock it against concurrent
+	 * drop, and mark stmt->relation as RELPERSISTENCE_TEMP if a temporary
+	 * namespace is selected.
 	 */
-	namespaceId = RangeVarGetAndCheckCreationNamespace(stmt->relation);
-	RangeVarAdjustRelationPersistence(stmt->relation, namespaceId);
+	namespaceId =
+		RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, NULL);
 
 	/*
 	 * Security check: disallow creating temp tables from security-restricted
@@ -2308,9 +2310,18 @@ renameatt(RenameStmt *stmt)
 
 	/* lock level taken here should match renameatt_internal */
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
-									 false, false,
+									 stmt->missing_ok, false,
 									 RangeVarCallbackForRenameAttribute,
 									 NULL);
+
+	if (!OidIsValid(relid))
+	{
+		ereport(NOTICE,
+				(errmsg("relation \"%s\" does not exist, skipping",
+							stmt->relation->relname)));
+		return;
+	}
+
 	renameatt_internal(relid,
 					   stmt->subname,	/* old att name */
 					   stmt->newname,	/* new att name */
@@ -2336,9 +2347,17 @@ RenameRelation(RenameStmt *stmt)
 	 * lock escalation.
 	 */
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
-									 false, false,
+									 stmt->missing_ok, false,
 									 RangeVarCallbackForAlterRelation,
 									 (void *) stmt);
+
+	if (!OidIsValid(relid))
+	{
+		ereport(NOTICE,
+				(errmsg("relation \"%s\" does not exist, skipping",
+							stmt->relation->relname)));
+		return;
+	}
 
 	/* Do the work */
 	RenameRelationInternal(relid, stmt->newname);
@@ -2480,7 +2499,7 @@ CheckTableNotInUse(Relation rel, const char *stmt)
 Oid
 AlterTableLookupRelation(AlterTableStmt *stmt, LOCKMODE lockmode)
 {
-	return RangeVarGetRelidExtended(stmt->relation, lockmode, false, false,
+	return RangeVarGetRelidExtended(stmt->relation, lockmode, stmt->missing_ok, false,
 									RangeVarCallbackForAlterRelation,
 									(void *) stmt);
 }
@@ -8816,18 +8835,18 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel)
  * Check constraints in child table match up with constraints in parent,
  * and increment their coninhcount.
  *
+ * Constraints that are marked ONLY in the parent are ignored.
+ *
  * Called by ATExecAddInherit
  *
  * Currently all constraints in parent must be present in the child. One day we
- * may consider adding new constraints like CREATE TABLE does. We may also want
- * to allow an optional flag on parent table constraints indicating they are
- * intended to ONLY apply to the master table, not to the children. That would
- * make it possible to ensure no records are mistakenly inserted into the
- * master in partitioned tables rather than the appropriate child.
+ * may consider adding new constraints like CREATE TABLE does.
  *
  * XXX This is O(N^2) which may be an issue with tables with hundreds of
  * constraints. As long as tables have more like 10 constraints it shouldn't be
  * a problem though. Even 100 constraints ought not be the end of the world.
+ *
+ * XXX See MergeWithExistingConstraint too if you change this code.
  */
 static void
 MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
@@ -8860,6 +8879,10 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 		if (parent_con->contype != CONSTRAINT_CHECK)
 			continue;
 
+		/* if the parent's constraint is marked ONLY, it's not inherited */
+		if (parent_con->conisonly)
+			continue;
+
 		/* Search for a child constraint matching this one */
 		ScanKeyInit(&child_key,
 					Anum_pg_constraint_conrelid,
@@ -8886,6 +8909,14 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 						 errmsg("child table \"%s\" has different definition for check constraint \"%s\"",
 								RelationGetRelationName(child_rel),
 								NameStr(parent_con->conname))));
+
+			/* If the constraint is "only" then cannot merge */
+			if (child_con->conisonly)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+						 errmsg("constraint \"%s\" conflicts with non-inherited constraint on child table \"%s\"",
+								NameStr(child_con->conname),
+								RelationGetRelationName(child_rel))));
 
 			/*
 			 * OK, bump the child constraint's inheritance count.  (If we fail
@@ -9417,11 +9448,21 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 	Oid			oldNspOid;
 	Oid			nspOid;
 	Relation	classRel;
+	RangeVar   *newrv;
 
 	relid = RangeVarGetRelidExtended(stmt->relation, AccessExclusiveLock,
-									 false, false,
+									 stmt->missing_ok, false,
 									 RangeVarCallbackForAlterRelation,
 									 (void *) stmt);
+
+	if (!OidIsValid(relid))
+	{
+		ereport(NOTICE,
+				(errmsg("relation \"%s\" does not exist, skipping",
+							stmt->relation->relname)));
+		return;
+	}
+
 	rel = relation_open(relid, NoLock);
 
 	oldNspOid = RelationGetNamespace(rel);
@@ -9441,8 +9482,9 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 						get_rel_name(tableId))));
 	}
 
-	/* get schema OID and check its permissions */
-	nspOid = LookupCreationNamespace(stmt->newschema);
+	/* Get and lock schema OID and check its permissions. */
+	newrv = makeRangeVar(stmt->newschema, RelationGetRelationName(rel), -1);
+	nspOid = RangeVarGetAndCheckCreationNamespace(newrv, NoLock, NULL);
 
 	/* common checks on switching namespaces */
 	CheckSetNamespace(oldNspOid, nspOid, RelationRelationId, relid);

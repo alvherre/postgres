@@ -1179,6 +1179,7 @@ typedef struct AlterTableStmt
 	RangeVar   *relation;		/* table to work on */
 	List	   *cmds;			/* list of subcommands */
 	ObjectType	relkind;		/* type of object */
+	bool	   missing_ok;		/* skip error if table missing */
 } AlterTableStmt;
 
 typedef enum AlterTableType
@@ -1815,6 +1816,7 @@ typedef struct AlterSeqStmt
 	NodeTag		type;
 	RangeVar   *sequence;		/* the sequence to alter */
 	List	   *options;
+	bool		missing_ok;		/* skip error if a role is missing? */
 } AlterSeqStmt;
 
 /* ----------------------
@@ -2125,6 +2127,7 @@ typedef struct RenameStmt
 								 * trigger, etc) */
 	char	   *newname;		/* the new name */
 	DropBehavior behavior;		/* RESTRICT or CASCADE behavior */
+	bool		missing_ok;	/* skip error if missing? */
 } RenameStmt;
 
 /* ----------------------
@@ -2140,6 +2143,7 @@ typedef struct AlterObjectSchemaStmt
 	List	   *objarg;			/* argument types, if applicable */
 	char	   *addname;		/* additional name if needed */
 	char	   *newschema;		/* the new schema */
+	bool		missing_ok;	/* skip error if missing? */
 } AlterObjectSchemaStmt;
 
 /* ----------------------
