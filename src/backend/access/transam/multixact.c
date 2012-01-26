@@ -93,20 +93,20 @@
 	((xid) % (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
 
 /*
- * The situation for members is a bit more complex: we store two
+ * The situation for members is a bit more complex: we store one byte of
  * additional flag bits for each TransactionId.  To do this without getting
- * into alignment issues, we store four bytes of flags (so 16 bit pairs), and
- * then the corresponding 16 Xids.  Each such 17-word (68-byte) set we call a
- * "group", and are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep
- * 120 groups per page.  This wastes 32 bytes per page, but that's OK --
- * simplicity (and performance) trumps space efficiency here.
+ * into alignment issues, we store four bytes of flags, and then the
+ * corresponding 4 Xids.  Each such 5-word (20-byte) set we call a "group", and
+ * are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep 409 groups
+ * per page.  This wastes 12 bytes per page, but that's OK -- simplicity (and
+ * performance) trumps space efficiency here.
  *
  * Note that the "offset" macros work with byte offset, not array indexes, so
  * arithmetic must be done using "char *" pointers.
  */
-/* We need two bits per xact, so four xacts fit in a byte */
-#define MXACT_MEMBER_BITS_PER_XACT			2
-#define MXACT_MEMBER_FLAGS_PER_BYTE			4
+/* We need eight bits per xact, so one xact fits in a byte */
+#define MXACT_MEMBER_BITS_PER_XACT			8
+#define MXACT_MEMBER_FLAGS_PER_BYTE			1
 #define MXACT_MEMBER_XACT_BITMASK	((1 << MXACT_MEMBER_BITS_PER_XACT) - 1)
 
 /* how many full bytes of flags are there in a group? */
