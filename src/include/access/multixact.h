@@ -29,22 +29,24 @@
 #define NUM_MXACTMEMBER_BUFFERS		16
 
 /*
- * Possible multixact lock modes ("status").  The first three modes are for
- * tuple locks (FOR KEY SHARE, FOR SHARE and FOR UPDATE, respectively); the
- * fourth is used for an update that doesn't modify key columns.  The fifth one
- * is used for other updates and deletes.  Note that we only use two bits to
- * represent them on disk, which means we don't have space to represent the
- * last one.  This is okay, because a multixact can never contain such an
- * operation; this mode is only used to wait for other modes.
+ * Possible multixact lock modes ("status").  The first four modes are for
+ * tuple locks (FOR KEY SHARE, FOR SHARE, FOR UPDATE, FOR KEY UPDATE); the
+ * next two are used for update and delete modes.
  */
 typedef enum
 {
 	MultiXactStatusForKeyShare = 0x00,
 	MultiXactStatusForShare = 0x01,
 	MultiXactStatusForUpdate = 0x02,
-	MultiXactStatusUpdate = 0x03,
-	MultiXactStatusKeyUpdate = 0x04,
+	MultiXactStatusForKeyUpdate = 0x03,
+	/* an update that doesn't touch "key" columns */
+	MultiXactStatusUpdate = 0x04,
+	/* other updates, and delete */
+	MultiXactStatusKeyUpdate = 0x05
 } MultiXactStatus;
+
+#define MaxMultiXactStatus MultiXactStatusKeyUpdate
+
 
 typedef struct MultiXactMember
 {

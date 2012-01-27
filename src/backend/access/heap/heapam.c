@@ -103,22 +103,25 @@ static bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status
 						   int *remaining);
 
 /* multixact status conflict table */
-static const bool MultiXactConflicts[5][5] =
+static const bool MultiXactConflicts[MaxMultiXactStatus + 1][MaxMultiXactStatus + 1] =
 {
 	{	/* ForKeyShare */
-		false, false, false, false, true
+		false, false, false, true, false, true
 	},
 	{	/* ForShare */
-		false, false, true, true, true
+		false, false, true, true, true, true
 	},
 	{	/* ForUpdate */
-		false, true, true, true, true
+		false, true, true, true, true, true
+	},
+	{	/* ForKeyUpdate */
+		false, true, true, true, true, true
 	},
 	{	/* Update */
-		false, true, true, true, true
+		false, true, true, true, true, true
 	},
 	{	/* KeyUpdate */
-		true, true, true, true, true
+		true, true, true, true, true, true
 	}
 };
 
@@ -3632,7 +3635,7 @@ get_mxact_status_for_tuplelock(LockTupleMode mode)
 		case LockTupleUpdate:
 			return MultiXactStatusForUpdate;
 		case LockTupleKeyUpdate:
-			return MultiXactStatusUpdate;
+			return MultiXactStatusForKeyUpdate;
 		default:
 			elog(ERROR, "invalid tuple lock mode %d", mode);
 			return 0;	/* keep compiler quiet */
@@ -4523,7 +4526,13 @@ l5:
 	old_infomask = mytup.t_data->t_infomask;
 	xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
 
-	if (!(old_infomask & HEAP_XMAX_INVALID))
+	/*
+	 * If this tuple is updated and the key has been modified (or deleted), we
+	 * need to sleep on the updating transaction.  For other updates we can
+	 * just plough ahead.
+	 */
+	if (!(old_infomask & HEAP_XMAX_INVALID) &&
+		(mytup.t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED))
 	{
 		TransactionId	update_xid;
 
@@ -4868,12 +4877,10 @@ GetMultiXactIdHintBits(MultiXactId multi)
 			case MultiXactStatusForShare:
 				break;
 			case MultiXactStatusForUpdate:
+			case MultiXactStatusForKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				break;
 			case MultiXactStatusUpdate:
-				bits |= HEAP_XMAX_EXCL_LOCK;
-				has_update = true;
-				break;
 			case MultiXactStatusKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				has_update = true;

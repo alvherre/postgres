@@ -175,10 +175,13 @@ pgrowlocks(PG_FUNCTION_ARGS)
 					switch (members[j].status)
 					{
 						case MultiXactStatusKeyUpdate:
-							snprintf(buf, NCHARS, "KeyUpdate");
+							snprintf(buf, NCHARS, "Key Update");
 							break;
 						case MultiXactStatusUpdate:
 							snprintf(buf, NCHARS, "Update");
+							break;
+						case MultiXactStatusForKeyUpdate:
+							snprintf(buf, NCHARS, "For Key Update");
 							break;
 						case MultiXactStatusForUpdate:
 							snprintf(buf, NCHARS, "For Update");
