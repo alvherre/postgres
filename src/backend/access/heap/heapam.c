@@ -4323,7 +4323,7 @@ l6:
 				break;
 			case LockTupleKeyUpdate:
 				new_xmax = add_to_xmax;
-				new_infomask |= HEAP_XMAX_EXCL_LOCK;
+				new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
 				break;
 			default:
 				new_xmax = InvalidTransactionId;	/* keep compiler quiet */
@@ -4871,9 +4871,11 @@ GetMultiXactIdHintBits(MultiXactId multi)
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				break;
 			case MultiXactStatusUpdate:
+				bits |= HEAP_XMAX_EXCL_LOCK;
 				has_update = true;
 				break;
 			case MultiXactStatusKeyUpdate:
+				bits |= HEAP_XMAX_EXCL_LOCK;
 				has_update = true;
 				break;
 		}
