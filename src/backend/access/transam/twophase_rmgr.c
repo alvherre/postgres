@@ -14,7 +14,6 @@
  */
 #include "postgres.h"
 
-#include "access/multixact.h"
 #include "access/twophase_rmgr.h"
 #include "pgstat.h"
 #include "storage/lock.h"
