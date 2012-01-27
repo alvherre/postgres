@@ -570,7 +570,8 @@ typedef struct DefElem
 } DefElem;
 
 /*
- * LockingClause - raw representation of FOR UPDATE/SHARE/KEY SHARE options
+ * LockingClause - raw representation of FOR KEY UPDATE/UPDATE/SHARE/KEY SHARE
+ * 		options
  *
  * Note: lockedRels == NIL means "all relations in query".	Otherwise it
  * is a list of RangeVar nodes.  (We use RangeVar mainly because it carries
@@ -582,7 +583,8 @@ typedef enum LockClauseStrength
 	/* order is important -- see applyLockingClause */
 	LCS_FORKEYSHARE,
 	LCS_FORSHARE,
-	LCS_FORUPDATE
+	LCS_FORUPDATE,
+	LCS_FORKEYUPDATE
 } LockClauseStrength;
 
 typedef struct LockingClause

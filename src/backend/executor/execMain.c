@@ -829,6 +829,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 
 		switch (rc->markType)
 		{
+			case ROW_MARK_KEYUPDATE:
 			case ROW_MARK_EXCLUSIVE:
 			case ROW_MARK_SHARE:
 			case ROW_MARK_KEYSHARE:

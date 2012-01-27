@@ -669,8 +669,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			flagsoff;
 		int			memberoff;
 
-		/* this status value is not representable on disk */
-		Assert(members[i].status < MultiXactStatusKeyUpdate);
+		Assert(members[i].status <= MultiXactStatusKeyUpdate);
 
 		pageno = MXOffsetToMemberPage(offset);
 		memberoff = MXOffsetToMemberOffset(offset);

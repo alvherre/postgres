@@ -2076,6 +2076,9 @@ CreateCommandTag(Node *parsetree)
 								case LCS_FORKEYSHARE:
 									tag = "SELECT FOR KEY SHARE";
 									break;
+								case LCS_FORKEYUPDATE:
+									tag = "SELECT FOR KEY UPDATE";
+									break;
 								default:
 									tag =  "???";
 									break;
@@ -2136,6 +2139,9 @@ CreateCommandTag(Node *parsetree)
 									break;
 								case LCS_FORKEYSHARE:
 									tag = "SELECT FOR KEY SHARE";
+									break;
+								case LCS_FORKEYUPDATE:
+									tag = "SELECT FOR KEY UPDATE";
 									break;
 								default:
 									tag =  "???";

@@ -45,7 +45,7 @@ SELECT [ ALL | DISTINCT [ ON ( <replaceable class="parameter">expression</replac
     [ LIMIT { <replaceable class="parameter">count</replaceable> | ALL } ]
     [ OFFSET <replaceable class="parameter">start</replaceable> [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ <replaceable class="parameter">count</replaceable> ] { ROW | ROWS } ONLY ]
-    [ FOR { UPDATE | SHARE | KEY SHARE } [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ] [...] ]
+    [ FOR { KEY UPDATE | UPDATE | SHARE | KEY SHARE } [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ] [...] ]
 
 <phrase>where <replaceable class="parameter">from_item</replaceable> can be one of:</phrase>
 
@@ -178,7 +178,7 @@ TABLE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ]
 
     <listitem>
      <para>
-      If <literal>FOR UPDATE</literal>, <literal>FOR SHARE</literal>
+      If <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</literal>, <literal>FOR SHARE</literal>
       or <literal>FOR KEY SHARE</literal>
       is specified, the
       <command>SELECT</command> statement locks the selected rows
@@ -191,7 +191,8 @@ TABLE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ]
 
   <para>
    You must have <literal>SELECT</literal> privilege on each column used
-   in a <command>SELECT</> command.  The use of <literal>FOR UPDATE</literal>,
+   in a <command>SELECT</> command.  The use of <literal>FOR KEY UPDATE</>,
+   <literal>FOR UPDATE</literal>,
    <literal>FOR SHARE</literal> or <literal>FOR KEY SHARE</literal> requires
    <literal>UPDATE</literal> privilege as well (for at least one column
    of each table so selected).
@@ -830,7 +831,7 @@ SELECT DISTINCT ON (location) location, time, report
 <replaceable class="parameter">select_statement</replaceable> UNION [ ALL | DISTINCT ] <replaceable class="parameter">select_statement</replaceable>
 </synopsis><replaceable class="parameter">select_statement</replaceable> is
     any <command>SELECT</command> statement without an <literal>ORDER
-    BY</>, <literal>LIMIT</>, <literal>FOR UPDATE</literal>,
+    BY</>, <literal>LIMIT</>, <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</literal>,
     <literal>FOR SHARE</literal>, or <literal>FOR KEY SHARE</literal> clause.
     (<literal>ORDER BY</> and <literal>LIMIT</> can be attached to a
     subexpression if it is enclosed in parentheses.  Without
@@ -867,7 +868,7 @@ SELECT DISTINCT ON (location) location, time, report
    </para>
 
    <para>
-    Currently, <literal>FOR UPDATE</>, <literal>FOR SHARE</> and
+    Currently, <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>, <literal>FOR SHARE</> and
     <literal>FOR KEY SHARE</> cannot be
     specified either for a <literal>UNION</> result or for any input of a
     <literal>UNION</>.
@@ -883,7 +884,7 @@ SELECT DISTINCT ON (location) location, time, report
 <replaceable class="parameter">select_statement</replaceable> INTERSECT [ ALL | DISTINCT ] <replaceable class="parameter">select_statement</replaceable>
 </synopsis><replaceable class="parameter">select_statement</replaceable> is
     any <command>SELECT</command> statement without an <literal>ORDER
-    BY</>, <literal>LIMIT</>, <literal>FOR UPDATE</literal>,
+    BY</>, <literal>LIMIT</>, <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</literal>,
     <literal>FOR SHARE</literal>, or <literal>FOR KEY SHARE</> clause.
    </para>
 
@@ -915,7 +916,7 @@ SELECT DISTINCT ON (location) location, time, report
    </para>
 
    <para>
-    Currently, <literal>FOR UPDATE</>, <literal>FOR SHARE</> and
+    Currently, <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>, <literal>FOR SHARE</> and
     <literal>FOR KEY SHARE</> cannot be
     specified either for an <literal>INTERSECT</> result or for any input of
     an <literal>INTERSECT</>.
@@ -931,7 +932,7 @@ SELECT DISTINCT ON (location) location, time, report
 <replaceable class="parameter">select_statement</replaceable> EXCEPT [ ALL | DISTINCT ] <replaceable class="parameter">select_statement</replaceable>
 </synopsis><replaceable class="parameter">select_statement</replaceable> is
     any <command>SELECT</command> statement without an <literal>ORDER
-    BY</>, <literal>LIMIT</>, <literal>FOR UPDATE</literal>,
+    BY</>, <literal>LIMIT</>, <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</literal>,
     <literal>FOR SHARE</literal>, or <literal>FOR KEY SHARE</> clause.
    </para>
 
@@ -959,7 +960,7 @@ SELECT DISTINCT ON (location) location, time, report
    </para>
 
    <para>
-    Currently, <literal>FOR UPDATE</>, <literal>FOR SHARE</> and
+    Currently, <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>, <literal>FOR SHARE</> and
     <literal>FOR KEY SHARE</> cannot be
     specified either for an <literal>EXCEPT</> result or for any input of
     an <literal>EXCEPT</>.
@@ -1140,12 +1141,20 @@ FETCH { FIRST | NEXT } [ <replaceable class="parameter">count</replaceable> ] { 
   </refsect2>
 
   <refsect2 id="SQL-FOR-UPDATE-SHARE">
-   <title id="sql-for-update-share-title"><literal>FOR UPDATE</>/<literal>FOR SHARE</>/<literal>FOR KEY SHARE</> Clause</title>
+   <title id="sql-for-update-share-title"><literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>/<literal>FOR SHARE</>/<literal>FOR KEY SHARE</> Clauses</title>
 
    <para>
-    <literal>FOR UPDATE</>, <literal>FOR SHARE</> and <literal>FOR KEY SHARE</>
+    <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>, <literal>FOR SHARE</>
+    and <literal>FOR KEY SHARE</>
     are <firstterm>locking clauses</>; they affect how <literal>SELECT</>
     locks rows as they are obtained from the table.
+   </para>
+
+   <para>
+    The <literal>FOR KEY UPDATE</literal> clause has this form:
+<synopsis>
+FOR KEY UPDATE [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ]
+</synopsis>
    </para>
 
    <para>
@@ -1189,6 +1198,20 @@ FOR KEY SHARE [ OF <replaceable class="parameter">table_name</replaceable> [, ..
    </para>
 
    <para>
+    <literal>FOR KEY UPDATE</> behaves similarly, except that the lock
+    acquired is stronger: this lock will block
+    <literal>SELECT FOR KEY SHARE</> commands that attempt to acquire
+    a lock on the same rows, in addition to all commands blocked by
+    <literal>FOR UPDATE</>.  The <literal>FOR KEY UPDATE</> lock mode
+	is also acquired by any <command>DELETE</> on a row, and also by an
+	<command>UPDATE</> that modifies the values on certain columns.  Currently,
+	the set of columns considered for the <command>UPDATE</> case are those that
+	have an unique index on them that can be used in a foreign key (so partial
+	indexes and expressional indexes are not considered), but this may change
+    in the future.
+   </para>
+
+   <para>
     <literal>FOR SHARE</literal> behaves similarly, except that it
     acquires a shared rather than exclusive lock on each retrieved
     row.  A shared lock blocks other transactions from performing
@@ -1198,18 +1221,14 @@ FOR KEY SHARE [ OF <replaceable class="parameter">table_name</replaceable> [, ..
    </para>
 
    <para>
-    <literal>FOR KEY SHARE</> behaves similarly, except that it acquires
-    a lock that prevents the row from being deleted, and the values in
-    certain columns from being changed.  A key-shared
+    <literal>FOR KEY SHARE</> behaves similarly, except that the lock
+    is weaker: <literal>SELECT FOR KEY UPDATE</> is blocked, but
+    not <literal>SELECT FOR UPDATE</>.  A key-shared
     lock blocks other transactions from performing <command>DELETE</command>
     or any <command>UPDATE</command> that changes the key values, but not
     other <command>UPDATE</>, and neither it does prevent
     <command>SELECT FOR UPDATE</>, <command>SELECT FOR SHARE</>, or
     <command>SELECT FOR KEY SHARE</>.
-    Currently, the set of columns considered for this locking are those
-    that have an unique index on them that can be used in a foreign key (so
-    partial indexes and expressional indexes are not considered), but this
-    may change in the future.
    </para>
 
    <para>

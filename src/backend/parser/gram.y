@@ -9053,6 +9053,14 @@ for_locking_item:
 					n->noWait = $5;
 					$$ = (Node *) n;
 				}
+			| FOR KEY UPDATE locked_rels_list opt_nowait
+				{
+					LockingClause *n = makeNode(LockingClause);
+					n->lockedRels = $4;
+					n->strength = LCS_FORKEYUPDATE;
+					n->noWait = $5;
+					$$ = (Node *) n;
+				}
 		;
 
 locked_rels_list:

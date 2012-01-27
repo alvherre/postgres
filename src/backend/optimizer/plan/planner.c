@@ -1995,6 +1995,9 @@ preprocess_rowmarks(PlannerInfo *root)
 			case LCS_FORKEYSHARE:
 				newrc->markType = ROW_MARK_KEYSHARE;
 				break;
+			case LCS_FORKEYUPDATE:
+				newrc->markType = ROW_MARK_KEYUPDATE;
+				break;
 			default:
 				elog(ERROR, "unsupported rowmark type %d", rc->strength);
 		}
