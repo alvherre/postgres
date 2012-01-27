@@ -829,6 +829,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 
 		switch (rc->markType)
 		{
+			case ROW_MARK_KEYUPDATE:
 			case ROW_MARK_EXCLUSIVE:
 			case ROW_MARK_SHARE:
 			case ROW_MARK_KEYSHARE:
@@ -2533,11 +2534,13 @@ OpenIntoRel(QueryDesc *queryDesc)
 	}
 
 	/*
-	 * Find namespace to create in, check its permissions
+	 * Find namespace to create in, check its permissions, lock it against
+	 * concurrent drop, and mark into->rel as RELPERSISTENCE_TEMP if the
+	 * selected namespace is temporary.
 	 */
 	intoName = into->rel->relname;
-	namespaceId = RangeVarGetAndCheckCreationNamespace(into->rel);
-	RangeVarAdjustRelationPersistence(into->rel, namespaceId);
+	namespaceId = RangeVarGetAndCheckCreationNamespace(into->rel, NoLock,
+													   NULL);
 
 	/*
 	 * Security check: disallow creating temp tables from security-restricted

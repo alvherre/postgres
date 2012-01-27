@@ -570,7 +570,8 @@ typedef struct DefElem
 } DefElem;
 
 /*
- * LockingClause - raw representation of FOR UPDATE/SHARE/KEY SHARE options
+ * LockingClause - raw representation of FOR KEY UPDATE/UPDATE/SHARE/KEY SHARE
+ * 		options
  *
  * Note: lockedRels == NIL means "all relations in query".	Otherwise it
  * is a list of RangeVar nodes.  (We use RangeVar mainly because it carries
@@ -582,7 +583,8 @@ typedef enum LockClauseStrength
 	/* order is important -- see applyLockingClause */
 	LCS_FORKEYSHARE,
 	LCS_FORSHARE,
-	LCS_FORUPDATE
+	LCS_FORUPDATE,
+	LCS_FORKEYUPDATE
 } LockClauseStrength;
 
 typedef struct LockingClause
@@ -1179,6 +1181,7 @@ typedef struct AlterTableStmt
 	RangeVar   *relation;		/* table to work on */
 	List	   *cmds;			/* list of subcommands */
 	ObjectType	relkind;		/* type of object */
+	bool	   missing_ok;		/* skip error if table missing */
 } AlterTableStmt;
 
 typedef enum AlterTableType
@@ -1815,6 +1818,7 @@ typedef struct AlterSeqStmt
 	NodeTag		type;
 	RangeVar   *sequence;		/* the sequence to alter */
 	List	   *options;
+	bool		missing_ok;		/* skip error if a role is missing? */
 } AlterSeqStmt;
 
 /* ----------------------
@@ -2125,6 +2129,7 @@ typedef struct RenameStmt
 								 * trigger, etc) */
 	char	   *newname;		/* the new name */
 	DropBehavior behavior;		/* RESTRICT or CASCADE behavior */
+	bool		missing_ok;	/* skip error if missing? */
 } RenameStmt;
 
 /* ----------------------
@@ -2140,6 +2145,7 @@ typedef struct AlterObjectSchemaStmt
 	List	   *objarg;			/* argument types, if applicable */
 	char	   *addname;		/* additional name if needed */
 	char	   *newschema;		/* the new schema */
+	bool		missing_ok;	/* skip error if missing? */
 } AlterObjectSchemaStmt;
 
 /* ----------------------

@@ -81,16 +81,10 @@ extern MultiXactId MultiXactIdCreate(TransactionId xid1,
 extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
 				  MultiXactStatus status);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
-extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-							int *remaining);
-extern bool ConditionalMultiXactIdWait(MultiXactId multi,
-						   MultiXactStatus status, int *remaining);
 extern void MultiXactIdSetOldestMember(void);
 extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids);
 
 extern void AtEOXact_MultiXact(void);
-extern void AtPrepare_MultiXact(void);
-extern void PostPrepare_MultiXact(TransactionId xid);
 
 extern Size MultiXactShmemSize(void);
 extern void MultiXactShmemInit(void);
@@ -109,13 +103,6 @@ extern void MultiXactSetNextMXact(MultiXactId nextMulti,
 					  MultiXactOffset nextMultiOffset);
 extern void MultiXactAdvanceNextMXact(MultiXactId minMulti,
 						  MultiXactOffset minMultiOffset);
-
-extern void multixact_twophase_recover(TransactionId xid, uint16 info,
-						   void *recdata, uint32 len);
-extern void multixact_twophase_postcommit(TransactionId xid, uint16 info,
-							  void *recdata, uint32 len);
-extern void multixact_twophase_postabort(TransactionId xid, uint16 info,
-							 void *recdata, uint32 len);
 
 extern void multixact_redo(XLogRecPtr lsn, XLogRecord *record);
 extern void multixact_desc(StringInfo buf, uint8 xl_info, char *rec);

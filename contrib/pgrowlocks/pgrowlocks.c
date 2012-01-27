@@ -60,12 +60,11 @@ typedef struct
 } MyData;
 
 #define		Atnum_tid		0
-#define		Atnum_type		1
-#define		Atnum_xmax		2
-#define		Atnum_ismulti	3
-#define		Atnum_xids		4
-#define		Atnum_modes		5
-#define		Atnum_pids		6
+#define		Atnum_xmax		1
+#define		Atnum_ismulti	2
+#define		Atnum_xids		3
+#define		Atnum_modes		4
+#define		Atnum_pids		5
 
 Datum
 pgrowlocks(PG_FUNCTION_ARGS)
@@ -138,15 +137,6 @@ pgrowlocks(PG_FUNCTION_ARGS)
 
 			values[Atnum_tid] = (char *) DirectFunctionCall1(tidout, PointerGetDatum(&tuple->t_self));
 
-			values[Atnum_type] = palloc(36);
-			values[Atnum_type][0] = '\0';
-			if (tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK)
-				strcat(values[Atnum_type], "KeyShare ");
-			if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
-				strcat(values[Atnum_type], "Exclusive ");
-			if (tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY)
-				strcat(values[Atnum_type], "LockOnly ");
-
 			values[Atnum_xmax] = palloc(NCHARS * sizeof(char));
 			snprintf(values[Atnum_xmax], NCHARS, "%d", HeapTupleHeaderGetRawXmax(tuple->t_data));
 			if (tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI)
@@ -185,19 +175,19 @@ pgrowlocks(PG_FUNCTION_ARGS)
 					switch (members[j].status)
 					{
 						case MultiXactStatusKeyUpdate:
-							snprintf(buf, NCHARS, "keyupd");
+							snprintf(buf, NCHARS, "KeyUpdate");
 							break;
 						case MultiXactStatusUpdate:
-							snprintf(buf, NCHARS, "upd");
+							snprintf(buf, NCHARS, "Update");
 							break;
 						case MultiXactStatusForUpdate:
-							snprintf(buf, NCHARS, "forupd");
+							snprintf(buf, NCHARS, "For Update");
 							break;
 						case MultiXactStatusForShare:
-							snprintf(buf, NCHARS, "shr");
+							snprintf(buf, NCHARS, "Share");
 							break;
 						case MultiXactStatusForKeyShare:
-							snprintf(buf, NCHARS, "keyshr");
+							snprintf(buf, NCHARS, "Key Share");
 							break;
 					}
 					strcat(values[Atnum_modes], buf);
@@ -218,10 +208,27 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				values[Atnum_xids] = palloc(NCHARS * sizeof(char));
 				snprintf(values[Atnum_xids], NCHARS, "{%d}", HeapTupleHeaderGetRawXmax(tuple->t_data));
 
-				values[Atnum_modes] = NULL;
+				values[Atnum_modes] = palloc(NCHARS);
+				if (tuple->t_data->t_infomask & HEAP_XMAX_LOCK_ONLY)
+				{
+					if ((tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK) &&
+						(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
+						/* both bits set: invalid combination */
+						snprintf(values[Atnum_modes], NCHARS, "{invalid two lock bits}");
+					else if (tuple->t_data->t_infomask & HEAP_XMAX_KEYSHR_LOCK)
+						snprintf(values[Atnum_modes], NCHARS, "{Key Share}");
+					else if (tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK)
+						snprintf(values[Atnum_modes], NCHARS, "{For Update}");
+					else
+						/* neither keyshare nor exclusive bit it set */
+						snprintf(values[Atnum_modes], NCHARS, "{transient upgrade status}");
+				}
+				else
+					snprintf(values[Atnum_modes], NCHARS, "{infomask %x}", tuple->t_data->t_infomask);
 
 				values[Atnum_pids] = palloc(NCHARS * sizeof(char));
-				snprintf(values[Atnum_pids], NCHARS, "{%d}", BackendXidGetPid(HeapTupleHeaderGetRawXmax(tuple->t_data)));
+				snprintf(values[Atnum_pids], NCHARS, "{%d}",
+						 BackendXidGetPid(HeapTupleHeaderGetRawXmax(tuple->t_data)));
 			}
 
 			LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);

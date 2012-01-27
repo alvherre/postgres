@@ -2121,7 +2121,6 @@ PrepareTransaction(void)
 	AtPrepare_Locks();
 	AtPrepare_PredicateLocks();
 	AtPrepare_PgStat();
-	AtPrepare_MultiXact();
 	AtPrepare_RelationMap();
 
 	/*
@@ -2172,8 +2171,6 @@ PrepareTransaction(void)
 	PostPrepare_Inval();
 
 	PostPrepare_smgr();
-
-	PostPrepare_MultiXact(xid);
 
 	PostPrepare_Locks(xid);
 	PostPrepare_PredicateLocks(xid);

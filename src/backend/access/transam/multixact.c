@@ -3,12 +3,18 @@
  * multixact.c
  *		PostgreSQL multi-transaction-log manager
  *
- * The pg_multixact manager is a pg_clog-like manager that stores an array
- * of MultiXactMember for each MultiXactId.	It is a fundamental part of the
- * shared-row-lock implementation.	A share-locked tuple stores a
- * MultiXactId in its Xmax, and a transaction that needs to wait for the
- * tuple to be unlocked can sleep on the potentially-several TransactionIds
- * that compose the MultiXactId.
+ * The pg_multixact manager is a pg_clog-like manager that stores an array of
+ * MultiXactMember for each MultiXactId.  It is a fundamental part of the
+ * shared-row-lock implementation.  Each MultiXactMember is comprised of a
+ * TransactionId and a set of flag bits.  The name is a bit historical:
+ * originally, a MultiXactId consisted of more than one TransactionId (except
+ * in rare corner cases), hence "multi".  Nowadays, however, it's perfectly
+ * legitimate to have MultiXactIds that only include a single Xid.
+ *
+ * The meaning of the flag bits is opaque to this module, but they are mostly
+ * used in heapam.c to identify lock modes that each of the member transactions
+ * is holding on any given tuple.  This module just contains support to store
+ * and retrieve the arrays.
  *
  * We use two SLRU areas, one for storing the offsets at which the data
  * starts for each MultiXactId in the other one.  This trick allows us to
@@ -69,13 +75,13 @@
  * Defines for MultiXactOffset page sizes.	A page is the same BLCKSZ as is
  * used everywhere else in Postgres.
  *
- * Note: because both MultiXactOffsets and TransactionIds are 32 bits and
- * wrap around at 0xFFFFFFFF, MultiXact page numbering also wraps around at
- * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE, and segment numbering at
- * 0xFFFFFFFF/MULTIXACT_*_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need take no
- * explicit notice of that fact in this module, except when comparing segment
- * and page numbers in TruncateMultiXact
- * (see MultiXact{Offset,Member}PagePrecedes).
+ * Note: because MultiXactOffsets are 32 bits and wrap around at 0xFFFFFFFF,
+ * MultiXact page numbering also wraps around at
+ * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE, and segment numbering at
+ * 0xFFFFFFFF/MULTIXACT_OFFSETS_PER_PAGE/SLRU_SEGMENTS_PER_PAGE.	We need
+ * take no explicit notice of that fact in this module, except when comparing
+ * segment and page numbers in TruncateMultiXact (see
+ * MultiXactOffsetPagePrecedes).
  */
 
 /* We need four bytes per offset */
@@ -87,20 +93,20 @@
 	((xid) % (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
 
 /*
- * The situation for members is a bit more complex: we need to store two
+ * The situation for members is a bit more complex: we store one byte of
  * additional flag bits for each TransactionId.  To do this without getting
- * into alignment issues, we store four bytes of flags (so 16 bit pairs), and
- * then the corresponding 16 Xids.  Each such 17-word (68-byte) set we call a
- * "group", and are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep
- * 120 groups per page.  This wastes 32 bytes per page, but that's OK --
- * simplicity (and performance) trumps space efficiency here.
+ * into alignment issues, we store four bytes of flags, and then the
+ * corresponding 4 Xids.  Each such 5-word (20-byte) set we call a "group", and
+ * are stored as a whole in pages.  Thus, with 8kB BLCKSZ, we keep 409 groups
+ * per page.  This wastes 12 bytes per page, but that's OK -- simplicity (and
+ * performance) trumps space efficiency here.
  *
  * Note that the "offset" macros work with byte offset, not array indexes, so
  * arithmetic must be done using "char *" pointers.
  */
-/* We need two bits per xact, so four xacts fit in a byte */
-#define MXACT_MEMBER_BITS_PER_XACT			2
-#define MXACT_MEMBER_FLAGS_PER_BYTE			4
+/* We need eight bits per xact, so one xact fits in a byte */
+#define MXACT_MEMBER_BITS_PER_XACT			8
+#define MXACT_MEMBER_FLAGS_PER_BYTE			1
 #define MXACT_MEMBER_XACT_BITMASK	((1 << MXACT_MEMBER_BITS_PER_XACT) - 1)
 
 /* how many full bytes of flags are there in a group? */
@@ -230,31 +236,7 @@ typedef struct mXactCacheEnt
 static mXactCacheEnt *MXactCache = NULL;
 static MemoryContext MXactContext = NULL;
 
-/* status conflict table */
-static const bool MultiXactConflicts[5][5] =
-{
-	{	/* ForKeyShare */
-		false, false, false, false, true
-	},
-	{	/* ForShare */
-		false, false, true, true, true
-	},
-	{	/* ForUpdate */
-		false, true, true, true, true
-	},
-	{	/* Update */
-		false, true, true, true, true
-	},
-	{	/* KeyUpdate */
-		true, true, true, true, true
-	}
-};
 
-#define MultiXactStatusConflict(status1, status2) \
-	MultiXactConflicts[status1][status2]
-
-
-#define MULTIXACT_DEBUG
 #ifdef MULTIXACT_DEBUG
 #define debug_elog2(a,b) elog(a,b)
 #define debug_elog3(a,b,c) elog(a,b,c)
@@ -308,6 +290,13 @@ static void WriteMZeroMemberPageXlogRec(int pageno);
  * MultiXactIdCreateSingleton
  * 		Construct a MultiXactId representing a single transaction.
  *
+ * This is used when a tuple is marked FOR SHARE; there is no purely-hint-bit
+ * representation of that, so we have to resort to always using a multi.  Other
+ * lock modes have dedicated hint bits, so they don't have this problem.
+ *
+ * Note that MultiXactIdExpand can also create singleton MultiXactIds in some
+ * cases.
+ *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
  */
@@ -334,7 +323,7 @@ MultiXactIdCreateSingleton(TransactionId xid, MultiXactStatus status)
  * MultiXactIdCreate
  *		Construct a MultiXactId representing two TransactionIds.
  *
- * The two XIDs must be different, or be requesting different lock modes.
+ * The two XIDs must be different, or be requesting different statuses.
  *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
@@ -380,7 +369,8 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
  *
  * Note that we do NOT actually modify the membership of a pre-existing
  * MultiXactId; instead we create a new one.  This is necessary to avoid
- * a race condition against MultiXactIdWait (see notes there).
+ * a race condition against code trying to wait for one MultiXactId to finish;
+ * see notes in heapam.c.
  *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
@@ -534,104 +524,6 @@ MultiXactIdIsRunning(MultiXactId multi)
 	return false;
 }
 
-/*
- * MultiXactIdWait
- *		Sleep on a MultiXactId.
- *
- * We do this by sleeping on each member using XactLockTableWait.  Any
- * members that belong to the current backend are *not* waited for, however;
- * this would not merely be useless but would lead to Assert failure inside
- * XactLockTableWait.  By the time this returns, it is certain that all
- * transactions *of other backends* that were members of the MultiXactId
- * that conflict with the requested status are dead (and no new ones can have
- * been added, since it is not legal to add members to an existing
- * MultiXactId).
- *
- * But by the time we finish sleeping, someone else may have changed the Xmax
- * of the containing tuple, so the caller needs to iterate on us somehow.
- *
- * We return the number of members that we did not test for.  This is dubbed
- * "remaining" as in "the number of members that remaing running", but this is
- * slightly incorrect, because lockers whose status did not conflict with ours
- * are not even considered and so might have gone away anyway.
- */
-void
-MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
-{
-	MultiXactMember *members;
-	int			nmembers;
-	int			remain = 0;
-
-	nmembers = GetMultiXactIdMembers(multi, &members);
-
-	if (nmembers >= 0)
-	{
-		int			i;
-
-		for (i = 0; i < nmembers; i++)
-		{
-			debug_elog4(DEBUG2, "MultiXactIdWait: waiting for %d (%u)",
-						i, members[i].xid);
-			if (TransactionIdIsCurrentTransactionId(members[i].xid) ||
-				!MultiXactStatusConflict(members[i].status, status))
-			{
-				remain++;
-				continue;
-			}
-
-			XactLockTableWait(members[i].xid);
-		}
-	}
-
-	*remaining = remain;
-}
-
-/*
- * ConditionalMultiXactIdWait
- *		As above, but only lock if we can get the lock without blocking.
- *
- * Note that in case we return false, the number of remaining members is
- * not to be trusted.
- */
-bool
-ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-						   int *remaining)
-{
-	bool		result = true;
-	MultiXactMember *members;
-	int			nmembers;
-	int			remain = 0;
-
-	nmembers = GetMultiXactIdMembers(multi, &members);
-
-	if (nmembers >= 0)
-	{
-		int			i;
-
-		for (i = 0; i < nmembers; i++)
-		{
-			TransactionId member = members[i].xid;
-
-			debug_elog4(DEBUG2, "ConditionalMultiXactIdWait: trying %d (%u)",
-						i, member);
-			if (TransactionIdIsCurrentTransactionId(member) ||
-				!MultiXactStatusConflict(members[i].status, status))
-			{
-				remain++;
-				continue;
-			}
-			result = ConditionalXactLockTableWait(member);
-			if (!result)
-				break;
-		}
-
-		pfree(members);
-	}
-
-	*remaining = remain;
-
-	return result;
-}
 
 /*
  * CreateMultiXactId
@@ -777,11 +669,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			flagsoff;
 		int			memberoff;
 
-		if (members[i].xid < 900)
-			abort();
-
-		/* this status value is not representable on disk */
-		Assert(members[i].status < MultiXactStatusKeyUpdate);
+		Assert(members[i].status <= MultiXactStatusKeyUpdate);
 
 		pageno = MXOffsetToMemberPage(offset);
 		memberoff = MXOffsetToMemberOffset(offset);
@@ -1309,21 +1197,24 @@ static char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
 	static char	   *str = NULL;
+	StringInfoData	buf;
 	int			i;
 
 	if (str != NULL)
 		pfree(str);
 
-	str = MemoryContextAlloc(TopMemoryContext, 15 * (nmembers + 1) + 4);
+	initStringInfo(&buf);
 
-	snprintf(str, 47, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
-			 mxstatus_to_string(members[0].status));
+	appendStringInfo(&buf, "%u %d[%u (%s)", multi, nmembers, members[0].xid,
+					 mxstatus_to_string(members[0].status));
 
 	for (i = 1; i < nmembers; i++)
-		snprintf(str + strlen(str), 17, ", %u (%s)", members[i].xid,
-				 mxstatus_to_string(members[i].status));
+		appendStringInfo(&buf, ", %u (%s)", members[i].xid,
+						 mxstatus_to_string(members[i].status));
 
-	strcat(str, "]");
+	appendStringInfoChar(&buf, ']');
+	str = MemoryContextStrdup(TopMemoryContext, buf.data);
+	pfree(buf.data);
 	return str;
 }
 #endif
@@ -1343,63 +1234,6 @@ AtEOXact_MultiXact(void)
 	 */
 	MXactContext = NULL;
 	MXactCache = NULL;
-}
-
-/*
- * AtPrepare_MultiXact
- *		Save multixact state at 2PC tranasction prepare
- */
-void
-AtPrepare_MultiXact(void)
-{
-	/* nothing to do */
-}
-
-/*
- * PostPrepare_MultiXact
- *		Clean up after successful PREPARE TRANSACTION
- */
-void
-PostPrepare_MultiXact(TransactionId xid)
-{
-	/*
-	 * Discard the local MultiXactId cache like in AtEOX_MultiXact
-	 */
-	MXactContext = NULL;
-	MXactCache = NULL;
-}
-
-/*
- * multixact_twophase_recover
- *		Recover the state of a prepared transaction at startup
- */
-void
-multixact_twophase_recover(TransactionId xid, uint16 info,
-						   void *recdata, uint32 len)
-{
-	/* nothing to do */
-}
-
-/*
- * multixact_twophase_postcommit
- *		Similar to AtEOX_MultiXact but for COMMIT PREPARED
- */
-void
-multixact_twophase_postcommit(TransactionId xid, uint16 info,
-							  void *recdata, uint32 len)
-{
-	/* nothing to do */
-}
-
-/*
- * multixact_twophase_postabort
- *		This is actually just the same as the COMMIT case.
- */
-void
-multixact_twophase_postabort(TransactionId xid, uint16 info,
-							 void *recdata, uint32 len)
-{
-	/* nothing to do */
 }
 
 /*
@@ -1865,7 +1699,7 @@ fillSegmentInfoData(SlruCtl ctl, SegmentInfo *segment)
 	LWLockRelease(ctl->shared->ControlLock);
 }
 
-/* SegmentInfo comparator, for qsort and bsearch */
+/* SegmentInfo comparator, for qsort */
 static int
 compareTruncateXidEpoch(const void *a, const void *b)
 {
@@ -2101,7 +1935,7 @@ MultiXactOffsetPagePrecedes(int page1, int page2)
 
 /*
  * Decide which of two MultiXactMember page numbers is "older" for truncation
- * purposes.  There is no "invalid offset number" so use the numbers verbatim.
+ * purposes.  There is no "invalid number" so use the numbers verbatim.
  */
 static bool
 MultiXactMemberPagePrecedes(int page1, int page2)

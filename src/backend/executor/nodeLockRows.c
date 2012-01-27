@@ -113,6 +113,9 @@ lnext:
 		/* okay, try to lock the tuple */
 		switch (erm->markType)
 		{
+			case ROW_MARK_KEYUPDATE:
+				lockmode = LockTupleKeyUpdate;
+				break;
 			case ROW_MARK_EXCLUSIVE:
 				lockmode = LockTupleUpdate;
 				break;

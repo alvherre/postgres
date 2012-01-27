@@ -7,7 +7,6 @@ ALTER EXTENSION pgrowlocks DROP FUNCTION pgrowlocks(text);
 DROP FUNCTION pgrowlocks(text);
 CREATE FUNCTION pgrowlocks(IN relname text,
     OUT locked_row TID,		-- row TID
-    OUT lock_type TEXT,		-- lock type
     OUT locker XID,		-- locking XID
     OUT multi bool,		-- multi XID?
     OUT xids xid[],		-- multi XIDs
