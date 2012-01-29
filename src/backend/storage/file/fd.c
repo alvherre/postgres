@@ -53,6 +53,7 @@
 #include "access/xact.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
+#include "pgstat.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "utils/guc.h"
@@ -1088,6 +1089,9 @@ FileClose(File file)
 	 */
 	if (vfdP->fdstate & FD_TEMPORARY)
 	{
+		struct stat filestats;
+		int			stat_errno;
+
 		/*
 		 * If we get an error, as could happen within the ereport/elog calls,
 		 * we'll come right back here during transaction abort.  Reset the
@@ -1101,23 +1105,22 @@ FileClose(File file)
 		temporary_files_size -= vfdP->fileSize;
 		vfdP->fileSize = 0;
 
-		if (log_temp_files >= 0)
+		/* first try the stat() */
+		if (stat(vfdP->fileName, &filestats))
+			stat_errno = errno;
+		else
+			stat_errno = 0;
+
+		/* in any case do the unlink */
+		if (unlink(vfdP->fileName))
+			elog(LOG, "could not unlink file \"%s\": %m", vfdP->fileName);
+
+		/* and last report the stat results */
+		if (stat_errno == 0)
 		{
-			struct stat filestats;
-			int			stat_errno;
+			pgstat_report_tempfile(filestats.st_size);
 
-			/* first try the stat() */
-			if (stat(vfdP->fileName, &filestats))
-				stat_errno = errno;
-			else
-				stat_errno = 0;
-
-			/* in any case do the unlink */
-			if (unlink(vfdP->fileName))
-				elog(LOG, "could not unlink file \"%s\": %m", vfdP->fileName);
-
-			/* and last report the stat results */
-			if (stat_errno == 0)
+			if (log_temp_files >= 0)
 			{
 				if ((filestats.st_size / 1024) >= log_temp_files)
 					ereport(LOG,
@@ -1125,17 +1128,11 @@ FileClose(File file)
 									vfdP->fileName,
 									(unsigned long) filestats.st_size)));
 			}
-			else
-			{
-				errno = stat_errno;
-				elog(LOG, "could not stat file \"%s\": %m", vfdP->fileName);
-			}
 		}
 		else
 		{
-			/* easy case, just do the unlink */
-			if (unlink(vfdP->fileName))
-				elog(LOG, "could not unlink file \"%s\": %m", vfdP->fileName);
+			errno = stat_errno;
+			elog(LOG, "could not stat file \"%s\": %m", vfdP->fileName);
 		}
 	}
 

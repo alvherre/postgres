@@ -53,8 +53,9 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
 	int2		pronargdefaults;	/* number of arguments with defaults */
 	Oid			prorettype;		/* OID of result type */
 
-	/* VARIABLE LENGTH FIELDS: */
+	/* variable-length fields start here, but we allow direct access to proargtypes */
 	oidvector	proargtypes;	/* parameter types (excludes OUT params) */
+#ifdef CATALOG_VARLEN
 	Oid			proallargtypes[1];		/* all param types (NULL if IN only) */
 	char		proargmodes[1]; /* parameter modes (NULL if IN only) */
 	text		proargnames[1]; /* parameter names (NULL if no names) */
@@ -64,6 +65,7 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
 	text		probin;			/* secondary procedure info (can be NULL) */
 	text		proconfig[1];	/* procedure-local GUC settings */
 	aclitem		proacl[1];		/* access permissions */
+#endif
 } FormData_pg_proc;
 
 /* ----------------
@@ -1092,6 +1094,8 @@ DESCR("contains");
 DATA(insert OID = 1062 (  aclitemeq		   PGNSP PGUID 12 1 0 0 0 f f f t f i 2 0 16 "1033 1033" _null_ _null_ _null_ _null_ aclitem_eq _null_ _null_ _null_ ));
 DATA(insert OID = 1365 (  makeaclitem	   PGNSP PGUID 12 1 0 0 0 f f f t f i 4 0 1033 "26 26 25 16" _null_ _null_ _null_ _null_ makeaclitem _null_ _null_ _null_ ));
 DESCR("make ACL item");
+DATA(insert OID = 3943 (  acldefault	PGNSP PGUID 12 1 0 0 0 f f f t f i 2 0 1034 "18 26" _null_ _null_ _null_ _null_  acldefault_sql _null_ _null_ _null_ ));
+DESCR("TODO");
 DATA(insert OID = 1689 (  aclexplode	PGNSP PGUID 12 1 10 0 0 f f f t t s 1 0 2249 "1034" "{1034,26,26,25,16}" "{i,o,o,o,o}" "{acl,grantor,grantee,privilege_type,is_grantable}" _null_ aclexplode _null_ _null_ _null_ ));
 DESCR("convert ACL item array to table, for use by information schema");
 DATA(insert OID = 1044 (  bpcharin		   PGNSP PGUID 12 1 0 0 0 f f f t f i 3 0 1042 "2275 26 23" _null_ _null_ _null_ _null_ bpcharin _null_ _null_ _null_ ));
@@ -2634,8 +2638,14 @@ DATA(insert OID = 3069 (  pg_stat_get_db_conflict_startup_deadlock PGNSP PGUID 1
 DESCR("statistics: recovery conflicts in database caused by buffer deadlock");
 DATA(insert OID = 3070 (  pg_stat_get_db_conflict_all PGNSP PGUID 12 1 0 0 0 f f f t f s 1 0 20 "26" _null_ _null_ _null_ _null_ pg_stat_get_db_conflict_all _null_ _null_ _null_ ));
 DESCR("statistics: recovery conflicts in database");
+DATA(insert OID = 3152 (  pg_stat_get_db_deadlocks PGNSP PGUID 12 1 0 0 0 f f f t f s 1 0 20 "26" _null_ _null_ _null_ _null_ pg_stat_get_db_deadlocks _null_ _null_ _null_ ));
+DESCR("statistics: deadlocks detected in database");
 DATA(insert OID = 3074 (  pg_stat_get_db_stat_reset_time PGNSP PGUID 12 1 0 0 0 f f f t f s 1 0 1184 "26" _null_ _null_ _null_ _null_ pg_stat_get_db_stat_reset_time _null_ _null_ _null_ ));
 DESCR("statistics: last reset for a database");
+DATA(insert OID = 3150 (  pg_stat_get_db_temp_files PGNSP PGUID 12 1 0 0 0 f f f t f s 1 0 20 "26" _null_ _null_ _null_ _null_ pg_stat_get_db_temp_files _null_ _null_ _null_ ));
+DESCR("statistics: number of temporary files written");
+DATA(insert OID = 3151 (  pg_stat_get_db_temp_bytes PGNSP PGUID 12 1 0 0 0 f f f t f s 1 0 20 "26" _null_ _null_ _null_ _null_ pg_stat_get_db_temp_bytes _null_ _null_ _null_ ));
+DESCR("statistics: number of bytes in temporary files written");
 DATA(insert OID = 2769 ( pg_stat_get_bgwriter_timed_checkpoints PGNSP PGUID 12 1 0 0 0 f f f t f s 0 0 20 "" _null_ _null_ _null_ _null_ pg_stat_get_bgwriter_timed_checkpoints _null_ _null_ _null_ ));
 DESCR("statistics: number of timed checkpoints started by the bgwriter");
 DATA(insert OID = 2770 ( pg_stat_get_bgwriter_requested_checkpoints PGNSP PGUID 12 1 0 0 0 f f f t f s 0 0 20 "" _null_ _null_ _null_ _null_ pg_stat_get_bgwriter_requested_checkpoints _null_ _null_ _null_ ));
@@ -2697,6 +2707,9 @@ DATA(insert OID = 3776 (  pg_stat_reset_single_table_counters	PGNSP PGUID 12 1 0
 DESCR("statistics: reset collected statistics for a single table or index in the current database");
 DATA(insert OID = 3777 (  pg_stat_reset_single_function_counters	PGNSP PGUID 12 1 0 0 0 f f f f f v 1 0 2278 "26" _null_ _null_ _null_ _null_	pg_stat_reset_single_function_counters _null_ _null_ _null_ ));
 DESCR("statistics: reset collected statistics for a single function in the current database");
+
+DATA(insert OID = 3163 (  pg_trigger_depth				PGNSP PGUID 12 1 0 0 0 f f f t f s 0 0 23 "" _null_ _null_ _null_ _null_ pg_trigger_depth _null_ _null_ _null_ ));
+DESCR("current trigger depth");
 
 DATA(insert OID = 3778 ( pg_tablespace_location PGNSP PGUID 12 1 0 0 0 f f f t f s 1 0 25 "26" _null_ _null_ _null_ _null_ pg_tablespace_location _null_ _null_ _null_ ));
 DESCR("tablespace location");
