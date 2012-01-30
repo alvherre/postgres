@@ -1208,11 +1208,11 @@ FOR KEY SHARE [ OF <replaceable class="parameter">table_name</replaceable> [, ..
     <literal>SELECT FOR KEY SHARE</> commands that attempt to acquire
     a lock on the same rows, in addition to all commands blocked by
     <literal>FOR UPDATE</>.  The <literal>FOR KEY UPDATE</> lock mode
-	is also acquired by any <command>DELETE</> on a row, and also by an
-	<command>UPDATE</> that modifies the values on certain columns.  Currently,
-	the set of columns considered for the <command>UPDATE</> case are those that
-	have an unique index on them that can be used in a foreign key (so partial
-	indexes and expressional indexes are not considered), but this may change
+    is also acquired by any <command>DELETE</> on a row, and also by an
+    <command>UPDATE</> that modifies the values on certain columns.  Currently,
+    the set of columns considered for the <command>UPDATE</> case are those that
+    have an unique index on them that can be used in a foreign key (so partial
+    indexes and expressional indexes are not considered), but this may change
     in the future.
    </para>
 
