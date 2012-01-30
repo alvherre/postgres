@@ -708,8 +708,12 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 				if (!TransactionIdIsCurrentTransactionId(xmax))
 					return HeapTupleMayBeUpdated;
 				else
-					return HeapTupleSelfUpdated;
-				/* FIXME -- what do we need to do with the Cmax here? */
+				{
+					if (HeapTupleHeaderGetCmax(tuple) >= curcid)
+						return HeapTupleSelfUpdated;	/* updated after scan started */
+					else
+						return HeapTupleInvisible;	/* updated before scan started */
+				}
 			}
 
 			if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
@@ -1281,7 +1285,6 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 				return HEAPTUPLE_INSERT_IN_PROGRESS;
 			if (HeapTupleHeaderIsOnlyLocked(tuple))
 				return HEAPTUPLE_INSERT_IN_PROGRESS;
-			/* FIXME -- probably need something here */
 			/* inserted and then deleted by same xact */
 			return HEAPTUPLE_DELETE_IN_PROGRESS;
 		}
@@ -1335,10 +1338,6 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 					return HEAPTUPLE_LIVE;
 			}
 
-			/*
-			 * FIXME -- if the multixact is gone, we should replace it with
-			 * the plain updating Xid and remove the IS_MULTI bit.
-			 */
 			/*
 			 * We don't really care whether xmax did commit, abort or crash.
 			 * We know that xmax did lock the tuple, but it did not and will

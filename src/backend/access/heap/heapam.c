@@ -4472,7 +4472,7 @@ restart:
 	 * lock anyway.
 	 */
 
-l5:
+l4:
 	LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
 	old_infomask = mytup.t_data->t_infomask;
@@ -4504,7 +4504,7 @@ l5:
 		{
 			LockBuffer(buf, BUFFER_LOCK_UNLOCK);
 			XactLockTableWait(update_xid);
-			goto l5;
+			goto l4;
 		}
 		else if (TransactionIdDidAbort(update_xid))
 			;	/* okay to proceed */

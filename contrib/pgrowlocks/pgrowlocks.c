@@ -124,12 +124,24 @@ pgrowlocks(PG_FUNCTION_ARGS)
 	/* scan the relation */
 	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
 	{
+		HTSU_Result	htsu;
 		/* must hold a buffer lock to call HeapTupleSatisfiesUpdate */
 		LockBuffer(scan->rs_cbuf, BUFFER_LOCK_SHARE);
 
-		if (HeapTupleSatisfiesUpdate(tuple->t_data,
-									 GetCurrentCommandId(false),
-									 scan->rs_cbuf) == HeapTupleBeingUpdated)
+		htsu = HeapTupleSatisfiesUpdate(tuple->t_data,
+										GetCurrentCommandId(false),
+										scan->rs_cbuf);
+
+		/*
+		 * a tuple is locked if HTSU returns BeingUpdated, and if it returns
+		 * MayBeUpdated but the Xmax is valid and pointing at us.
+		 */
+		if (htsu == HeapTupleBeingUpdated ||
+			(htsu == HeapTupleMayBeUpdated &&
+			 !(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) &&
+			 !(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) &&
+			 (HeapTupleHeaderGetRawXmax(tuple->t_data) ==
+			  GetCurrentTransactionIdIfAny())))
 		{
 			char	  **values;
 
