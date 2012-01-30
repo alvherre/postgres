@@ -641,6 +641,7 @@ typedef HeapTupleData *HeapTuple;
 #define XLOG_HEAP2_CLEANUP_INFO 0x30
 #define XLOG_HEAP2_VISIBLE		0x40
 #define XLOG_HEAP2_MULTI_INSERT	0x50
+#define XLOG_HEAP2_LOCK_UPDATED	0x60
 
 /*
  * All what we need to find changed tuple
@@ -801,6 +802,16 @@ typedef struct xl_heap_lock
 
 #define SizeOfHeapLock	(offsetof(xl_heap_lock, infobits_set) + sizeof(int8))
 
+/* This is what we need to know about locking an updated version of a row */
+typedef struct xl_heap_lock_updated
+{
+	xl_heaptid	target;
+	TransactionId	xmax;
+	uint16		infomask;
+} xl_heap_lock_updated;
+
+#define SizeOfHeapLockUpdated	(offsetof(xl_heap_lock_updated, infomask) + sizeof(uint16))
+
 /* This is what we need to know about in-place update */
 typedef struct xl_heap_inplace
 {
@@ -829,6 +840,7 @@ typedef struct xl_heap_visible
 } xl_heap_visible;
 
 #define SizeOfHeapVisible (offsetof(xl_heap_visible, block) + sizeof(BlockNumber))
+
 
 extern void HeapTupleHeaderAdvanceLatestRemovedXid(HeapTupleHeader tuple,
 									   TransactionId *latestRemovedXid);

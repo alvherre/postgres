@@ -89,11 +89,10 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay);
 static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
-						  uint16 old_infomask2,
-						  TransactionId add_to_xmax, LockTupleMode mode,
-						  bool is_update,
+						  uint16 old_infomask2, TransactionId add_to_xmax,
+						  LockTupleMode mode, bool is_update,
 						  TransactionId *result_xmax, uint16 *result_infomask);
-static HTSU_Result heap_lock_updated_tuple(Relation rel, ItemPointer tid,
+static HTSU_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple,
 						TransactionId xid, LockTupleMode mode);
 static uint16 GetMultiXactIdHintBits(MultiXactId multi);
 static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
@@ -3849,11 +3848,11 @@ l3:
 		 * momentarily, if a concurrent transaction is deleting a key; or it
 		 * could return a value to the effect that the transaction deleting the
 		 * key has already committed.  So we do this before re-locking the
-		 * buffer; otherwise this would be prone to deadlocks.  Note that the TID
-		 * we're locking was grabbed before we unlocked the buffer.  For it to
-		 * change while we're not looking, the other properties we're testing
-		 * for below after re-locking the buffer would also change, in which
-		 * case we would restart this loop above.
+		 * buffer; otherwise this would be prone to deadlocks.  Note that the
+		 * TID we're locking was grabbed before we unlocked the buffer.  For it
+		 * to change while we're not looking, the other properties we're
+		 * testing for below after re-locking the buffer would also change, in
+		 * which case we would restart this loop above.
 		 */
 		if ((mode == LockTupleKeyShare) &&
 			!(infomask2 & HEAP_UPDATE_KEY_REVOKED))
@@ -3865,7 +3864,7 @@ l3:
 			{
 				HTSU_Result		res;
 
-				res = heap_lock_updated_tuple(relation, tid,
+				res = heap_lock_updated_tuple(relation, tuple,
 											  GetCurrentTransactionId(),
 											  mode);
 				if (res != HeapTupleMayBeUpdated)
@@ -4024,7 +4023,7 @@ l3:
 				{
 					HTSU_Result		res;
 
-					res = heap_lock_updated_tuple(relation, tid,
+					res = heap_lock_updated_tuple(relation, tuple,
 												  GetCurrentTransactionId(),
 												  mode);
 					if (res != HeapTupleMayBeUpdated)
@@ -4077,7 +4076,7 @@ l3:
 				{
 					HTSU_Result		res;
 
-					res = heap_lock_updated_tuple(relation, tid,
+					res = heap_lock_updated_tuple(relation, tuple,
 												  GetCurrentTransactionId(),
 												  mode);
 					if (res != HeapTupleMayBeUpdated)
@@ -4298,8 +4297,9 @@ failed:
  * MultiXactId.  Fortunately this is harmless.
  */
 static void
-compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask, uint16 old_infomask2,
-						  TransactionId add_to_xmax, LockTupleMode mode, bool is_update,
+compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
+						  uint16 old_infomask2, TransactionId add_to_xmax,
+						  LockTupleMode mode, bool is_update,
 						  TransactionId *result_xmax, uint16 *result_infomask)
 {
 	TransactionId	new_xmax;
@@ -4337,7 +4337,7 @@ l6:
 					new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
 					break;
 				default:
-					new_xmax = InvalidTransactionId;	/* keep compiler quiet */
+					new_xmax = InvalidTransactionId;	/* silence compiler */
 					elog(ERROR, "invalid lock mode");
 			}
 		}
@@ -4404,11 +4404,13 @@ l6:
 				 * FIXME should we raise a warning here?
 				 */
 				old_infomask |= HEAP_XMAX_INVALID;
+				old_infomask &= ~HEAP_XMAX_LOCK_ONLY;
 				goto l6;
 			}
 		}
 		else
 		{
+			/* it's an update, but which kind? */
 			if (old_infomask2 & HEAP_UPDATE_KEY_REVOKED)
 				status = MultiXactStatusKeyUpdate;
 			else
@@ -4435,22 +4437,15 @@ l6:
 	*result_xmax = new_xmax;
 }
 
+
 /*
- * heap_lock_updated_tuple
- * 		Follow update chain when locking an updated tuple
+ * Recursive part of heap_lock_updated_tuple
  *
- * Given a TID corresponding to the first updated version of a tuple, acquire
- * a lock of the given mode on it in the name of the given transaction, and
- * recurse to acquire locks on all subsequent versions.
- *
- * This function doesn't check visibility, it just inconditionally marks the
- * tuple(s) as locked.  If the tuple is being deleted concurrently (or updated
- * with the key being modified), sleep until the transaction doing it is
- * finished.
+ * See the function below.
  */
 static HTSU_Result
-heap_lock_updated_tuple(Relation rel, ItemPointer tid, TransactionId xid,
-						LockTupleMode mode)
+heap_lock_updated_tuple_rec(Relation rel, ItemPointer tid, TransactionId xid,
+							LockTupleMode mode)
 {
 	ItemPointerData	tupid;
 	HeapTupleData	mytup;
@@ -4532,11 +4527,30 @@ l5:
 
 	MarkBufferDirty(buf);
 
-	/*
-	 * FIXME XLOG stuff goes here.  Is it really necessary to have this, or
-	 * would it be sufficient to just WAL log the original tuple lock, and have
-	 * the replay code follow the update chain too?
-	 */
+	/* XLOG stuff */
+	if (RelationNeedsWAL(rel))
+	{
+		xl_heap_lock_updated xlrec;
+		XLogRecPtr	recptr;
+		XLogRecData	rdata;
+		Page		page = BufferGetPage(buf);
+
+		xlrec.target.node = rel->rd_node;
+		xlrec.target.tid = mytup.t_self;
+		xlrec.xmax = new_xmax;
+		xlrec.infomask = new_infomask;
+
+		rdata.data = (char *) &xlrec;
+		rdata.len = SizeOfHeapLockUpdated;
+		rdata.buffer = buf;
+		rdata.buffer_std = true;
+		rdata.next = NULL;
+
+		recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOCK_UPDATED, &rdata);
+
+		PageSetLSN(page, recptr);
+		PageSetTLI(page, ThisTimeLineID);
+	}
 
 	END_CRIT_SECTION();
 
@@ -4553,6 +4567,31 @@ l5:
 	ItemPointerCopy(&(mytup.t_data->t_ctid), &tupid);
 	UnlockReleaseBuffer(buf);
 	goto restart;
+}
+
+/*
+ * heap_lock_updated_tuple
+ * 		Follow update chain when locking an updated tuple
+ *
+ * Given a TID corresponding to the first updated version of a tuple, acquire
+ * a lock of the given mode on it in the name of the given transaction, and
+ * recurse to acquire locks on all subsequent versions.
+ *
+ * This function doesn't check visibility, it just inconditionally marks the
+ * tuple(s) as locked.  If the tuple is being deleted concurrently (or updated
+ * with the key being modified), sleep until the transaction doing it is
+ * finished.
+ */
+static HTSU_Result
+heap_lock_updated_tuple(Relation rel, HeapTuple tuple, TransactionId xid,
+						LockTupleMode mode)
+{
+	if (!ItemPointerEquals(&tuple->t_self, &tuple->t_data->t_ctid))
+		return heap_lock_updated_tuple_rec(rel, &tuple->t_data->t_ctid,
+										   xid, mode);
+
+	/* nothing to lock */
+	return HeapTupleMayBeUpdated;
 }
 
 
@@ -6375,6 +6414,50 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 }
 
 static void
+heap_xlog_lock_updated(XLogRecPtr lsn, XLogRecord *record)
+{
+	xl_heap_lock_updated *xlrec = (xl_heap_lock_updated *) XLogRecGetData(record);
+	Buffer		buffer;
+	Page		page;
+	OffsetNumber offnum;
+	ItemId		lp = NULL;
+	HeapTupleHeader htup;
+
+	if (record->xl_info & XLR_BKP_BLOCK_1)
+		return;
+
+	buffer = XLogReadBuffer(xlrec->target.node,
+							ItemPointerGetBlockNumber(&(xlrec->target.tid)),
+							false);
+	if (!BufferIsValid(buffer))
+		return;
+	page = (Page) BufferGetPage(buffer);
+
+	if (XLByteLE(lsn, PageGetLSN(page)))		/* changes are applied */
+	{
+		UnlockReleaseBuffer(buffer);
+		return;
+	}
+
+	offnum = ItemPointerGetOffsetNumber(&(xlrec->target.tid));
+	if (PageGetMaxOffsetNumber(page) >= offnum)
+		lp = PageGetItemId(page, offnum);
+
+	if (PageGetMaxOffsetNumber(page) < offnum || !ItemIdIsNormal(lp))
+		elog(PANIC, "heap_xlog_lock_updated: invalid lp");
+
+	htup = (HeapTupleHeader) PageGetItem(page, lp);
+
+	htup->t_infomask |= xlrec->infomask;
+	HeapTupleHeaderSetXmax(htup, xlrec->xmax);
+
+	PageSetLSN(page, lsn);
+	PageSetTLI(page, ThisTimeLineID);
+	MarkBufferDirty(buffer);
+	UnlockReleaseBuffer(buffer);
+}
+
+static void
 heap_xlog_inplace(XLogRecPtr lsn, XLogRecord *record)
 {
 	xl_heap_inplace *xlrec = (xl_heap_inplace *) XLogRecGetData(record);
@@ -6492,6 +6575,9 @@ heap2_redo(XLogRecPtr lsn, XLogRecord *record)
 			break;
 		case XLOG_HEAP2_MULTI_INSERT:
 			heap_xlog_multi_insert(lsn, record);
+			break;
+		case XLOG_HEAP2_LOCK_UPDATED:
+			heap_xlog_lock_updated(lsn, record);
 			break;
 		default:
 			elog(PANIC, "heap2_redo: unknown op code %u", info);
@@ -6644,6 +6730,14 @@ heap2_desc(StringInfo buf, uint8 xl_info, char *rec)
 		appendStringInfo(buf, "rel %u/%u/%u; blk %u; %d tuples",
 						 xlrec->node.spcNode, xlrec->node.dbNode, xlrec->node.relNode,
 						 xlrec->blkno, xlrec->ntuples);
+	}
+	else if (info == XLOG_HEAP2_LOCK_UPDATED)
+	{
+		xl_heap_lock_updated *xlrec = (xl_heap_lock_updated *) rec;
+
+		appendStringInfo(buf, "lock updated: xmax %u msk %04x; ", xlrec->xmax,
+						 xlrec->infomask);
+		out_target(buf, &(xlrec->target));
 	}
 	else
 		appendStringInfo(buf, "UNKNOWN");
