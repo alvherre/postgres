@@ -4873,14 +4873,13 @@ GetMultiXactIdHintBits(MultiXactId multi)
 				break;
 			case MultiXactStatusForShare:
 				break;
+			case MultiXactStatusUpdate:
+			case MultiXactStatusKeyUpdate:
+				has_update = true;
+				/* fall through */
 			case MultiXactStatusForUpdate:
 			case MultiXactStatusForKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
-				break;
-			case MultiXactStatusUpdate:
-			case MultiXactStatusKeyUpdate:
-				bits |= HEAP_XMAX_EXCL_LOCK;
-				has_update = true;
 				break;
 		}
 	}
