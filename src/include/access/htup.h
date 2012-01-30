@@ -841,7 +841,6 @@ typedef struct xl_heap_visible
 
 #define SizeOfHeapVisible (offsetof(xl_heap_visible, block) + sizeof(BlockNumber))
 
-
 extern void HeapTupleHeaderAdvanceLatestRemovedXid(HeapTupleHeader tuple,
 									   TransactionId *latestRemovedXid);
 

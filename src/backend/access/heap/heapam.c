@@ -6416,7 +6416,8 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 static void
 heap_xlog_lock_updated(XLogRecPtr lsn, XLogRecord *record)
 {
-	xl_heap_lock_updated *xlrec = (xl_heap_lock_updated *) XLogRecGetData(record);
+	xl_heap_lock_updated *xlrec =
+		(xl_heap_lock_updated *) XLogRecGetData(record);
 	Buffer		buffer;
 	Page		page;
 	OffsetNumber offnum;
