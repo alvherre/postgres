@@ -1717,14 +1717,15 @@ SELECT distributors.* WHERE distributors.name = 'Westward';
   </refsect2>
 
   <refsect2>
-   <title><literal>FOR UPDATE</>, <literal>FOR SHARE</>, <literal>FOR KEY SHARE</></title>
+   <title><literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>, <literal>FOR SHARE</>, <literal>FOR KEY SHARE</></title>
 
    <para>
     Although <literal>FOR UPDATE</> appears in the SQL standard, the
     standard allows it only as an option of <command>DECLARE CURSOR</>.
     <productname>PostgreSQL</productname> allows it in any <command>SELECT</>
     query as well as in sub-<command>SELECT</>s, but this is an extension.
-    The <literal>FOR SHARE</> and <literal>FOR KEY SHARE</> variants,
+    The <literal>FOR KEY UPDATE</>, <literal>FOR SHARE</> and
+    <literal>FOR KEY SHARE</> variants,
     and the <literal>NOWAIT</> option,
     do not appear in the standard.
    </para>
