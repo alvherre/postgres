@@ -91,6 +91,7 @@ static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
 						  uint16 old_infomask2,
 						  TransactionId add_to_xmax, LockTupleMode mode,
+						  bool is_update,
 						  TransactionId *result_xmax, uint16 *result_infomask);
 static HTSU_Result heap_lock_updated_tuple(Relation rel, ItemPointer tid,
 						TransactionId xid, LockTupleMode mode);
@@ -2596,7 +2597,7 @@ l1:
 
 	compute_new_xmax_infomask(HeapTupleHeaderGetRawXmax(tp.t_data),
 							  tp.t_data->t_infomask, tp.t_data->t_infomask2,
-							  xid, LockTupleKeyUpdate,
+							  xid, LockTupleKeyUpdate, true,
 							  &new_xmax, &new_infomask);
 
 	/* store transaction information of xact deleting the tuple */
@@ -3098,7 +3099,7 @@ l2:
 	compute_new_xmax_infomask(HeapTupleHeaderGetRawXmax(oldtup.t_data),
 							  oldtup.t_data->t_infomask,
 							  oldtup.t_data->t_infomask2,
-							  xid, tuplock,
+							  xid, tuplock, true,
 							  &xmax_old_tuple, &infomask_old_tuple);
 
 	if ((oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
@@ -4177,7 +4178,7 @@ failed:
 	compute_new_xmax_infomask(xmax, old_infomask,
 							  tuple->t_data->t_infomask2,
 							  GetCurrentTransactionId(),
-							  mode, &xid, &new_infomask);
+							  mode, false, &xid, &new_infomask);
 
 	START_CRIT_SECTION();
 
@@ -4192,7 +4193,8 @@ failed:
 	 * we would break the HOT chain.
 	 */
 	tuple->t_data->t_infomask &= ~(HEAP_LOCK_BITS | HEAP_XMAX_IS_MULTI);
-	tuple->t_data->t_infomask = new_infomask;
+	tuple->t_data->t_infomask &= ~HEAP_XMAX_INVALID;
+	tuple->t_data->t_infomask |= new_infomask;
 	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
 		HeapTupleHeaderClearHotUpdated(tuple->t_data);
 	HeapTupleHeaderSetXmax(tuple->t_data, xid);
@@ -4297,14 +4299,11 @@ failed:
  */
 static void
 compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask, uint16 old_infomask2,
-						  TransactionId add_to_xmax, LockTupleMode mode,
+						  TransactionId add_to_xmax, LockTupleMode mode, bool is_update,
 						  TransactionId *result_xmax, uint16 *result_infomask)
 {
 	TransactionId	new_xmax;
 	uint16			new_infomask;
-	bool			is_update;
-
-	is_update = (mode == LockTupleUpdate || mode == LockTupleKeyUpdate);
 
 l6:
 	new_infomask = 0;
@@ -4522,7 +4521,7 @@ l5:
 	}
 
 	compute_new_xmax_infomask(xmax, old_infomask, mytup.t_data->t_infomask2,
-							  xid, mode,
+							  xid, mode, false,
 							  &new_xmax, &new_infomask);
 
 	START_CRIT_SECTION();
