@@ -4305,7 +4305,7 @@ compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
 	TransactionId	new_xmax;
 	uint16			new_infomask;
 
-l6:
+l5:
 	new_infomask = 0;
 	if (old_infomask & HEAP_XMAX_INVALID)
 	{
@@ -4367,7 +4367,7 @@ l6:
 			 */
 			old_infomask &= ~HEAP_XMAX_IS_MULTI;
 			old_infomask |= HEAP_XMAX_INVALID;
-			goto l6;
+			goto l5;
 		}
 
 		new_xmax = MultiXactIdExpand((MultiXactId) xmax, add_to_xmax,
@@ -4405,7 +4405,7 @@ l6:
 				 */
 				old_infomask |= HEAP_XMAX_INVALID;
 				old_infomask &= ~HEAP_XMAX_LOCK_ONLY;
-				goto l6;
+				goto l5;
 			}
 		}
 		else
@@ -4430,7 +4430,7 @@ l6:
 		 * no locker at all in the first place.
 		 */
 		old_infomask |= HEAP_XMAX_INVALID;
-		goto l6;
+		goto l5;
 	}
 
 	*result_infomask = new_infomask;
