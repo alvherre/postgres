@@ -174,8 +174,8 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 		case CMD_SELECT:
 
 			/*
-			 * SELECT INTO, SELECT FOR UPDATE/SHARE and modifying CTEs need to
-			 * mark tuples
+			 * SELECT INTO, SELECT FOR [KEY] UPDATE/SHARE and modifying CTEs
+			 * need to mark tuples
 			 */
 			if (queryDesc->plannedstmt->intoClause != NULL ||
 				queryDesc->plannedstmt->rowMarks != NIL ||
@@ -811,7 +811,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 	}
 
 	/*
-	 * Similarly, we have to lock relations selected FOR UPDATE/SHARE/KEY SHARE
+	 * Similarly, we have to lock relations selected FOR [KEY] UPDATE/SHARE
 	 * before we initialize the plan tree, else we'd be risking lock upgrades.
 	 * While we are at it, build the ExecRowMark list.
 	 */
@@ -1392,7 +1392,7 @@ ExecEndPlan(PlanState *planstate, EState *estate)
 	}
 
 	/*
-	 * close any relations selected FOR UPDATE/FOR SHARE, again keeping locks
+	 * close any relations selected FOR [KEY] UPDATE/SHARE, again keeping locks
 	 */
 	foreach(l, estate->es_rowMarks)
 	{

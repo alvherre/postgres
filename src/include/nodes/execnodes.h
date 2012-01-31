@@ -405,9 +405,9 @@ typedef struct EState
 
 /*
  * ExecRowMark -
- *	   runtime representation of FOR UPDATE/SHARE/KEY SHARE clauses
+ *	   runtime representation of FOR [KEY] UPDATE/SHARE clauses
  *
- * When doing UPDATE, DELETE, or SELECT FOR UPDATE/SHARE/KEY SHARE, we should have an
+ * When doing UPDATE, DELETE, or SELECT FOR [KEY] UPDATE/SHARE, we should have an
  * ExecRowMark for each non-target relation in the query (except inheritance
  * parent RTEs, which can be ignored at runtime).  See PlanRowMark for details
  * about most of the fields.  In addition to fields directly derived from
@@ -428,7 +428,7 @@ typedef struct ExecRowMark
 
 /*
  * ExecAuxRowMark -
- *	   additional runtime representation of FOR UPDATE/SHARE/KEY SHARE clauses
+ *	   additional runtime representation of FOR [KEY] UPDATE/SHARE clauses
  *
  * Each LockRows and ModifyTable node keeps a list of the rowmarks it needs to
  * deal with.  In addition to a pointer to the related entry in es_rowMarks,
@@ -1818,7 +1818,7 @@ typedef struct SetOpState
 /* ----------------
  *	 LockRowsState information
  *
- *		LockRows nodes are used to enforce FOR UPDATE/SHARE/KEY SHARE locking.
+ *		LockRows nodes are used to enforce FOR [KEY] UPDATE/SHARE locking.
  * ----------------
  */
 typedef struct LockRowsState

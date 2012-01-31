@@ -2863,7 +2863,7 @@ get_select_query_def(Query *query, deparse_context *context,
 			get_rule_expr(query->limitCount, context, false);
 	}
 
-	/* Add FOR UPDATE/SHARE/KEY SHARE clauses if present */
+	/* Add FOR [KEY] UPDATE/SHARE clauses if present */
 	if (query->hasForUpdate)
 	{
 		foreach(l, query->rowMarks)

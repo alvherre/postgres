@@ -68,7 +68,7 @@ static Query *fireRIRrules(Query *parsetree, List *activeRIRs,
  *	  These locks will ensure that the relation schemas don't change under us
  *	  while we are rewriting and planning the query.
  *
- * forUpdatePushedDown indicates that a pushed-down FOR UPDATE/SHARE applies
+ * forUpdatePushedDown indicates that a pushed-down FOR [KEY] UPDATE/SHARE applies
  * to the current subquery, requiring all rels to be opened with RowShareLock.
  * This should always be false at the start of the recursion.
  *
@@ -130,7 +130,7 @@ AcquireRewriteLocks(Query *parsetree, bool forUpdatePushedDown)
 				 *
 				 * If the relation is the query's result relation, then we
 				 * need RowExclusiveLock.  Otherwise, check to see if the
-				 * relation is accessed FOR UPDATE/SHARE or not.  We can't
+				 * relation is accessed FOR [KEY] UPDATE/SHARE or not.  We can't
 				 * just grab AccessShareLock because then the executor would
 				 * be trying to upgrade the lock, leading to possible
 				 * deadlocks.
@@ -1355,7 +1355,7 @@ ApplyRetrieveRule(Query *parsetree,
 	}
 
 	/*
-	 * If FOR UPDATE/SHARE of view, be sure we get right initial lock on the
+	 * If FOR [KEY] UPDATE/SHARE of view, be sure we get right initial lock on the
 	 * relations it references.
 	 */
 	rc = get_parse_rowmark(parsetree, rt_index);
@@ -1403,8 +1403,8 @@ ApplyRetrieveRule(Query *parsetree,
 	rte->modifiedCols = NULL;
 
 	/*
-	 * If FOR UPDATE/SHARE/KEY SHARE of view, mark all the contained tables as implicit
-	 * FOR UPDATE/SHARE/KEY SHARE, the same as the parser would have done if the view's
+	 * If FOR [KEY] UPDATE/SHARE of view, mark all the contained tables as implicit
+	 * FOR [KEY] UPDATE/SHARE, the same as the parser would have done if the view's
 	 * subquery had been written out explicitly.
 	 *
 	 * Note: we don't consider forUpdatePushedDown here; such marks will be
@@ -1418,7 +1418,7 @@ ApplyRetrieveRule(Query *parsetree,
 }
 
 /*
- * Recursively mark all relations used by a view as FOR UPDATE/SHARE/KEY SHARE.
+ * Recursively mark all relations used by a view as FOR [KEY] UPDATE/SHARE.
  *
  * This may generate an invalid query, eg if some sub-query uses an
  * aggregate.  We leave it to the planner to detect that.
@@ -1451,7 +1451,7 @@ markQueryForLocking(Query *qry, Node *jtnode,
 		else if (rte->rtekind == RTE_SUBQUERY)
 		{
 			applyLockingClause(qry, rti, strength, noWait, pushedDown);
-			/* FOR UPDATE/SHARE/KEY SHARE of subquery is propagated to subquery's rels */
+			/* FOR [KEY] UPDATE/SHARE of subquery is propagated to subquery's rels */
 			markQueryForLocking(rte->subquery, (Node *) rte->subquery->jointree,
 								strength, noWait, true);
 		}
