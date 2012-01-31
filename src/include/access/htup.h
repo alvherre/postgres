@@ -196,6 +196,10 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 #define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
 	((infomask) & HEAP_XMAX_LOCK_ONLY)
 
+/* turn these all off when Xmax is to change */
+#define HEAP_XMAX_BITS (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | \
+						HEAP_XMAX_IS_MULTI | HEAP_LOCK_BITS)
+
 #define HeapTupleHeaderIsOnlyLocked(tup) \
 	HeapTupleHeaderInfomaskIsOnlyLocked((tup)->t_infomask)
 
