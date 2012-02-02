@@ -239,7 +239,12 @@ pgrowlocks(PG_FUNCTION_ARGS)
 						snprintf(values[Atnum_modes], NCHARS, "{transient upgrade status}");
 				}
 				else
-					snprintf(values[Atnum_modes], NCHARS, "{infomask %x}", tuple->t_data->t_infomask);
+				{
+					if (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+						snprintf(values[Atnum_modes], NCHARS, "{Key Update}");
+					else
+						snprintf(values[Atnum_modes], NCHARS, "{Update}");
+				}
 
 				values[Atnum_pids] = palloc(NCHARS * sizeof(char));
 				snprintf(values[Atnum_pids], NCHARS, "{%d}",
