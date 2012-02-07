@@ -69,7 +69,6 @@ CATALOG(pg_class,1259) BKI_BOOTSTRAP BKI_ROWTYPE_OID(83) BKI_SCHEMA_MACRO
 	TransactionId relfrozenxid; /* all Xids < this are frozen in this rel */
 	TransactionId relminmxid;	/* all multixacts in this rel are >= this.
 								 * this is really a MultiXactId */
-								
 
 #ifdef CATALOG_VARLEN			/* variable-length fields start here */
 	/* NOTE: These fields are not present in a relcache entry's rd_rel field. */
@@ -133,7 +132,10 @@ typedef FormData_pg_class *Form_pg_class;
  * ----------------
  */
 
-/* Note: "3" in the relfrozenxid column stands for FirstNormalTransactionId */
+/*
+ * Note: "3" in the relfrozenxid column stands for FirstNormalTransactionId;
+ * similarly, "1" in relminmxid stands for FirstMultiXactId
+ */
 DATA(insert OID = 1247 (  pg_type		PGNSP 71 0 PGUID 0 0 0 0 0 0 0 0 f f p r 30 0 t f f f f 3 1 _null_ _null_ ));
 DESCR("");
 DATA(insert OID = 1249 (  pg_attribute	PGNSP 75 0 PGUID 0 0 0 0 0 0 0 0 f f p r 21 0 f f f f f 3 1 _null_ _null_ ));

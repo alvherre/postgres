@@ -4722,8 +4722,8 @@ heap_inplace_update(Relation relation, HeapTuple tuple)
  * because this function is applied during WAL recovery, when we don't have
  * access to any such state, and can't depend on the hint bits to be set.)
  *
- * Similarly, cutoff_multi must be smallest than the smallest MultiXactId
- * used by any transaction currently open.
+ * Similarly, cutoff_multi must be less than or equal to the smallest
+ * MultiXactId used by any transaction currently open.
  *
  * In lazy VACUUM, we call this while initially holding only a shared lock
  * on the tuple's buffer.  If any change is needed, we trade that in for an
