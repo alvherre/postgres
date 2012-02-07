@@ -718,17 +718,106 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 
 	debug_elog3(DEBUG2, "GetNew: for %d xids", nmembers);
 
+	/* safety check, we should never get this far in a HS slave */
+	if (RecoveryInProgress())
+		elog(ERROR, "cannot assign MultiXactIds during recovery");
+
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 
-	/* Handle corner cases of the nextMXact counter */
-	MultiXactState->nextMXact =
-		HandleMxactOffsetCornerCases(MultiXactState->nextMXact);
-
-	/*
-	 * Assign the MXID, and make sure there is room for it in the file.
-	 */
 	result = MultiXactState->nextMXact;
 
+	/*----------
+	 * Check to see if it's safe to assign another MultiXactId.  This protects
+	 * against catastrophic data loss due to multixact wraparound.  The basic
+	 * rules are:
+	 *
+	 * If we're past multiVacLimit, start trying to force autovacuum cycles.
+	 * If we're past multiWarnLimit, start issuing warnings.
+	 * If we're past multiStopLimit, refuse to execute transactions, unless
+	 * we are running in a standalone backend (which gives an escape hatch
+	 * to the DBA who somehow got past the earlier defenses).
+	 *
+	 * Note this is pretty much the same as the protections in
+	 * GetNewTransactionId.
+	 *----------
+	 */
+	if (!MultiXactIdPrecedes(result, MultiXactState->multiVacLimit))
+	{
+		/*
+		 * For safety's sake, we release MultiXactGenLock while sending
+		 * signals, warnings, etc.  This is not so much because we care about
+		 * preserving concurrency in this situation, as to avoid any
+		 * possibility of deadlock while doing get_database_name(). First,
+		 * copy all the shared values we'll need in this path.
+		 */
+		MultiXactId multiWarnLimit = MultiXactState->multiWarnLimit;
+		MultiXactId multiStopLimit = MultiXactState->multiStopLimit;
+		MultiXactId multiWrapLimit = MultiXactState->multiWrapLimit;
+		Oid			oldest_datoid = MultiXactState->oldestMultiDB;
+
+		LWLockRelease(MultiXactGenLock);
+
+		/*
+		 * To avoid swamping the postmaster with signals, we issue the autovac
+		 * request only once per 64K transaction starts.  This still gives
+		 * plenty of chances before we get into real trouble.
+		 */
+		if (IsUnderPostmaster && (result % 65536) == 0)
+			SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
+
+		if (IsUnderPostmaster &&
+			!MultiXactIdPrecedes(result, multiStopLimit))
+		{
+			char	   *oldest_datname = get_database_name(oldest_datoid);
+
+			/* complain even if that DB has disappeared */
+			if (oldest_datname)
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("database is not accepting commands to avoid wraparound data loss in database \"%s\"",
+								oldest_datname),
+						 errhint("Stop the postmaster and use a standalone backend to vacuum that database.\n"
+								 "You might also need to commit or roll back old prepared transactions.")));
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						 errmsg("database is not accepting commands to avoid wraparound data loss in database with OID %u",
+								oldest_datoid),
+						 errhint("Stop the postmaster and use a standalone backend to vacuum that database.\n"
+								 "You might also need to commit or roll back old prepared transactions.")));
+		}
+		else if (!MultiXactIdPrecedes(result, multiWarnLimit))
+		{
+			char	   *oldest_datname = get_database_name(oldest_datoid);
+
+			/* complain even if that DB has disappeared */
+			if (oldest_datname)
+				ereport(WARNING,
+						(errmsg("database \"%s\" must be vacuumed within %u transactions",
+								oldest_datname,
+								multiWrapLimit - result),
+						 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+								 "You might also need to commit or roll back old prepared transactions.")));
+			else
+				ereport(WARNING,
+						(errmsg("database with OID %u must be vacuumed within %u transactions",
+								oldest_datoid,
+								multiWrapLimit - result),
+						 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+								 "You might also need to commit or roll back old prepared transactions.")));
+		}
+
+		/* Re-acquire lock and start over */
+		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+		result = MultiXactState->nextMXact;
+	}
+
+	/* Assign the MXID, and handle corner cases of the nextMXact counter */
+	result = MultiXactState->nextMXact = HandleMxactOffsetCornerCases(result);
+
+	/*
+	 * Make sure there is room for it in the file.
+	 */
 	ExtendMultiXactOffset(result);
 
 	/*
