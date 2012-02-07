@@ -4782,9 +4782,9 @@ heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 recheck_xmax:
 	xid = HeapTupleHeaderGetRawXmax(tuple);
 	if (TransactionIdIsNormal(xid) &&
-		(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI) &&
-		 TransactionIdPrecedes(xid, cutoff_xid)) ||
-		(MultiXactIdPrecedes(xid, cutoff_multi)))
+		(((!(tuple->t_infomask & HEAP_XMAX_IS_MULTI) &&
+		   TransactionIdPrecedes(xid, cutoff_xid))) ||
+		 MultiXactIdPrecedes(xid, cutoff_multi)))
 	{
 		if (buf != InvalidBuffer)
 		{

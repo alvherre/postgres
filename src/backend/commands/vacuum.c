@@ -63,7 +63,7 @@ static BufferAccessStrategy vac_strategy;
 
 /* non-export function prototypes */
 static List *get_rel_oids(Oid relid, const RangeVar *vacrel);
-static void vac_truncate_clog(TransactionId frozenXID);
+static void vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti);
 static bool vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast,
 		   bool for_wraparound);
 
@@ -850,7 +850,7 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti)
 		else if (TransactionIdPrecedes(dbform->datfrozenxid, frozenXID))
 		{
 			frozenXID = dbform->datfrozenxid;
-			oldest_datoid = HeapTupleGetOid(tuple);
+			oldestxid_datoid = HeapTupleGetOid(tuple);
 		}
 
 		if (MultiXactIdPrecedes(dbform->datminmxid, frozenMulti))
@@ -883,10 +883,12 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti)
 	TruncateMultiXact(frozenMulti);
 
 	/*
-	 * Update the wrap limit for GetNewTransactionId.  Note: this function
-	 * will also signal the postmaster for an(other) autovac cycle if needed.
+	 * Update the wrap limit for GetNewTransactionId and creation of new
+	 * MultiXactIds.  Note: these functions will also signal the postmaster for
+	 * an(other) autovac cycle if needed.   XXX should we avoid possibly
+	 * signalling twice?
 	 */
-	SetTransactionIdLimit(frozenXID, oldest_datoid);
+	SetTransactionIdLimit(frozenXID, oldestxid_datoid);
 	SetMultiXactIdLimit(frozenMulti, oldestmulti_datoid);
 }
 

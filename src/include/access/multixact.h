@@ -96,13 +96,11 @@ extern void MultiXactShmemInit(void);
 extern void BootStrapMultiXact(void);
 extern void StartupMultiXact(void);
 extern void ShutdownMultiXact(void);
-extern void SetMultiXactIdLimit(MultiXactid oldest_datminmxid,
+extern void SetMultiXactIdLimit(MultiXactId oldest_datminmxid,
 					Oid oldest_datoid);
 extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
 						 MultiXactOffset *nextMultiOffset,
-						 TransactionId *oldestTruncateXid,
-						 uint32 *oldestTruncateXidEpoch,
 						 MultiXactId *oldestMulti);
 extern void CheckPointMultiXact(void);
 extern void TruncateMultiXact(TransactionId oldestXid);

@@ -7883,8 +7883,6 @@ CreateCheckPoint(int flags)
 	MultiXactGetCheckptMulti(shutdown,
 							 &checkPoint.nextMulti,
 							 &checkPoint.nextMultiOffset,
-							 &checkPoint.oldestSegTruncateXid,
-							 &checkPoint.oldestSegTruncateXidEpoch,
 							 &checkPoint.oldestMultiXactId);
 
 	/*

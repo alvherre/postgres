@@ -67,7 +67,9 @@ CATALOG(pg_class,1259) BKI_BOOTSTRAP BKI_ROWTYPE_OID(83) BKI_SCHEMA_MACRO
 	bool		relhastriggers; /* has (or has had) any TRIGGERs */
 	bool		relhassubclass; /* has (or has had) derived classes */
 	TransactionId relfrozenxid; /* all Xids < this are frozen in this rel */
-	TransactionId relfrozenmulti; /* all multixacts in this rel are >= this */
+	TransactionId relminmxid;	/* all multixacts in this rel are >= this.
+								 * this is really a MultiXactId */
+								
 
 #ifdef CATALOG_VARLEN			/* variable-length fields start here */
 	/* NOTE: These fields are not present in a relcache entry's rd_rel field. */

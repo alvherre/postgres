@@ -62,9 +62,11 @@
 #include "access/twophase.h"
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
+#include "commands/dbcommands.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
 #include "storage/lmgr.h"
+#include "storage/pmsignal.h"
 #include "storage/procarray.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -167,6 +169,13 @@ typedef struct MultiXactStateData
 	 * not be consulted.
 	 */
 	MultiXactId		oldestMultiXactId;
+
+	/* support for anti-wraparound measures */
+	MultiXactId		multiVacLimit;
+	MultiXactId		multiWarnLimit;
+	MultiXactId		multiStopLimit;
+	MultiXactId		multiWrapLimit;
+	Oid				oldestMultiDB;
 } MultiXactStateData;
 
 /* Pointer to the state data in shared memory */
@@ -175,33 +184,11 @@ static MultiXactStateData *MultiXactState;
 #define firstPageOf(segment) ((segment) * SLRU_PAGES_PER_SEGMENT)
 
 /*
- * structs to pass data around in our private SlruScanDirectory callback for
- * the offset truncation support code.
- */
-typedef struct SegmentInfo
-{
-	int				segno;			/* segment number */
-	TransactionId	truncateXid;	/* after this Xid is frozen, the previous
-									 * segment can be removed */
-	uint32			truncateXidEpoch;	/* epoch of above Xid */
-	MultiXactOffset	firstOffset;	/* first valid offset in segment */
-} SegmentInfo;
-
-typedef struct TruncateCbData
-{
-	int				remaining_alloc;
-	int				remaining_used;
-	SegmentInfo	   *remaining;
-} TruncateCbData;
-
-/*
  * MultiXactZeroOffsetPage xlog record
  */
 typedef struct MxactZeroOffPg
 {
 	int				pageno;
-	TransactionId	truncateXid;
-	TransactionId	truncateXidEpoch;
 } MxactZeroOffPg;
 
 /*
@@ -238,13 +225,11 @@ static MemoryContext MXactContext = NULL;
 #define debug_elog3(a,b,c) elog(a,b,c)
 #define debug_elog4(a,b,c,d) elog(a,b,c,d)
 #define debug_elog5(a,b,c,d,e) elog(a,b,c,d,e)
-#define debug_elog7(a,b,c,d,e,f,g) elog(a,b,c,d,e,f,g)
 #else
 #define debug_elog2(a,b)
 #define debug_elog3(a,b,c)
 #define debug_elog4(a,b,c,d)
 #define debug_elog5(a,b,c,d,e)
-#define debug_elog7(a,b,c,d,e,f,g)
 #endif
 
 /* internal MultiXactId management */
@@ -265,8 +250,7 @@ static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *me
 #endif
 
 /* management of SLRU infrastructure */
-static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog,
-						TransactionId truncateXid, uint32 truncateXidEpoch);
+static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog);
 static int	ZeroMultiXactMemberPage(int pageno, bool writeXlog);
 static bool MultiXactOffsetPagePrecedes(int page1, int page2);
 static bool MultiXactMemberPagePrecedes(int page1, int page2);
@@ -274,10 +258,7 @@ static bool MultiXactOffsetPrecedes(MultiXactOffset offset1,
 						MultiXactOffset offset2);
 static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
-static void fillSegmentInfoData(SlruCtl ctl, SegmentInfo *segment);
-static int	compareTruncateXidEpoch(const void *a, const void *b);
-static void WriteMZeroOffsetPageXlogRec(int pageno, TransactionId truncateXid,
-							uint32 truncateXidEpoch);
+static void WriteMZeroOffsetPageXlogRec(int pageno);
 static void WriteMZeroMemberPageXlogRec(int pageno);
 
 
@@ -801,19 +782,13 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
  * 		Properly handle corner cases of MultiXactId enumeration
  *
  * This function takes a MultiXactId and returns a value that's actually a
- * valid multi, that is, it skips the first two values of any segment-
- * beginning page, which are used to store the truncateXid and
- * truncateXidEpoch.
+ * valid multi.
  */
 static MultiXactId
 HandleMxactOffsetCornerCases(MultiXactId multi)
 {
 	if (multi < FirstMultiXactId)
 		return FirstMultiXactId;
-
-	if (MultiXactIdToOffsetEntry(multi) == 0 &&
-		multi % SLRU_PAGES_PER_SEGMENT == 0)
-		return multi + 2;
 
 	return multi;
 }
@@ -1311,7 +1286,7 @@ BootStrapMultiXact(void)
 	LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
 	/* Create and zero the first page of the offsets log */
-	slotno = ZeroMultiXactOffsetPage(0, false, InvalidTransactionId, 0);
+	slotno = ZeroMultiXactOffsetPage(0, false);
 
 	/* Make sure it's written out */
 	SimpleLruWritePage(MultiXactOffsetCtl, slotno);
@@ -1335,34 +1310,20 @@ BootStrapMultiXact(void)
  * Initialize (or reinitialize) a page of MultiXactOffset to zeroes.
  * If writeXlog is TRUE, also emit an XLOG record saying we did this.
  *
- * If truncateXid is valid, store it in the first position of the page.
- *
  * The page is not actually written, just set up in shared memory.
  * The slot number of the new page is returned.
  *
  * Control lock must be held at entry, and will be held at exit.
  */
 static int
-ZeroMultiXactOffsetPage(int pageno, bool writeXlog, TransactionId truncateXid,
-						uint32 truncateXidEpoch)
+ZeroMultiXactOffsetPage(int pageno, bool writeXlog)
 {
 	int			slotno;
 
 	slotno = SimpleLruZeroPage(MultiXactOffsetCtl, pageno);
 
 	if (writeXlog)
-		WriteMZeroOffsetPageXlogRec(pageno, truncateXid, truncateXidEpoch);
-
-	if (TransactionIdIsValid(truncateXid))
-	{
-		MultiXactOffset *offptr;
-
-		offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
-		*(offptr++) = truncateXid;
-		*offptr = truncateXidEpoch;
-
-		MultiXactOffsetCtl->shared->page_dirty[slotno] = true;
-	}
+		WriteMZeroOffsetPageXlogRec(pageno);
 
 	return slotno;
 }
@@ -1492,24 +1453,17 @@ void
 MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
 						 MultiXactOffset *nextMultiOffset,
-						 TransactionId *oldestTruncateXid,
-						 uint32 *oldestTruncateXidEpoch,
 						 MultiXactId *oldestMulti)
 {
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
-
 	*nextMulti = MultiXactState->nextMXact;
 	*nextMultiOffset = MultiXactState->nextOffset;
-	*oldestTruncateXid = MultiXactState->truncateXid;
-	*oldestTruncateXidEpoch = MultiXactState->truncateXidEpoch;
 	*oldestMulti = MultiXactState->oldestMultiXactId;
-
 	LWLockRelease(MultiXactGenLock);
 
-	debug_elog7(DEBUG2,
-				"MultiXact: checkpoint is nextMulti %u, nextOffset %u; truncate xid %u, epoch %u; oldest multi %u",
-				*nextMulti, *nextMultiOffset, *oldestTruncateXid,
-				*oldestTruncateXidEpoch, *oldestMulti);
+	debug_elog5(DEBUG2,
+				"MultiXact: checkpoint is nextMulti %u, nextOffset %u; oldest multi %u",
+				*nextMulti, *nextMultiOffset, *oldestMulti);
 }
 
 /*
@@ -1550,7 +1504,7 @@ MultiXactSetNextMXact(MultiXactId nextMulti,
  * of our cluster), and the OID of the (or a) database with that value.
  */
 void
-SetMultiXactIdLimit(MultiXactid oldest_datminmxid, Oid oldest_datoid)
+SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 {
 	MultiXactId	multiVacLimit;
 	MultiXactId	multiWarnLimit;
@@ -1607,19 +1561,19 @@ SetMultiXactIdLimit(MultiXactid oldest_datminmxid, Oid oldest_datoid)
 
 	/* Grab lock for just long enough to set the new limit values */
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
-	ShmemVariableCache->oldestMulti = oldest_datminmxid;
-	ShmemVariableCache->multiVacLimit = multiVacLimit;
-	ShmemVariableCache->multiWarnLimit = multiWarnLimit;
-	ShmemVariableCache->multiStopLimit = multiStopLimit;
-	ShmemVariableCache->multiWrapLimit = multiWrapLimit;
-	ShmemVariableCache->oldestMultiDB = oldestmulti_datoid;
-	curMulti = ShmemVariableCache->nextMXact;
+	MultiXactState->oldestMultiXactId = oldest_datminmxid;
+	MultiXactState->multiVacLimit = multiVacLimit;
+	MultiXactState->multiWarnLimit = multiWarnLimit;
+	MultiXactState->multiStopLimit = multiStopLimit;
+	MultiXactState->multiWrapLimit = multiWrapLimit;
+	MultiXactState->oldestMultiDB = oldest_datoid;
+	curMulti = MultiXactState->nextMXact;
 	LWLockRelease(MultiXactGenLock);
 
 	/* Log the info */
 	ereport(DEBUG1,
 			(errmsg("MultiXactId wrap limit is %u, limited by database with OID %u",
-					multiWrapLimit, oldestmulti_datoid)));
+					multiWrapLimit, oldest_datoid)));
 
 	/*
 	 * If past the autovacuum force point, immediately signal an autovac
@@ -1696,9 +1650,6 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 /*
  * Make sure that MultiXactOffset has room for a newly-allocated MultiXactId.
  *
- * If the newly allocated page is the first page on the segment, store an
- * appropriate truncate Xid value in the page first position.
- *
  * NB: this is called while holding MultiXactGenLock.  We want it to be very
  * fast most of the time; even when it's not so fast, no actual I/O need
  * happen unless we're forced to write out a dirty log or xlog page to make
@@ -1708,8 +1659,6 @@ static void
 ExtendMultiXactOffset(MultiXactId multi)
 {
 	int			pageno;
-	TransactionId truncateXid;
-	uint32		truncateXidEpoch;
 
 	/*
 	 * No work except at first MultiXactId of a page.  But beware: just after
@@ -1721,49 +1670,14 @@ ExtendMultiXactOffset(MultiXactId multi)
 
 	pageno = MultiXactIdToOffsetPage(multi);
 
-	/*
-	 * Determine the truncateXid and epoch that the new segment needs, if
-	 * this is the first page of the segment.
-	 */
-	if (pageno % SLRU_PAGES_PER_SEGMENT == 0)
-	{
-		TransactionId	nextXid;
-
-		Assert(TransactionIdIsValid(RecentGlobalXmin));
-		truncateXid = RecentGlobalXmin;
-
-		GetNextXidAndEpoch(&nextXid, &truncateXidEpoch);
-		/*
-		 * nextXid is certainly logically later than RecentGlobalXmin.  So if
-		 * it's numerically less, it must have wrapped into the next epoch.
-		 */
-		if (nextXid < truncateXid)
-			truncateXidEpoch--;
-	}
-	else
-	{
-		truncateXid = InvalidTransactionId;
-		truncateXidEpoch = 0;
-	}
-
 	LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
 	/*
 	 * Zero the page, mark it with its truncate info, and make an XLOG entry
 	 * about it.
 	 */
-	ZeroMultiXactOffsetPage(pageno, true, truncateXid, truncateXidEpoch);
+	ZeroMultiXactOffsetPage(pageno, true);
 	LWLockRelease(MultiXactOffsetControlLock);
-
-	/*
-	 * Finally, record the new truncation point in shared memory, if
-	 * there isn't one already.
-	 */
-	if (!TransactionIdIsValid(MultiXactState->truncateXid))
-	{
-		MultiXactState->truncateXid = truncateXid;
-		MultiXactState->truncateXidEpoch = truncateXidEpoch;
-	}
 }
 
 /*
@@ -1815,234 +1729,31 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 }
 
 /*
- * Complete a SegmentInfo with the truncate Xid and epoch, as read from its
- * first page.
- */
-static void
-fillSegmentInfoData(SlruCtl ctl, SegmentInfo *segment)
-{
-	int			slotno;
-	MultiXactId *offptr;
-
-	/* lock is acquired by SimpleLruReadPage_ReadOnly */
-	/* FIXME it'd be nice not to trash the entire SLRU cache while at this */
-	slotno = SimpleLruReadPage_ReadOnly(ctl, segment->segno, InvalidTransactionId);
-	offptr = (MultiXactId *) MultiXactOffsetCtl->shared->page_buffer[slotno];
-	segment->truncateXid = *offptr;
-	offptr++;
-	segment->truncateXidEpoch = *offptr;
-	offptr++;
-	segment->firstOffset = *offptr;
-	LWLockRelease(ctl->shared->ControlLock);
-}
-
-/* SegmentInfo comparator, for qsort */
-static int
-compareTruncateXidEpoch(const void *a, const void *b)
-{
-	const SegmentInfo *sega = (const SegmentInfo *) a;
-	const SegmentInfo *segb = (const SegmentInfo *) b;
-	uint32	epocha = sega->truncateXidEpoch;
-	uint32	epochb = segb->truncateXidEpoch;
-	TransactionId	xida = sega->truncateXid;
-	TransactionId	xidb = segb->truncateXid;
-
-	if (epocha < epochb)
-		return -1;
-	if (epocha > epochb)
-		return 1;
-	if (xida < xidb)
-		return -1;
-	if (xida > xidb)
-		return 1;
-	return 0;
-}
-
-/*
- * SlruScanDirectory callback
- * 		This callback is in charge of scanning all existing segments,
- * 		to determine their respective truncation points.
- *
- * This does not delete any segments.
- */
-static bool
-mxactSlruGathererCb(SlruCtl ctl, char *segname, int segpage,
-					void *data)
-{
-	TruncateCbData *truncdata = (TruncateCbData *) data;
-	SegmentInfo		seg;
-
-	/*
-	 * Keep track of the truncate Xid and other data for the caller to sort out
-	 * the new truncation point.
-	 */
-	seg.segno = segpage % SLRU_PAGES_PER_SEGMENT;
-	fillSegmentInfoData(ctl, &seg);
-
-	if (truncdata->remaining == NULL)
-	{
-		truncdata->remaining_alloc = 8;
-		truncdata->remaining_used = 0;
-		truncdata->remaining = palloc(truncdata->remaining_alloc *
-									  sizeof(SegmentInfo));
-	}
-	else if (truncdata->remaining_used == truncdata->remaining_alloc - 1)
-	{
-		truncdata->remaining_alloc *= 2;
-		truncdata->remaining = repalloc(truncdata->remaining,
-										truncdata->remaining_alloc);
-	}
-	truncdata->remaining[truncdata->remaining_used++] = seg;
-
-	return false;	/* keep going */
-}
-
-/*
  * Remove all MultiXactOffset and MultiXactMember segments before the oldest
  * ones still of interest.
  *
- * The truncation rules for the Offset SLRU area are:
- *
- * 1. the current segment is never to be deleted.
- * 2. for all the remaining segments, keep track of their respective number
- *    and truncate Xid info.  The caller is to determine the new truncation
- *    point from this data.
- *
- * This is called only during checkpoints.	We assume no more than one
- * backend does this at a time.
+ * This is called only during checkpoints.  FIXME ??	We assume no more than
+ * one backend does this at a time.
  *
  * XXX do we have any issues with needing to checkpoint here?
+ *
+ * FIXME rewrite this comment
  */
 void
-TruncateMultiXact(TransactionId frozenXid)
+TruncateMultiXact(MultiXactId cutoff_multi)
 {
-	TransactionId	currentXid;
-	uint32		frozenXidEpoch;
-	TruncateCbData	truncdata;
-	SegmentInfo *truncateSegment;
-	SegmentInfo	frozenPosition;
-	int			cutoffPage;
-	int			i;
-	TransactionId	newTruncateXid;
-	int		newTruncateXidEpoch;
-
-	/*
-	 * Quick exit #1: if the truncateXid is not valid, bail out.  We do this
-	 * check without a lock so that it's fast in the common case when there's
-	 * only one segment (which cannot be removed).  If a concurrent backend is
-	 * creating a new segment, no problem: it just means we delay removing
-	 * files until we're next called.  This assumes that storing an aligned
-	 * 32-bit value is atomic.
-	 */
-	if (!TransactionIdIsValid(MultiXactState->truncateXid))
-		return;
-
-	/*
-	 * Compute the epoch corresponding to the frozenXid value we were given.
-	 *
-	 * The current Xid value must be logically newer than frozenXid, so if it's
-	 * numerically lower, it must belong to the next epoch.
-	 */
-	GetNextXidAndEpoch(&currentXid, &frozenXidEpoch);
-	if (currentXid < frozenXid)
-		frozenXidEpoch--;
-
-	/*
-	 * Quick exit #2: the oldest segment is not yet old enough to be removed.
-	 * In that case we don't need to scan the whole directory.
-	 */
-	LWLockAcquire(MultiXactGenLock, LW_SHARED);
-	Assert(frozenXidEpoch >= MultiXactState->truncateXidEpoch);
-	if ((frozenXidEpoch == MultiXactState->truncateXidEpoch) &&
-		(frozenXid < MultiXactState->truncateXid))
-	{
-		LWLockRelease(MultiXactGenLock);
-		return;
-	}
-	LWLockRelease(MultiXactGenLock);
-
-	/*
-	 * Have our callback scan the SLRU directory to let us determine the
-	 * truncation point.
-	 */
-	truncdata.remaining_used = 0;
-	truncdata.remaining_alloc = 0;
-	truncdata.remaining = NULL;
-	SlruScanDirectory(MultiXactOffsetCtl, mxactSlruGathererCb, &truncdata);
-
-	/*
-	 * Determine the maximum segment whose truncateXid is less than the
-	 * truncate point.
-	 */
-	frozenPosition.truncateXid = frozenXid;
-	frozenPosition.truncateXidEpoch = frozenXidEpoch;
-	truncateSegment = NULL;
-	for (i = 0; i < truncdata.remaining_used; i++)
-	{
-		if ((compareTruncateXidEpoch(&frozenPosition,
-									 &(truncdata.remaining[i])) > 0) &&
-			(truncateSegment->segno < truncdata.remaining[i].segno))
-		{
-			truncateSegment = &(truncdata.remaining[i]);
-		}
-	}
-
-	/*
-	 * Nothing to delete? This shouldn't happen, due to quick exit #2 above,
-	 * but we'd better cope.
-	 */
-	if (truncateSegment == NULL)
-		return;
+	int		cutoffPage;
 
 	/* truncate MultiXactOffset */
-	SimpleLruTruncate(MultiXactOffsetCtl, firstPageOf(truncateSegment->segno));
+	SimpleLruTruncate(MultiXactOffsetCtl,
+					  MultiXactIdToOffsetPage(cutoff_multi));
 
 	/*
-	 * And truncate MultiXactMember at the first offset used by the oldest
-	 * remaining segment.
+	 * FIXME -- ...??
 	 */
-	cutoffPage = MXOffsetToMemberPage(truncateSegment->firstOffset);
+	cutoffPage = MXOffsetToMemberPage(cutoff_multi);
 
 	SimpleLruTruncate(MultiXactMemberCtl, cutoffPage);
-
-	/*
-	 * Finally, update shared memory to keep track of the next usable
-	 * truncation point, if any.  If the truncation point for offsets was the
-	 * last remaining segment, then there's no next truncation point: it will
-	 * be set when the next segment is created.  Otherwise, the second
-	 * remaining segment determines the next truncation point.
-	 */
-	newTruncateXid = InvalidTransactionId;
-	newTruncateXidEpoch = 0;
-	for (i = 0; i < truncdata.remaining_used; i++)
-	{
-		if (truncdata.remaining[i].segno == truncateSegment->segno + 1)
-		{
-			newTruncateXid = truncdata.remaining[i].truncateXid;
-			newTruncateXidEpoch = truncdata.remaining[i].truncateXidEpoch;
-			break;
-		}
-	}
-
-	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
-
-	/*
-	 * FIXME there's a race condition here: somebody might have created a new
-	 * segment after we finished scanning the dir.  That scenario would leave
-	 * us with an invalid truncateXid in shared memory, which is not an easy
-	 * situation to get out of.  Needs more thought.
-	 */
-
-	MultiXactState->truncateXid = newTruncateXid;
-	MultiXactState->truncateXidEpoch = newTruncateXidEpoch;
-
-	/*
-	 * we also set the oldest visible MultiXactId to the frozenXid value we
-	 * were given; although the segments we kept may have values earlier than
-	 * that, they are not supposed to remain on disk anyway.
-	 */
-	MultiXactState->oldestMultiXactId = frozenXid;
-	LWLockRelease(MultiXactGenLock);
 }
 
 /*
@@ -2112,15 +1823,12 @@ MultiXactOffsetPrecedes(MultiXactOffset offset1, MultiXactOffset offset2)
 }
 
 static void
-WriteMZeroOffsetPageXlogRec(int pageno, TransactionId truncateXid,
-							uint32 truncateXidEpoch)
+WriteMZeroOffsetPageXlogRec(int pageno)
 {
 	XLogRecData	rdata;
 	MxactZeroOffPg zerooff;
 
 	zerooff.pageno = pageno;
-	zerooff.truncateXid = truncateXid;
-	zerooff.truncateXidEpoch = truncateXidEpoch;
 
 	rdata.data = (char *) (&zerooff);
 	rdata.len = sizeof(MxactZeroOffPg);
@@ -2164,18 +1872,11 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 
 		LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
-		slotno = ZeroMultiXactOffsetPage(zerooff.pageno, false,
-										 zerooff.truncateXid,
-										 zerooff.truncateXidEpoch);
+		slotno = ZeroMultiXactOffsetPage(zerooff.pageno, false);
 		SimpleLruWritePage(MultiXactOffsetCtl, slotno);
 		Assert(!MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
 		LWLockRelease(MultiXactOffsetControlLock);
-
-		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
-		if (!TransactionIdIsValid(MultiXactState->truncateXid))
-			MultiXactState->truncateXid = zerooff.truncateXid;
-		LWLockRelease(MultiXactGenLock);
 	}
 	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
 	{
@@ -2204,7 +1905,6 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 
 		/*
 		 * Make sure nextMXact/nextOffset are beyond what this record has.
-		 * We cannot compute a truncateXid from this.
 		 */
 		MultiXactAdvanceNextMXact(xlrec->mid + 1, xlrec->moff + xlrec->nmembers);
 
@@ -2248,10 +1948,7 @@ multixact_desc(StringInfo buf, uint8 xl_info, char *rec)
 		MxactZeroOffPg zerooff;
 
 		memcpy(&zerooff, XLogRecGetData(rec), sizeof(MxactZeroOffPg));
-		appendStringInfo(buf, "zero offsets page: %d truncate: %u/%u",
-						 zerooff.pageno,
-						 zerooff.truncateXidEpoch,
-						 zerooff.truncateXid);
+		appendStringInfo(buf, "zero offsets page: %d", zerooff.pageno);
 	}
 	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
 	{
