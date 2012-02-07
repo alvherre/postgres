@@ -162,10 +162,6 @@ typedef struct MultiXactStateData
 	/* next-to-be-assigned offset */
 	MultiXactOffset nextOffset;
 
-	/* truncation info for the oldest segment in the offset SLRU area */
-	TransactionId	truncateXid;
-	uint32			truncateXidEpoch;
-
 	/*
 	 * oldest multixact that is still on disk.  Anything older than this should
 	 * not be consulted.
@@ -274,7 +270,6 @@ static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog,
 static int	ZeroMultiXactMemberPage(int pageno, bool writeXlog);
 static bool MultiXactOffsetPagePrecedes(int page1, int page2);
 static bool MultiXactMemberPagePrecedes(int page1, int page2);
-static bool MultiXactIdPrecedes(MultiXactId multi1, MultiXactId multi2);
 static bool MultiXactOffsetPrecedes(MultiXactOffset offset1,
 						MultiXactOffset offset2);
 static void ExtendMultiXactOffset(MultiXactId multi);
@@ -524,6 +519,24 @@ MultiXactIdIsRunning(MultiXactId multi)
 	return false;
 }
 
+/*
+ * ReadNextMultiXactId
+ * 		Return the next MultiXactId to be assigned, but don't allocate it
+ */
+MultiXactId
+ReadNextMultiXactId(void)
+{
+	MultiXactId		mxid;
+
+	/* XXX we could presumably do this without a lock. */
+	LWLockAcquire(MultiXactGenLock, LW_SHARED);
+	mxid = MultiXactState->nextMXact;
+	LWLockRelease(MultiXactGenLock);
+
+	mxid = HandleMxactOffsetCornerCases(mxid);
+
+	return mxid;
+}
 
 /*
  * CreateMultiXactId
@@ -1532,6 +1545,130 @@ MultiXactSetNextMXact(MultiXactId nextMulti,
 }
 
 /*
+ * Determine the last safe MultiXactId to allocate given the currently oldest
+ * datminmxid (ie, the oldest MultiXactId that might exist in any database
+ * of our cluster), and the OID of the (or a) database with that value.
+ */
+void
+SetMultiXactIdLimit(MultiXactid oldest_datminmxid, Oid oldest_datoid)
+{
+	MultiXactId	multiVacLimit;
+	MultiXactId	multiWarnLimit;
+	MultiXactId	multiStopLimit;
+	MultiXactId	multiWrapLimit;
+	MultiXactId	curMulti;
+
+	Assert(MultiXactIdIsValid(oldest_datminmxid));
+
+	/*
+	 * The place where we actually get into deep trouble is halfway around
+	 * from the oldest potentially-existing XID/multi.  (This calculation is
+	 * probably off by one or two counts for Xids, because the special XIDs
+	 * reduce the size of the loop a little bit.  But we throw in plenty of
+	 * slop below, so it doesn't matter.)
+	 */
+	multiWrapLimit = oldest_datminmxid + (MaxMultiXactId >> 1);
+	if (multiWrapLimit < FirstMultiXactId)
+		multiWrapLimit += FirstMultiXactId;
+
+	/*
+	 * We'll refuse to continue assigning MultiXactIds in interactive mode once we get
+	 * within 1M multis of data loss.  This leaves lots of room for the
+	 * DBA to fool around fixing things in a standalone backend, while not
+	 * being significant compared to total MultiXactId space. (Note that since
+	 * vacuuming requires one transaction per table cleaned, we had better be
+	 * sure there's lots of multis left...)
+	 */
+	multiStopLimit = multiWrapLimit - 1000000;
+	if (multiStopLimit < FirstMultiXactId)
+		multiStopLimit -= FirstMultiXactId;
+
+	/*
+	 * We'll start complaining loudly when we get within 10M multis of the stop
+	 * point.	This is kind of arbitrary, but if you let your gas gauge get
+	 * down to 1% of full, would you be looking for the next gas station?  We
+	 * need to be fairly liberal about this number because there are lots of
+	 * scenarios where most transactions are done by automatic clients that
+	 * won't pay attention to warnings. (No, we're not gonna make this
+	 * configurable.  If you know enough to configure it, you know enough to
+	 * not get in this kind of trouble in the first place.)
+	 */
+	multiWarnLimit = multiStopLimit - 10000000;
+	if (multiWarnLimit < FirstMultiXactId)
+		multiWarnLimit -= FirstMultiXactId;
+
+	/*
+	 * We'll start trying to force autovacuums when oldest_datminmxid gets
+	 * to be more than 200 million transactions old.
+	 */
+	multiVacLimit = oldest_datminmxid + 200000000;
+	if (multiVacLimit < FirstMultiXactId)
+		multiVacLimit += FirstMultiXactId;
+
+	/* Grab lock for just long enough to set the new limit values */
+	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+	ShmemVariableCache->oldestMulti = oldest_datminmxid;
+	ShmemVariableCache->multiVacLimit = multiVacLimit;
+	ShmemVariableCache->multiWarnLimit = multiWarnLimit;
+	ShmemVariableCache->multiStopLimit = multiStopLimit;
+	ShmemVariableCache->multiWrapLimit = multiWrapLimit;
+	ShmemVariableCache->oldestMultiDB = oldestmulti_datoid;
+	curMulti = ShmemVariableCache->nextMXact;
+	LWLockRelease(MultiXactGenLock);
+
+	/* Log the info */
+	ereport(DEBUG1,
+			(errmsg("MultiXactId wrap limit is %u, limited by database with OID %u",
+					multiWrapLimit, oldestmulti_datoid)));
+
+	/*
+	 * If past the autovacuum force point, immediately signal an autovac
+	 * request.  The reason for this is that autovac only processes one
+	 * database per invocation.  Once it's finished cleaning up the oldest
+	 * database, it'll call here, and we'll signal the postmaster to start
+	 * another iteration immediately if there are still any old databases.
+	 */
+	if (!MultiXactIdPrecedes(multiVacLimit, curMulti) &&
+		IsUnderPostmaster && !InRecovery)
+		SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
+
+	/* Give an immediate warning if past the wrap warn point */
+	if (!MultiXactIdPrecedes(multiWarnLimit, curMulti) && !InRecovery)
+	{
+		char	   *oldest_datname;
+
+		/*
+		 * We can be called when not inside a transaction, for example during
+		 * StartupXLOG().  In such a case we cannot do database access, so we
+		 * must just report the oldest DB's OID.
+		 *
+		 * Note: it's also possible that get_database_name fails and returns
+		 * NULL, for example because the database just got dropped.  We'll
+		 * still warn, even though the warning might now be unnecessary.
+		 */
+		if (IsTransactionState())
+			oldest_datname = get_database_name(oldest_datoid);
+		else
+			oldest_datname = NULL;
+
+		if (oldest_datname)
+			ereport(WARNING,
+			(errmsg("database \"%s\" must be vacuumed before %u more MultiXactId are used",
+					oldest_datname,
+					multiWrapLimit - curMulti),
+			 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+					 "You might also need to commit or roll back old prepared transactions.")));
+		else
+			ereport(WARNING,
+					(errmsg("database with OID %u must be vacuumed before %u more MultiXactId are used",
+							oldest_datoid,
+							multiWrapLimit - curMulti),
+					 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+							 "You might also need to commit or roll back old prepared transactions.")));
+	}
+}
+
+/*
  * Ensure the next-to-be-assigned MultiXactId is at least minMulti,
  * and similarly nextOffset is at least minMultiOffset.
  *
@@ -1955,7 +2092,7 @@ MultiXactMemberPagePrecedes(int page1, int page2)
  * XXX do we need to do something special for InvalidMultiXactId?
  * (Doesn't look like it.)
  */
-static bool
+bool
 MultiXactIdPrecedes(MultiXactId multi1, MultiXactId multi2)
 {
 	int32		diff = (int32) (multi1 - multi2);

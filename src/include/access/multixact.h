@@ -21,6 +21,7 @@
  */
 #define InvalidMultiXactId	((MultiXactId) 0)
 #define FirstMultiXactId	((MultiXactId) 2)
+#define MaxMultiXactId		((MultiXactId) 0xFFFFFFFF)
 
 #define MultiXactIdIsValid(multi) ((multi) != InvalidMultiXactId)
 
@@ -82,9 +83,11 @@ extern MultiXactId MultiXactIdCreate(TransactionId xid1,
 				  MultiXactStatus status2);
 extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
 				  MultiXactStatus status);
+extern MultiXactId ReadNextMultiXactId(void);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern void MultiXactIdSetOldestMember(void);
 extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids);
+extern bool MultiXactIdPrecedes(MultiXactId multi1, MultiXactId multi2);
 
 extern void AtEOXact_MultiXact(void);
 
@@ -93,6 +96,8 @@ extern void MultiXactShmemInit(void);
 extern void BootStrapMultiXact(void);
 extern void StartupMultiXact(void);
 extern void ShutdownMultiXact(void);
+extern void SetMultiXactIdLimit(MultiXactid oldest_datminmxid,
+					Oid oldest_datoid);
 extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
 						 MultiXactOffset *nextMultiOffset,

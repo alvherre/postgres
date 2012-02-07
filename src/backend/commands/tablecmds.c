@@ -16,6 +16,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/multixact.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/sysattr.h"
@@ -3415,7 +3416,8 @@ ATRewriteTables(List **wqueue, LOCKMODE lockmode)
 			 * interest in letting this code work on system catalogs.
 			 */
 			finish_heap_swap(tab->relid, OIDNewHeap,
-							 false, false, true, RecentXmin);
+							 false, false, true, RecentXmin,
+							 ReadNextMultiXactId());
 		}
 		else
 		{

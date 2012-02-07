@@ -124,6 +124,31 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
 }
 
 /*
+ * only to be called when the multixact that marked the tuple has no live
+ * members left
+ */
+static inline void
+ResetMultiHintBit(HeapTupleHeader tuple, Buffer buffer,
+				  TransactionId xid, bool mark_committed)
+{
+	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
+	Assert(!(tuple->t_infomask & HEAP_XMAX_INVALID));
+	Assert(!MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)));
+
+	tuple->t_infomask &= ~HEAP_XMAX_BITS;
+	HeapTupleHeaderSetXmax(tuple, xid);
+	if (!TransactionIdIsValid(xid))
+		tuple->t_infomask |= HEAP_XMAX_INVALID;
+	/* note that HEAP_UPDATE_KEY_REVOKED persists, if set */
+
+	if (mark_committed)
+		SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xid);
+	else
+		SetBufferCommitInfoNeedsSave(buffer);
+}
+
+
+/*
  * HeapTupleSetHintBits --- exported version of SetHintBits()
  *
  * This must be separate because of C99's brain-dead notions about how to
@@ -280,10 +305,7 @@ HeapTupleSatisfiesSelf(HeapTupleHeader tuple, Snapshot snapshot, Buffer buffer)
 		if (TransactionIdIsInProgress(xmax))
 			return true;
 		if (TransactionIdDidCommit(xmax))
-		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			return false;
-		}
 		return true;
 	}
 
@@ -764,6 +786,8 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 		{
 			if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 				return HeapTupleBeingUpdated;
+
+			ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
 			return HeapTupleMayBeUpdated;
 		}
 
@@ -782,10 +806,11 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
+			ResetMultiHintBit(tuple, buffer, xmax, true);
 			return HeapTupleUpdated;
 		}
 		/* it must have aborted or crashed */
+		ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
 		return HeapTupleMayBeUpdated;
 	}
 
@@ -973,10 +998,7 @@ HeapTupleSatisfiesDirty(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 		}
 		if (TransactionIdDidCommit(xmax))
-		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			return false;
-		}
 		return true;
 	}
 
@@ -1171,7 +1193,6 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 			return true;
 		if (TransactionIdDidCommit(xmax))
 		{
-			SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
 			/* updating transaction committed, but when? */
 			if (XidInMVCCSnapshot(xmax, snapshot))
 				return true;	/* treat as still in progress */
@@ -1331,21 +1352,23 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 			{
 				if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 					return HEAPTUPLE_LIVE;
+				ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+
 			}
 			else
 			{
 				if (TransactionIdIsInProgress(HeapTupleHeaderGetRawXmax(tuple)))
 					return HEAPTUPLE_LIVE;
+				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
+							InvalidTransactionId);
 			}
-
-			/*
-			 * We don't really care whether xmax did commit, abort or crash.
-			 * We know that xmax did lock the tuple, but it did not and will
-			 * never actually update it.
-			 */
-			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
-						InvalidTransactionId);
 		}
+
+		/*
+		 * We don't really care whether xmax did commit, abort or crash.
+		 * We know that xmax did lock the tuple, but it did not and will
+		 * never actually update it.
+		 */
 
 		return HEAPTUPLE_LIVE;
 	}
@@ -1356,44 +1379,45 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 
 		if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 		{
-			if (tuple->t_infomask & HEAP_XMAX_LOCK_ONLY)
-				return HEAPTUPLE_LIVE;
-			else
-			{
-				xmax = HeapTupleGetUpdateXid(tuple);
-				if (TransactionIdDidCommit(xmax))
-					return HEAPTUPLE_RECENTLY_DEAD;
-				else if (TransactionIdIsInProgress(xmax) ||
-						 TransactionIdIsCurrentTransactionId(xmax))
-					return HEAPTUPLE_DELETE_IN_PROGRESS;
-				return HEAPTUPLE_LIVE;
-			}
+			/* already checked above */
+			Assert(!HeapTupleHeaderIsOnlyLocked(tuple));
+
+			xmax = HeapTupleGetUpdateXid(tuple);
+			if (TransactionIdDidCommit(xmax))
+				/* there are still lockers around -- can't return DEAD here */
+				return HEAPTUPLE_RECENTLY_DEAD;
+			else if (TransactionIdIsInProgress(xmax))
+				return HEAPTUPLE_DELETE_IN_PROGRESS;
+			/* updating transaction aborted */
+			return HEAPTUPLE_LIVE;
 		}
 
+		Assert(!(tuple->t_infomask & HEAP_XMAX_COMMITTED));
+
 		xmax = HeapTupleGetUpdateXid(tuple);
-		if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED))
+		if (TransactionIdDidCommit(xmax))
 		{
-			Assert(!TransactionIdIsInProgress(xmax));
-			Assert(!TransactionIdIsCurrentTransactionId(xmax));
-			if (TransactionIdDidCommit(xmax))
-				SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xmax);
-			else
+			if (!TransactionIdPrecedes(xmax, OldestXmin))
 			{
-				/*
-				 * Not in Progress, Not Committed, so either Aborted or crashed
-				 */
-				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID,
-							InvalidTransactionId);
-				return HEAPTUPLE_LIVE;
+				ResetMultiHintBit(tuple, buffer, xmax, true);
+				return HEAPTUPLE_RECENTLY_DEAD;
 			}
+			else
+				return HEAPTUPLE_DEAD;
+		}
+		else
+		{
+			/*
+			 * Not in Progress, Not Committed, so either Aborted or crashed.
+			 */
+			ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+			return HEAPTUPLE_LIVE;
 		}
 
 		/*
 		 * Deleter committed, but perhaps it was recent enough that some open
 		 * transactions could still see the tuple.
 		 */
-		if (!TransactionIdPrecedes(xmax, OldestXmin))
-			return HEAPTUPLE_RECENTLY_DEAD;
 
 		/* Otherwise, it's dead and removable */
 		return HEAPTUPLE_DEAD;

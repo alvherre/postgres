@@ -4722,6 +4722,9 @@ heap_inplace_update(Relation relation, HeapTuple tuple)
  * because this function is applied during WAL recovery, when we don't have
  * access to any such state, and can't depend on the hint bits to be set.)
  *
+ * Similarly, cutoff_multi must be smallest than the smallest MultiXactId
+ * used by any transaction currently open.
+ *
  * In lazy VACUUM, we call this while initially holding only a shared lock
  * on the tuple's buffer.  If any change is needed, we trade that in for an
  * exclusive lock before making the change.  Caller should pass the buffer ID
@@ -4738,7 +4741,7 @@ heap_inplace_update(Relation relation, HeapTuple tuple)
  */
 bool
 heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
-				  Buffer buf)
+				  MultiXactId cutoff_multi, Buffer buf)
 {
 	bool		changed = false;
 	TransactionId xid;
@@ -4777,32 +4780,33 @@ heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 	 * cutoff; it doesn't remove dead members of a very old multixact.
 	 */
 recheck_xmax:
-		xid = HeapTupleHeaderGetUpdateXid(tuple);
-		if (TransactionIdIsNormal(xid) &&
-			TransactionIdPrecedes(xid, cutoff_xid))
+	xid = HeapTupleHeaderGetRawXmax(tuple);
+	if (TransactionIdIsNormal(xid) &&
+		(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI) &&
+		 TransactionIdPrecedes(xid, cutoff_xid)) ||
+		(MultiXactIdPrecedes(xid, cutoff_multi)))
+	{
+		if (buf != InvalidBuffer)
 		{
-			if (buf != InvalidBuffer)
-			{
-				/* trade in share lock for exclusive lock */
-				LockBuffer(buf, BUFFER_LOCK_UNLOCK);
-				LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-				buf = InvalidBuffer;
-				goto recheck_xmax;		/* see comment above */
-			}
-			HeapTupleHeaderSetXmax(tuple, InvalidTransactionId);
-
-			/*
-			 * The tuple might be marked either XMAX_INVALID or XMAX_COMMITTED
-			 * + LOCKED, possibly with IS_MULTI too.  Normalize to INVALID just
-			 * to be sure no one gets confused.  Also get rid of the
-			 * HEAP_UPDATE_KEY_REVOKED bit.
-			 */
-			tuple->t_infomask &= ~HEAP_XMAX_BITS;
-			tuple->t_infomask |= HEAP_XMAX_INVALID;
-			HeapTupleHeaderClearHotUpdated(tuple);
-			tuple->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
-			changed = true;
+			/* trade in share lock for exclusive lock */
+			LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+			LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+			buf = InvalidBuffer;
+			goto recheck_xmax;		/* see comment above */
 		}
+		HeapTupleHeaderSetXmax(tuple, InvalidTransactionId);
+
+		/*
+		 * The tuple might be marked either XMAX_INVALID or XMAX_COMMITTED
+		 * + LOCKED.  Normalize to INVALID just to be sure no one gets
+		 * confused.  Also get rid of the HEAP_UPDATE_KEY_REVOKED bit.
+		 */
+		tuple->t_infomask &= ~HEAP_XMAX_BITS;
+		tuple->t_infomask |= HEAP_XMAX_INVALID;
+		HeapTupleHeaderClearHotUpdated(tuple);
+		tuple->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+		changed = true;
+	}
 
 	/*
 	 * Although xvac per se could only be set by old-style VACUUM FULL, it
@@ -5079,14 +5083,14 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
  * heap_tuple_needs_freeze
  *
  * Check to see whether any of the XID fields of a tuple (xmin, xmax, xvac)
- * are older than the specified cutoff XID.  If so, return TRUE.
+ * are older than the specified cutoff XID or MultiXactId.  If so, return TRUE.
  *
  * It doesn't matter whether the tuple is alive or dead, we are checking
  * to see if a tuple needs to be removed or frozen to avoid wraparound.
  */
 bool
 heap_tuple_needs_freeze(HeapTupleHeader tuple, TransactionId cutoff_xid,
-				  Buffer buf)
+						MultiXactId cutoff_multi, Buffer buf)
 {
 	TransactionId xid;
 
@@ -5095,12 +5099,23 @@ heap_tuple_needs_freeze(HeapTupleHeader tuple, TransactionId cutoff_xid,
 		TransactionIdPrecedes(xid, cutoff_xid))
 		return true;
 
-	if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
+	if (!(tuple->t_infomask & HEAP_XMAX_INVALID))
 	{
-		xid = HeapTupleHeaderGetRawXmax(tuple);
-		if (TransactionIdIsNormal(xid) &&
-			TransactionIdPrecedes(xid, cutoff_xid))
-			return true;
+		if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
+		{
+			xid = HeapTupleHeaderGetRawXmax(tuple);
+			if (TransactionIdIsNormal(xid) &&
+				TransactionIdPrecedes(xid, cutoff_xid))
+				return true;
+		}
+		else
+		{
+			MultiXactId multi;
+
+			multi = HeapTupleHeaderGetRawXmax(tuple);
+			if (MultiXactIdPrecedes(multi, cutoff_multi))
+				return true;
+		}
 	}
 
 	if (tuple->t_infomask & HEAP_MOVED)
@@ -5347,7 +5362,7 @@ log_heap_clean(Relation reln, Buffer buffer,
  */
 XLogRecPtr
 log_heap_freeze(Relation reln, Buffer buffer,
-				TransactionId cutoff_xid,
+				TransactionId cutoff_xid, MultiXactId cutoff_multi,
 				OffsetNumber *offsets, int offcnt)
 {
 	xl_heap_freeze xlrec;
@@ -5362,6 +5377,7 @@ log_heap_freeze(Relation reln, Buffer buffer,
 	xlrec.node = reln->rd_node;
 	xlrec.block = BufferGetBlockNumber(buffer);
 	xlrec.cutoff_xid = cutoff_xid;
+	xlrec.cutoff_multi = cutoff_multi;
 
 	rdata[0].data = (char *) &xlrec;
 	rdata[0].len = SizeOfHeapFreeze;
@@ -5652,6 +5668,7 @@ heap_xlog_freeze(XLogRecPtr lsn, XLogRecord *record)
 {
 	xl_heap_freeze *xlrec = (xl_heap_freeze *) XLogRecGetData(record);
 	TransactionId cutoff_xid = xlrec->cutoff_xid;
+	MultiXactId	cutoff_multi = xlrec->cutoff_multi;
 	Buffer		buffer;
 	Page		page;
 
@@ -5693,7 +5710,7 @@ heap_xlog_freeze(XLogRecPtr lsn, XLogRecord *record)
 			ItemId		lp = PageGetItemId(page, *offsets);
 			HeapTupleHeader tuple = (HeapTupleHeader) PageGetItem(page, lp);
 
-			(void) heap_freeze_tuple(tuple, cutoff_xid, InvalidBuffer);
+			(void) heap_freeze_tuple(tuple, cutoff_xid, cutoff_multi, InvalidBuffer);
 			offsets++;
 		}
 	}
@@ -6697,10 +6714,10 @@ heap2_desc(StringInfo buf, uint8 xl_info, char *rec)
 	{
 		xl_heap_freeze *xlrec = (xl_heap_freeze *) rec;
 
-		appendStringInfo(buf, "freeze: rel %u/%u/%u; blk %u; cutoff %u",
+		appendStringInfo(buf, "freeze: rel %u/%u/%u; blk %u; cutoff xid %u multi %u",
 						 xlrec->node.spcNode, xlrec->node.dbNode,
 						 xlrec->node.relNode, xlrec->block,
-						 xlrec->cutoff_xid);
+						 xlrec->cutoff_xid, xlrec->cutoff_multi);
 	}
 	else if (info == XLOG_HEAP2_CLEAN)
 	{

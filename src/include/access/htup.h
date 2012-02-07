@@ -831,10 +831,11 @@ typedef struct xl_heap_freeze
 	RelFileNode node;
 	BlockNumber block;
 	TransactionId cutoff_xid;
+	MultiXactId cutoff_multi;
 	/* TUPLE OFFSET NUMBERS FOLLOW AT THE END */
 } xl_heap_freeze;
 
-#define SizeOfHeapFreeze (offsetof(xl_heap_freeze, cutoff_xid) + sizeof(TransactionId))
+#define SizeOfHeapFreeze (offsetof(xl_heap_freeze, cutoff_multi) + sizeof(MultiXactId))
 
 /* This is what we need to know about setting a visibility map bit */
 typedef struct xl_heap_visible

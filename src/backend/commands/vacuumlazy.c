@@ -109,6 +109,7 @@ static int	elevel = -1;
 
 static TransactionId OldestXmin;
 static TransactionId FreezeLimit;
+static MultiXactId MultiXactFrzLimit;
 
 static BufferAccessStrategy vac_strategy;
 
@@ -182,7 +183,8 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 
 	vacuum_set_xid_limits(vacstmt->freeze_min_age, vacstmt->freeze_table_age,
 						  onerel->rd_rel->relisshared,
-						  &OldestXmin, &FreezeLimit, &freezeTableLimit);
+						  &OldestXmin, &FreezeLimit, &freezeTableLimit,
+						  &MultiXactFrzLimit);
 	scan_all = TransactionIdPrecedesOrEquals(onerel->rd_rel->relfrozenxid,
 											 freezeTableLimit);
 
@@ -785,7 +787,7 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 				 * freezing.  Note we already have exclusive buffer lock.
 				 */
 				if (heap_freeze_tuple(tuple.t_data, FreezeLimit,
-									  InvalidBuffer))
+									  MultiXactFrzLimit, InvalidBuffer))
 					frozen[nfrozen++] = offnum;
 			}
 		}						/* scan along page */
@@ -803,7 +805,7 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 				XLogRecPtr	recptr;
 
 				recptr = log_heap_freeze(onerel, buf, FreezeLimit,
-										 frozen, nfrozen);
+										 MultiXactFrzLimit, frozen, nfrozen);
 				PageSetLSN(page, recptr);
 				PageSetTLI(page, ThisTimeLineID);
 			}
@@ -1108,7 +1110,8 @@ lazy_check_needs_freeze(Buffer buf)
 
 		tupleheader = (HeapTupleHeader) PageGetItem(page, itemid);
 
-		if (heap_tuple_needs_freeze(tupleheader, FreezeLimit, buf))
+		if (heap_tuple_needs_freeze(tupleheader, FreezeLimit,
+									MultiXactFrzLimit, buf))
 			return true;
 	}						/* scan along page */
 

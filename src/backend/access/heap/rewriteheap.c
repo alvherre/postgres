@@ -127,6 +127,8 @@ typedef struct RewriteStateData
 										 * determine tuple visibility */
 	TransactionId rs_freeze_xid;/* Xid that will be used as freeze cutoff
 								 * point */
+	MultiXactId	rs_freeze_multi;/* MultiXactId that will be used as freeze
+								 * cutoff point for multixacts */
 	MemoryContext rs_cxt;		/* for hash tables and entries and tuples in
 								 * them */
 	HTAB	   *rs_unresolved_tups;		/* unmatched A tuples */
@@ -176,6 +178,7 @@ static void raw_heap_insert(RewriteState state, HeapTuple tup);
  * new_heap		new, locked heap relation to insert tuples to
  * oldest_xmin	xid used by the caller to determine which tuples are dead
  * freeze_xid	xid before which tuples will be frozen
+ * freeze_multi multixact before which multis will be frozen
  * use_wal		should the inserts to the new heap be WAL-logged?
  *
  * Returns an opaque RewriteState, allocated in current memory context,
@@ -183,7 +186,8 @@ static void raw_heap_insert(RewriteState state, HeapTuple tup);
  */
 RewriteState
 begin_heap_rewrite(Relation new_heap, TransactionId oldest_xmin,
-				   TransactionId freeze_xid, bool use_wal)
+				   TransactionId freeze_xid, MultiXactId freeze_multi,
+				   bool use_wal)
 {
 	RewriteState state;
 	MemoryContext rw_cxt;
@@ -212,6 +216,7 @@ begin_heap_rewrite(Relation new_heap, TransactionId oldest_xmin,
 	state->rs_use_wal = use_wal;
 	state->rs_oldest_xmin = oldest_xmin;
 	state->rs_freeze_xid = freeze_xid;
+	state->rs_freeze_multi = freeze_multi;
 	state->rs_cxt = rw_cxt;
 
 	/* Initialize hash tables used to track update chains */
@@ -341,7 +346,8 @@ rewrite_heap_tuple(RewriteState state,
 	 * we can get the right things to happen by passing InvalidBuffer for the
 	 * buffer.
 	 */
-	heap_freeze_tuple(new_tuple->t_data, state->rs_freeze_xid, InvalidBuffer);
+	heap_freeze_tuple(new_tuple->t_data, state->rs_freeze_xid,
+					  state->rs_freeze_multi, InvalidBuffer);
 
 	/*
 	 * Invalid ctid means that ctid should point to the tuple itself. We'll

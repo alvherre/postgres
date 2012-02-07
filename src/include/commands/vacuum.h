@@ -156,7 +156,8 @@ extern void vacuum_set_xid_limits(int freeze_min_age, int freeze_table_age,
 					  bool sharedRel,
 					  TransactionId *oldestXmin,
 					  TransactionId *freezeLimit,
-					  TransactionId *freezeTableLimit);
+					  TransactionId *freezeTableLimit,
+					  MultiXactId *multiXactFrzLimit);
 extern void vac_update_datfrozenxid(void);
 extern void vacuum_delay_point(void);
 
