@@ -164,6 +164,9 @@ typedef struct MultiXactStateData
 	/* next-to-be-assigned offset */
 	MultiXactOffset nextOffset;
 
+	/* the Offset SLRU area was last truncated at this MultiXactId */
+	MultiXactId lastTruncationPoint;
+
 	/*
 	 * oldest multixact that is still on disk.  Anything older than this should
 	 * not be consulted.
@@ -176,12 +179,57 @@ typedef struct MultiXactStateData
 	MultiXactId		multiStopLimit;
 	MultiXactId		multiWrapLimit;
 	Oid				oldestMultiDB;
+
+	/*
+	 * Per-backend data starts here.  We have two arrays stored in the area
+	 * immediately following the MultiXactStateData struct. Each is indexed by
+	 * BackendId.
+	 *
+	 * In both arrays, there's a slot for all normal backends (1..MaxBackends)
+	 * followed by a slot for max_prepared_xacts prepared transactions. Valid
+	 * BackendIds start from 1; element zero of each array is never used.
+	 *
+	 * OldestMemberMXactId[k] is the oldest MultiXactId each backend's current
+	 * transaction(s) could possibly be a member of, or InvalidMultiXactId
+	 * when the backend has no live transaction that could possibly be a
+	 * member of a MultiXact.  Each backend sets its entry to the current
+	 * nextMXact counter just before first acquiring a shared lock in a given
+	 * transaction, and clears it at transaction end. (This works because only
+	 * during or after acquiring a shared lock could an XID possibly become a
+	 * member of a MultiXact, and that MultiXact would have to be created
+	 * during or after the lock acquisition.)
+	 *
+	 * OldestVisibleMXactId[k] is the oldest MultiXactId each backend's
+	 * current transaction(s) think is potentially live, or InvalidMultiXactId
+	 * when not in a transaction or not in a transaction that's paid any
+	 * attention to MultiXacts yet.  This is computed when first needed in a
+	 * given transaction, and cleared at transaction end.  We can compute it
+	 * as the minimum of the valid OldestMemberMXactId[] entries at the time
+	 * we compute it (using nextMXact if none are valid).  Each backend is
+	 * required not to attempt to access any SLRU data for MultiXactIds older
+	 * than its own OldestVisibleMXactId[] setting; this is necessary because
+	 * the checkpointer could truncate away such data at any instant.
+	 *
+	 * The checkpointer can compute the safe truncation point as the oldest
+	 * valid value among all the OldestMemberMXactId[] and
+	 * OldestVisibleMXactId[] entries, or nextMXact if none are valid.
+	 * Clearly, it is not possible for any later-computed OldestVisibleMXactId
+	 * value to be older than this, and so there is no risk of truncating data
+	 * that is still needed.
+	 */
+	MultiXactId perBackendXactIds[1];	/* VARIABLE LENGTH ARRAY */
 } MultiXactStateData;
 
-/* Pointer to the state data in shared memory */
-static MultiXactStateData *MultiXactState;
+/*
+ * Last element of OldestMemberMXactID and OldestVisibleMXactId arrays.
+ * Valid elements are (1..MaxOldestSlot); element 0 is never used.
+ */
+#define MaxOldestSlot	(MaxBackends + max_prepared_xacts)
 
-#define firstPageOf(segment) ((segment) * SLRU_PAGES_PER_SEGMENT)
+/* Pointers to the state data in shared memory */
+static MultiXactStateData *MultiXactState;
+static MultiXactId *OldestMemberMXactId;
+static MultiXactId *OldestVisibleMXactId;
 
 /*
  * MultiXactZeroOffsetPage xlog record
@@ -233,11 +281,11 @@ static MemoryContext MXactContext = NULL;
 #endif
 
 /* internal MultiXactId management */
+static void MultiXactIdSetOldestVisible(void);
 static MultiXactId CreateMultiXactId(int nmembers, MultiXactMember *members);
 static void RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 				   int nmembers, MultiXactMember *members);
 static MultiXactId GetNewMultiXactId(int nmembers, MultiXactOffset *offset);
-static MultiXactId HandleMxactOffsetCornerCases(MultiXactId multi);
 
 /* MultiXact cache management */
 static int mxactMemberComparator(const void *arg1, const void *arg2);
@@ -501,6 +549,107 @@ MultiXactIdIsRunning(MultiXactId multi)
 }
 
 /*
+ * MultiXactIdSetOldestMember
+ *		Save the oldest MultiXactId this transaction could be a member of.
+ *
+ * We set the OldestMemberMXactId for a given transaction the first time
+ * it's going to acquire a shared lock.  We need to do this even if we end
+ * up using a TransactionId instead of a MultiXactId, because there is a
+ * chance that another transaction would add our XID to a MultiXactId.
+ *
+ * The value to set is the next-to-be-assigned MultiXactId, so this is meant
+ * to be called just before acquiring a shared lock.
+ */
+void
+MultiXactIdSetOldestMember(void)
+{
+	if (!MultiXactIdIsValid(OldestMemberMXactId[MyBackendId]))
+	{
+		MultiXactId nextMXact;
+
+		/*
+		 * You might think we don't need to acquire a lock here, since
+		 * fetching and storing of TransactionIds is probably atomic, but in
+		 * fact we do: suppose we pick up nextMXact and then lose the CPU for
+		 * a long time.  Someone else could advance nextMXact, and then
+		 * another someone else could compute an OldestVisibleMXactId that
+		 * would be after the value we are going to store when we get control
+		 * back.  Which would be wrong.
+		 */
+		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+
+		/*
+		 * We have to beware of the possibility that nextMXact is in the
+		 * wrapped-around state.  We don't fix the counter itself here, but we
+		 * must be sure to store a valid value in our array entry.
+		 */
+		nextMXact = MultiXactState->nextMXact;
+		if (nextMXact < FirstMultiXactId)
+			nextMXact = FirstMultiXactId;
+
+		OldestMemberMXactId[MyBackendId] = nextMXact;
+
+		LWLockRelease(MultiXactGenLock);
+
+		debug_elog4(DEBUG2, "MultiXact: setting OldestMember[%d] = %u",
+					MyBackendId, nextMXact);
+	}
+}
+
+/*
+ * MultiXactIdSetOldestVisible
+ *		Save the oldest MultiXactId this transaction considers possibly live.
+ *
+ * We set the OldestVisibleMXactId for a given transaction the first time
+ * it's going to inspect any MultiXactId.  Once we have set this, we are
+ * guaranteed that the checkpointer won't truncate off SLRU data for
+ * MultiXactIds at or after our OldestVisibleMXactId.
+ *
+ * The value to set is the oldest of nextMXact and all the valid per-backend
+ * OldestMemberMXactId[] entries.  Because of the locking we do, we can be
+ * certain that no subsequent call to MultiXactIdSetOldestMember can set
+ * an OldestMemberMXactId[] entry older than what we compute here.	Therefore
+ * there is no live transaction, now or later, that can be a member of any
+ * MultiXactId older than the OldestVisibleMXactId we compute here.
+ */
+static void
+MultiXactIdSetOldestVisible(void)
+{
+	if (!MultiXactIdIsValid(OldestVisibleMXactId[MyBackendId]))
+	{
+		MultiXactId oldestMXact;
+		int			i;
+
+		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+
+		/*
+		 * We have to beware of the possibility that nextMXact is in the
+		 * wrapped-around state.  We don't fix the counter itself here, but we
+		 * must be sure to store a valid value in our array entry.
+		 */
+		oldestMXact = MultiXactState->nextMXact;
+		if (oldestMXact < FirstMultiXactId)
+			oldestMXact = FirstMultiXactId;
+
+		for (i = 1; i <= MaxOldestSlot; i++)
+		{
+			MultiXactId thisoldest = OldestMemberMXactId[i];
+
+			if (MultiXactIdIsValid(thisoldest) &&
+				MultiXactIdPrecedes(thisoldest, oldestMXact))
+				oldestMXact = thisoldest;
+		}
+
+		OldestVisibleMXactId[MyBackendId] = oldestMXact;
+
+		LWLockRelease(MultiXactGenLock);
+
+		debug_elog4(DEBUG2, "MultiXact: setting OldestVisible[%d] = %u",
+					MyBackendId, oldestMXact);
+	}
+}
+
+/*
  * ReadNextMultiXactId
  * 		Return the next MultiXactId to be assigned, but don't allocate it
  */
@@ -514,7 +663,8 @@ ReadNextMultiXactId(void)
 	mxid = MultiXactState->nextMXact;
 	LWLockRelease(MultiXactGenLock);
 
-	mxid = HandleMxactOffsetCornerCases(mxid);
+	if (mxid < FirstMultiXactId)
+		mxid = FirstMultiXactId;
 
 	return mxid;
 }
@@ -718,6 +868,9 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 
 	debug_elog3(DEBUG2, "GetNew: for %d xids", nmembers);
 
+	/* MultiXactIdSetOldestMember() must have been called already */
+	Assert(MultiXactIdIsValid(OldestMemberMXactId[MyBackendId]));
+
 	/* safety check, we should never get this far in a HS slave */
 	if (RecoveryInProgress())
 		elog(ERROR, "cannot assign MultiXactIds during recovery");
@@ -725,6 +878,8 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 
 	result = MultiXactState->nextMXact;
+	if (result < FirstMultiXactId)
+		result = FirstMultiXactId;
 
 	/*----------
 	 * Check to see if it's safe to assign another MultiXactId.  This protects
@@ -810,10 +965,12 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 		/* Re-acquire lock and start over */
 		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 		result = MultiXactState->nextMXact;
+		if (result < FirstMultiXactId)
+			result = FirstMultiXactId;
 	}
 
-	/* Assign the MXID, and handle corner cases of the nextMXact counter */
-	result = MultiXactState->nextMXact = HandleMxactOffsetCornerCases(result);
+	/* Assign the MXID */
+	MultiXactState->nextMXact = result;
 
 	/*
 	 * Make sure there is room for it in the file.
@@ -867,22 +1024,6 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 }
 
 /*
- * HandleMxactOffsetCornerCases
- * 		Properly handle corner cases of MultiXactId enumeration
- *
- * This function takes a MultiXactId and returns a value that's actually a
- * valid multi.
- */
-static MultiXactId
-HandleMxactOffsetCornerCases(MultiXactId multi)
-{
-	if (multi < FirstMultiXactId)
-		return FirstMultiXactId;
-
-	return multi;
-}
-
-/*
  * GetMultiXactIdMembers
  *		Returns the set of MultiXactMembers that make up a MultiXactId
  *
@@ -920,6 +1061,9 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 					mxid_to_string(multi, length, *members));
 		return length;
 	}
+
+	/* Set our OldestVisibleMXactId[] entry if we didn't already */
+	MultiXactIdSetOldestVisible();
 
 	/*
 	 * We check known limits on MultiXact before resorting to the SLRU area.
@@ -1021,8 +1165,9 @@ retry:
 	{
 		MultiXactOffset nextMXOffset;
 
-		/* Handle corner cases if needed */
-		tmpMXact = HandleMxactOffsetCornerCases(tmpMXact);
+		/* handle wraparound if needed */
+		if (tmpMXact < FirstMultiXactId)
+			tmpMXact = FirstMultiXactId;
 
 		prev_pageno = pageno;
 
@@ -1306,12 +1451,136 @@ void
 AtEOXact_MultiXact(void)
 {
 	/*
+	 * Reset our OldestMemberMXactId and OldestVisibleMXactId values, both of
+	 * which should only be valid while within a transaction.
+	 *
+	 * We assume that storing a MultiXactId is atomic and so we need not take
+	 * MultiXactGenLock to do this.
+	 */
+	OldestMemberMXactId[MyBackendId] = InvalidMultiXactId;
+	OldestVisibleMXactId[MyBackendId] = InvalidMultiXactId;
+
+	/*
 	 * Discard the local MultiXactId cache.  Since MXactContext was created as
 	 * a child of TopTransactionContext, we needn't delete it explicitly.
 	 */
 	MXactContext = NULL;
 	MXactCache = NULL;
 }
+
+/*
+ * AtPrepare_MultiXact
+ *		Save multixact state at 2PC tranasction prepare
+ *
+ * In this phase, we only store our OldestMemberMXactId value in the two-phase
+ * state file.
+ */
+void
+AtPrepare_MultiXact(void)
+{
+	MultiXactId myOldestMember = OldestMemberMXactId[MyBackendId];
+
+	if (MultiXactIdIsValid(myOldestMember))
+		RegisterTwoPhaseRecord(TWOPHASE_RM_MULTIXACT_ID, 0,
+							   &myOldestMember, sizeof(MultiXactId));
+}
+
+/*
+ * PostPrepare_MultiXact
+ *		Clean up after successful PREPARE TRANSACTION
+ */
+void
+PostPrepare_MultiXact(TransactionId xid)
+{
+	MultiXactId myOldestMember;
+
+	/*
+	 * Transfer our OldestMemberMXactId value to the slot reserved for the
+	 * prepared transaction.
+	 */
+	myOldestMember = OldestMemberMXactId[MyBackendId];
+	if (MultiXactIdIsValid(myOldestMember))
+	{
+		BackendId	dummyBackendId = TwoPhaseGetDummyBackendId(xid);
+
+		/*
+		 * Even though storing MultiXactId is atomic, acquire lock to make
+		 * sure others see both changes, not just the reset of the slot of the
+		 * current backend. Using a volatile pointer might suffice, but this
+		 * isn't a hot spot.
+		 */
+		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+
+		OldestMemberMXactId[dummyBackendId] = myOldestMember;
+		OldestMemberMXactId[MyBackendId] = InvalidMultiXactId;
+
+		LWLockRelease(MultiXactGenLock);
+	}
+
+	/*
+	 * We don't need to transfer OldestVisibleMXactId value, because the
+	 * transaction is not going to be looking at any more multixacts once it's
+	 * prepared.
+	 *
+	 * We assume that storing a MultiXactId is atomic and so we need not take
+	 * MultiXactGenLock to do this.
+	 */
+	OldestVisibleMXactId[MyBackendId] = InvalidMultiXactId;
+
+	/*
+	 * Discard the local MultiXactId cache like in AtEOX_MultiXact
+	 */
+	MXactContext = NULL;
+	MXactCache = NULL;
+}
+
+/*
+ * multixact_twophase_recover
+ *		Recover the state of a prepared transaction at startup
+ */
+void
+multixact_twophase_recover(TransactionId xid, uint16 info,
+						   void *recdata, uint32 len)
+{
+	BackendId	dummyBackendId = TwoPhaseGetDummyBackendId(xid);
+	MultiXactId oldestMember;
+
+	/*
+	 * Get the oldest member XID from the state file record, and set it in the
+	 * OldestMemberMXactId slot reserved for this prepared transaction.
+	 */
+	Assert(len == sizeof(MultiXactId));
+	oldestMember = *((MultiXactId *) recdata);
+
+	OldestMemberMXactId[dummyBackendId] = oldestMember;
+}
+
+/*
+ * multixact_twophase_postcommit
+ *		Similar to AtEOX_MultiXact but for COMMIT PREPARED
+ */
+void
+multixact_twophase_postcommit(TransactionId xid, uint16 info,
+							  void *recdata, uint32 len)
+{
+	BackendId	dummyBackendId = TwoPhaseGetDummyBackendId(xid);
+
+	Assert(len == sizeof(MultiXactId));
+
+	OldestMemberMXactId[dummyBackendId] = InvalidMultiXactId;
+}
+
+/*
+ * multixact_twophase_postabort
+ *		This is actually just the same as the COMMIT case.
+ */
+void
+multixact_twophase_postabort(TransactionId xid, uint16 info,
+							 void *recdata, uint32 len)
+{
+	multixact_twophase_postcommit(xid, info, recdata, len);
+}
+
 
 /*
  * Initialization of shared memory for MultiXact.  We use two SLRU areas,
@@ -1323,7 +1592,11 @@ MultiXactShmemSize(void)
 {
 	Size		size;
 
-	size = sizeof(MultiXactStateData);
+#define SHARED_MULTIXACT_STATE_SIZE \
+	add_size(sizeof(MultiXactStateData), \
+			 mul_size(sizeof(MultiXactId) * 2, MaxOldestSlot))
+
+	size = SHARED_MULTIXACT_STATE_SIZE;
 	size = add_size(size, SimpleLruShmemSize(NUM_MXACTOFFSET_BUFFERS, 0));
 	size = add_size(size, SimpleLruShmemSize(NUM_MXACTMEMBER_BUFFERS, 0));
 
@@ -1349,17 +1622,24 @@ MultiXactShmemInit(void)
 
 	/* Initialize our shared state struct */
 	MultiXactState = ShmemInitStruct("Shared MultiXact State",
-									 sizeof(MultiXactStateData),
+									 SHARED_MULTIXACT_STATE_SIZE,
 									 &found);
 	if (!IsUnderPostmaster)
 	{
 		Assert(!found);
 
 		/* Make sure we zero out the per-backend state */
-		MemSet(MultiXactState, 0, sizeof(MultiXactStateData));
+		MemSet(MultiXactState, 0, SHARED_MULTIXACT_STATE_SIZE);
 	}
 	else
 		Assert(found);
+
+	/*
+	 * Set up array pointers.  Note that perBackendXactIds[0] is wasted space
+	 * since we only use indexes 1..MaxOldestSlot in each array.
+	 */
+	OldestMemberMXactId = MultiXactState->perBackendXactIds;
+	OldestVisibleMXactId = OldestMemberMXactId + MaxOldestSlot;
 }
 
 /*
@@ -1418,7 +1698,7 @@ ZeroMultiXactOffsetPage(int pageno, bool writeXlog)
 }
 
 /*
- * Ditto for MultiXactMember, except these don't worry about truncation info.
+ * Ditto for MultiXactMember
  */
 static int
 ZeroMultiXactMemberPage(int pageno, bool writeXlog)
