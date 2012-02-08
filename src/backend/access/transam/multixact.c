@@ -172,13 +172,13 @@ typedef struct MultiXactStateData
 	 * not be consulted.
 	 */
 	MultiXactId		oldestMultiXactId;
+	Oid				oldestMultiXactDB;
 
 	/* support for anti-wraparound measures */
 	MultiXactId		multiVacLimit;
 	MultiXactId		multiWarnLimit;
 	MultiXactId		multiStopLimit;
 	MultiXactId		multiWrapLimit;
-	Oid				oldestMultiDB;
 
 	/*
 	 * Per-backend data starts here.  We have two arrays stored in the area
@@ -888,12 +888,9 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 	 *
 	 * If we're past multiVacLimit, start trying to force autovacuum cycles.
 	 * If we're past multiWarnLimit, start issuing warnings.
-	 * If we're past multiStopLimit, refuse to execute transactions, unless
-	 * we are running in a standalone backend (which gives an escape hatch
-	 * to the DBA who somehow got past the earlier defenses).
+	 * If we're past multiStopLimit, refuse to create new MultiXactIds.
 	 *
-	 * Note this is pretty much the same as the protections in
-	 * GetNewTransactionId.
+	 * Note these are pretty much the same protections in GetNewTransactionId.
 	 *----------
 	 */
 	if (!MultiXactIdPrecedes(result, MultiXactState->multiVacLimit))
@@ -908,7 +905,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 		MultiXactId multiWarnLimit = MultiXactState->multiWarnLimit;
 		MultiXactId multiStopLimit = MultiXactState->multiStopLimit;
 		MultiXactId multiWrapLimit = MultiXactState->multiWrapLimit;
-		Oid			oldest_datoid = MultiXactState->oldestMultiDB;
+		Oid			oldest_datoid = MultiXactState->oldestMultiXactDB;
 
 		LWLockRelease(MultiXactGenLock);
 
@@ -926,6 +923,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 			char	   *oldest_datname = get_database_name(oldest_datoid);
 
 			/* complain even if that DB has disappeared */
+			/* XXX need better wording for these errors */
 			if (oldest_datname)
 				ereport(ERROR,
 						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
@@ -1815,24 +1813,21 @@ ShutdownMultiXact(void)
 }
 
 /*
- * Get the next MultiXactId, offset and truncate info to save in a checkpoint
- * record
+ * Get the next MultiXactId and offset to save in a checkpoint record
  */
 void
 MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset,
-						 MultiXactId *oldestMulti)
+						 MultiXactOffset *nextMultiOffset)
 {
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
 	*nextMulti = MultiXactState->nextMXact;
 	*nextMultiOffset = MultiXactState->nextOffset;
-	*oldestMulti = MultiXactState->oldestMultiXactId;
 	LWLockRelease(MultiXactGenLock);
 
-	debug_elog5(DEBUG2,
-				"MultiXact: checkpoint is nextMulti %u, nextOffset %u; oldest multi %u",
-				*nextMulti, *nextMultiOffset, *oldestMulti);
+	debug_elog4(DEBUG2,
+				"MultiXact: checkpoint is nextMulti %u, nextOffset %u",
+				*nextMulti, *nextMultiOffset);
 }
 
 /*
@@ -1895,14 +1890,10 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 		multiWrapLimit += FirstMultiXactId;
 
 	/*
-	 * We'll refuse to continue assigning MultiXactIds in interactive mode once we get
-	 * within 1M multis of data loss.  This leaves lots of room for the
-	 * DBA to fool around fixing things in a standalone backend, while not
-	 * being significant compared to total MultiXactId space. (Note that since
-	 * vacuuming requires one transaction per table cleaned, we had better be
-	 * sure there's lots of multis left...)
+	 * We'll refuse to continue assigning MultiXactIds once we get within 100
+	 * multi of data loss.
 	 */
-	multiStopLimit = multiWrapLimit - 1000000;
+	multiStopLimit = multiWrapLimit - 100;
 	if (multiStopLimit < FirstMultiXactId)
 		multiStopLimit -= FirstMultiXactId;
 
@@ -1931,11 +1922,11 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 	/* Grab lock for just long enough to set the new limit values */
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 	MultiXactState->oldestMultiXactId = oldest_datminmxid;
+	MultiXactState->oldestMultiXactDB = oldest_datoid;
 	MultiXactState->multiVacLimit = multiVacLimit;
 	MultiXactState->multiWarnLimit = multiWarnLimit;
 	MultiXactState->multiStopLimit = multiStopLimit;
 	MultiXactState->multiWrapLimit = multiWrapLimit;
-	MultiXactState->oldestMultiDB = oldest_datoid;
 	curMulti = MultiXactState->nextMXact;
 	LWLockRelease(MultiXactGenLock);
 
@@ -2095,6 +2086,55 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 		offset += difference;
 		nmembers -= difference;
 	}
+}
+
+/*
+ * GetOldestMultiXactId
+ *
+ * Return the oldest MultiXactId that's still possibly visible to any running
+ * transaction.  Older ones might still exist on disk, but they no longer have
+ * any running transaction and can thus be removed safely.
+ */
+MultiXactId
+GetOldestMultiXactId(void)
+{
+	MultiXactId		oldestMXact;
+	MultiXactId		nextMXact;
+	int				i;
+
+	/*
+	 * This is the oldest valid value among all the OldestMemberMXactId[] and
+	 * OldestVisibleMXactId[] entries, or nextMXact if none are valid.
+	 */
+	LWLockAcquire(MultiXactGenLock, LW_SHARED);
+
+	/*
+	 * We have to beware of the possibility that nextMXact is in the
+	 * wrapped-around state.  We don't fix the counter itself here, but we
+	 * must be sure to use a valid value in our calculation.
+	 */
+	nextMXact = MultiXactState->nextMXact;
+	if (nextMXact < FirstMultiXactId)
+		nextMXact = FirstMultiXactId;
+
+	oldestMXact = nextMXact;
+	for (i = 1; i <= MaxOldestSlot; i++)
+	{
+		MultiXactId thisoldest;
+
+		thisoldest = OldestMemberMXactId[i];
+		if (MultiXactIdIsValid(thisoldest) &&
+			MultiXactIdPrecedes(thisoldest, oldestMXact))
+			oldestMXact = thisoldest;
+		thisoldest = OldestVisibleMXactId[i];
+		if (MultiXactIdIsValid(thisoldest) &&
+			MultiXactIdPrecedes(thisoldest, oldestMXact))
+			oldestMXact = thisoldest;
+	}
+
+	LWLockRelease(MultiXactGenLock);
+
+	return oldestMXact;
 }
 
 /*

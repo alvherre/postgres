@@ -2851,6 +2851,17 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 		tuplock = LockTupleUpdate;
 		mxact_status = MultiXactStatusUpdate;
 		key_intact = true;
+
+		/*
+		 * If this is the first possibly-multixact-able operation in the
+		 * current transaction, set my per-backend OldestMemberMXactId setting.
+		 * We can be certain that the transaction will never become a member of
+		 * any older MultiXactIds than that.  (We have to do this even if we
+		 * end up just using our own TransactionId below, since some other
+		 * backend could incorporate our XID into a MultiXact immediately
+		 * afterwards.)
+		 */
+		MultiXactIdSetOldestMember();
 	}
 	else
 	{
@@ -4164,6 +4175,23 @@ failed:
 		return HeapTupleMayBeUpdated;
 	}
 
+	if (mode == LockTupleKeyShare ||
+		mode == LockTupleShare ||
+		mode == LockTupleUpdate)
+	{
+		/*
+		 * If this is the first possibly-multixact-able operation in the
+		 * current transaction, set my per-backend OldestMemberMXactId setting.
+		 * We can be certain that the transaction will never become a member of
+		 * any older MultiXactIds than that.  (We have to do this even if we
+		 * end up just using our own TransactionId below, since some other
+		 * backend could incorporate our XID into a MultiXact immediately
+		 * afterwards.)
+		 */
+		MultiXactIdSetOldestMember();
+	}
+
+
 	/*
 	 * Compute the new xmax and infomask to store into the tuple.  Note we do
 	 * not modify the tuple just yet, because that would leave it in the wrong
@@ -4597,8 +4625,21 @@ heap_lock_updated_tuple(Relation rel, HeapTuple tuple, TransactionId xid,
 						LockTupleMode mode)
 {
 	if (!ItemPointerEquals(&tuple->t_self, &tuple->t_data->t_ctid))
+	{
+		/*
+		 * If this is the first possibly-multixact-able operation in the
+		 * current transaction, set my per-backend OldestMemberMXactId setting.
+		 * We can be certain that the transaction will never become a member of
+		 * any older MultiXactIds than that.  (We have to do this even if we
+		 * end up just using our own TransactionId below, since some other
+		 * backend could incorporate our XID into a MultiXact immediately
+		 * afterwards.)
+		 */
+		MultiXactIdSetOldestMember();
+
 		return heap_lock_updated_tuple_rec(rel, &tuple->t_data->t_ctid,
 										   xid, mode);
+	}
 
 	/* nothing to lock */
 	return HeapTupleMayBeUpdated;

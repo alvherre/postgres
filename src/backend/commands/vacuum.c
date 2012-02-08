@@ -482,7 +482,6 @@ vacuum_set_xid_limits(int freeze_min_age,
 	}
 }
 
-
 /*
  * vac_estimate_reltuples() -- estimate the new value for pg_class.reltuples
  *

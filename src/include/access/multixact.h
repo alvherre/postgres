@@ -102,9 +102,9 @@ extern void SetMultiXactIdLimit(MultiXactId oldest_datminmxid,
 					Oid oldest_datoid);
 extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset,
-						 MultiXactId *oldestMulti);
+						 MultiXactOffset *nextMultiOffset);
 extern void CheckPointMultiXact(void);
+extern MultiXactId GetOldestMultiXactId(void);
 extern void TruncateMultiXact(TransactionId oldestXid);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti,
 					  MultiXactOffset nextMultiOffset);

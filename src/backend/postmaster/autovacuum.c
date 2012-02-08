@@ -68,6 +68,7 @@
 #include <unistd.h>
 
 #include "access/heapam.h"
+#include "access/multixact.h"
 #include "access/reloptions.h"
 #include "access/transam.h"
 #include "access/xact.h"
@@ -133,8 +134,9 @@ static volatile sig_atomic_t got_SIGHUP = false;
 static volatile sig_atomic_t got_SIGUSR2 = false;
 static volatile sig_atomic_t got_SIGTERM = false;
 
-/* Comparison point for determining whether freeze_max_age is exceeded */
+/* Comparison points for determining whether freeze_max_age is exceeded */
 static TransactionId recentXid;
+static MultiXactId recentMulti;
 
 /* Default freeze ages to use for autovacuum (varies by database) */
 static int	default_freeze_min_age;
@@ -157,6 +159,7 @@ typedef struct avw_dbase
 	Oid			adw_datid;
 	char	   *adw_name;
 	TransactionId adw_frozenxid;
+	MultiXactId	adw_frozenmulti;
 	PgStat_StatDBEntry *adw_entry;
 } avw_dbase;
 
@@ -1072,7 +1075,9 @@ do_start_worker(void)
 	List	   *dblist;
 	ListCell   *cell;
 	TransactionId xidForceLimit;
+	MultiXactId multiForceLimit;
 	bool		for_xid_wrap;
+	bool		for_multi_wrap;
 	avw_dbase  *avdb;
 	TimestampTz current_time;
 	bool		skipit = false;
@@ -1118,12 +1123,20 @@ do_start_worker(void)
 	if (xidForceLimit < FirstNormalTransactionId)
 		xidForceLimit -= FirstNormalTransactionId;
 
+	/* Also determine the oldest datminmxid we will consider. */
+	recentMulti = ReadNextMultiXactId();
+	multiForceLimit = recentMulti - autovacuum_freeze_max_age;
+	if (multiForceLimit < FirstMultiXactId)
+		multiForceLimit -= FirstMultiXactId;
+
 	/*
 	 * Choose a database to connect to.  We pick the database that was least
 	 * recently auto-vacuumed, or one that needs vacuuming to prevent Xid
-	 * wraparound-related data loss.  If any db at risk of wraparound is
+	 * wraparound-related data loss.  If any db at risk of Xid wraparound is
 	 * found, we pick the one with oldest datfrozenxid, independently of
-	 * autovacuum times.
+	 * autovacuum times; similarly we pick the one with the oldest datminmxid
+	 * if any is in MultiXactId wraparound.  Note that those in Xid wraparound
+	 * danger are given more priority than those in multi wraparound danger.
 	 *
 	 * Note that a database with no stats entry is not considered, except for
 	 * Xid wraparound purposes.  The theory is that if no one has ever
@@ -1139,6 +1152,7 @@ do_start_worker(void)
 	 */
 	avdb = NULL;
 	for_xid_wrap = false;
+	for_multi_wrap = false;
 	current_time = GetCurrentTimestamp();
 	foreach(cell, dblist)
 	{
@@ -1149,12 +1163,24 @@ do_start_worker(void)
 		if (TransactionIdPrecedes(tmp->adw_frozenxid, xidForceLimit))
 		{
 			if (avdb == NULL ||
-			  TransactionIdPrecedes(tmp->adw_frozenxid, avdb->adw_frozenxid))
+				TransactionIdPrecedes(tmp->adw_frozenxid,
+									  avdb->adw_frozenxid))
 				avdb = tmp;
 			for_xid_wrap = true;
 			continue;
 		}
 		else if (for_xid_wrap)
+			continue;			/* ignore not-at-risk DBs */
+		else if (MultiXactIdPrecedes(tmp->adw_frozenmulti, multiForceLimit))
+		{
+			if (avdb == NULL ||
+				MultiXactIdPrecedes(tmp->adw_frozenmulti,
+									avdb->adw_frozenmulti))
+				avdb = tmp;
+			for_multi_wrap = true;
+			continue;
+		}
+		else if (for_multi_wrap)
 			continue;			/* ignore not-at-risk DBs */
 
 		/* Find pgstat entry if any */
@@ -1641,6 +1667,7 @@ AutoVacWorkerMain(int argc, char *argv[])
 
 		/* And do an appropriate amount of work */
 		recentXid = ReadNewTransactionId();
+		recentMulti = ReadNextMultiXactId();
 		do_autovacuum();
 	}
 
@@ -1856,6 +1883,7 @@ get_database_list(void)
 		avdb->adw_datid = HeapTupleGetOid(tup);
 		avdb->adw_name = pstrdup(NameStr(pgdatabase->datname));
 		avdb->adw_frozenxid = pgdatabase->datfrozenxid;
+		avdb->adw_frozenmulti = pgdatabase->datminmxid;
 		/* this gets set later: */
 		avdb->adw_entry = NULL;
 
@@ -2616,6 +2644,7 @@ relation_needs_vacanalyze(Oid relid,
 	/* freeze parameters */
 	int			freeze_max_age;
 	TransactionId xidForceLimit;
+	MultiXactId	multiForceLimit;
 
 	AssertArg(classForm != NULL);
 	AssertArg(OidIsValid(relid));
@@ -2656,6 +2685,14 @@ relation_needs_vacanalyze(Oid relid,
 	force_vacuum = (TransactionIdIsNormal(classForm->relfrozenxid) &&
 					TransactionIdPrecedes(classForm->relfrozenxid,
 										  xidForceLimit));
+	if (!force_vacuum)
+	{
+		multiForceLimit = recentMulti - autovacuum_freeze_max_age;
+		if (multiForceLimit < FirstMultiXactId)
+			multiForceLimit -= FirstMultiXactId;
+		force_vacuum = MultiXactIdPrecedes(classForm->relminmxid,
+										   multiForceLimit);
+	}
 	*wraparound = force_vacuum;
 
 	/* User disabled it in pg_class.reloptions?  (But ignore if at risk) */

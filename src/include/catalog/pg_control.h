@@ -39,7 +39,6 @@ typedef struct CheckPoint
 	Oid			nextOid;		/* next free OID */
 	MultiXactId nextMulti;		/* next free MultiXactId */
 	MultiXactOffset nextMultiOffset;	/* next free MultiXact offset */
-	MultiXactId oldestMultiXactId;	/* oldest MultiXactId still on disk */
 	TransactionId oldestXid;	/* cluster-wide minimum datfrozenxid */
 	Oid			oldestXidDB;	/* database with minimum datfrozenxid */
 	pg_time_t	time;			/* time stamp of checkpoint */
