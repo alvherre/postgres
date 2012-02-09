@@ -238,6 +238,7 @@ static MultiXactStateData *MultiXactState;
 static MultiXactId *OldestMemberMXactId;
 static MultiXactId *OldestVisibleMXactId;
 
+
 /*
  * Definitions for the backend-local MultiXactId cache.
  *
@@ -292,11 +293,11 @@ static MultiXactId GetNewMultiXactId(int nmembers, MultiXactOffset *offset);
 static int mxactMemberComparator(const void *arg1, const void *arg2);
 static MultiXactId mXactCacheGetBySet(int nmembers, MultiXactMember *members);
 static int	mXactCacheGetById(MultiXactId multi, MultiXactMember **members);
-static void mXactCachePut(MultiXactId multi, int nmembers, MultiXactMember *members);
+static void mXactCachePut(MultiXactId multi, int nmembers,
+			  MultiXactMember *members);
 
-#ifdef MULTIXACT_DEBUG
-static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members);
-#endif
+static char * mxid_to_string(MultiXactId multi, int nmembers,
+			   MultiXactMember *members);
 
 /* management of SLRU infrastructure */
 static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog);
@@ -1391,7 +1392,6 @@ mXactCachePut(MultiXactId multi, int nmembers, MultiXactMember *members)
 	MXactCache = entry;
 }
 
-#ifdef MULTIXACT_DEBUG
 static char *
 mxstatus_to_string(MultiXactStatus status)
 {
@@ -1437,7 +1437,6 @@ mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 	pfree(buf.data);
 	return str;
 }
-#endif
 
 /*
  * AtEOXact_MultiXact
@@ -2402,13 +2401,11 @@ multixact_desc(StringInfo buf, uint8 xl_info, char *rec)
 	else if (info == XLOG_MULTIXACT_CREATE_ID)
 	{
 		xl_multixact_create *xlrec = (xl_multixact_create *) rec;
-		int			i;
 
-		/* XXX describe status too? */
-		appendStringInfo(buf, "create multixact %u offset %u:",
-						 xlrec->mid, xlrec->moff);
-		for (i = 0; i < xlrec->nmembers; i++)
-			appendStringInfo(buf, " %u", xlrec->members[i].xid);
+		appendStringInfo(buf, "create multixact offset %u: %s",
+						 xlrec->moff,
+						 mxid_to_string(xlrec->mid, xlrec->nmembers,
+										xlrec->members));
 	}
 	else
 		appendStringInfo(buf, "UNKNOWN");
