@@ -44,6 +44,15 @@
  * replay, the next-MXID and next-offset counters are at least as large as
  * anything we saw during replay.
  *
+ * We are able to remove segments no longer necessary by carefully tracking
+ * each table's used values: during vacuum, any multixact older than a
+ * certain value is removed; the cutoff value is stored in pg_class.
+ * The minimum value in each database is stored in pg_database, and the
+ * global minimum is part of pg_control.  Any vacuum that is able to
+ * advance its database's minimum value also computes a new global minimum,
+ * and uses this value to truncate older segments.  When new multixactid
+ * values are to be created, care is taken that the counter does not
+ * fall within the wraparound horizon considering the global minimum value.
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -232,14 +241,6 @@ static MultiXactId *OldestMemberMXactId;
 static MultiXactId *OldestVisibleMXactId;
 
 /*
- * MultiXactZeroOffsetPage xlog record
- */
-typedef struct MxactZeroOffPg
-{
-	int				pageno;
-} MxactZeroOffPg;
-
-/*
  * Definitions for the backend-local MultiXactId cache.
  *
  * We use this cache to store known MultiXacts, so we don't need to go to
@@ -306,8 +307,7 @@ static bool MultiXactOffsetPrecedes(MultiXactOffset offset1,
 						MultiXactOffset offset2);
 static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
-static void WriteMZeroOffsetPageXlogRec(int pageno);
-static void WriteMZeroMemberPageXlogRec(int pageno);
+static void WriteMZeroPageXlogRec(int pageno, int8 info);
 
 
 /*
@@ -1690,7 +1690,7 @@ ZeroMultiXactOffsetPage(int pageno, bool writeXlog)
 	slotno = SimpleLruZeroPage(MultiXactOffsetCtl, pageno);
 
 	if (writeXlog)
-		WriteMZeroOffsetPageXlogRec(pageno);
+		WriteMZeroPageXlogRec(pageno, XLOG_MULTIXACT_ZERO_OFF_PAGE);
 
 	return slotno;
 }
@@ -1706,7 +1706,7 @@ ZeroMultiXactMemberPage(int pageno, bool writeXlog)
 	slotno = SimpleLruZeroPage(MultiXactMemberCtl, pageno);
 
 	if (writeXlog)
-		WriteMZeroMemberPageXlogRec(pageno);
+		WriteMZeroPageXlogRec(pageno, XLOG_MULTIXACT_ZERO_MEM_PAGE);
 
 	return slotno;
 }
@@ -2091,9 +2091,13 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 /*
  * GetOldestMultiXactId
  *
- * Return the oldest MultiXactId that's still possibly visible to any running
- * transaction.  Older ones might still exist on disk, but they no longer have
- * any running transaction and can thus be removed safely.
+ * Return the oldest MultiXactId that's still possibly still seen as live by
+ * any running transaction.  Older ones might still exist on disk, but they no
+ * longer have any running member transaction.
+ *
+ * It's not safe to truncate MultiXact SLRU segments on the value returned by
+ * this function; however, it can be used by a full-table vacuum to set the
+ * point at which it will be possible to truncate SLRU for that table.
  */
 MultiXactId
 GetOldestMultiXactId(void)
@@ -2141,28 +2145,49 @@ GetOldestMultiXactId(void)
  * Remove all MultiXactOffset and MultiXactMember segments before the oldest
  * ones still of interest.
  *
- * This is called only during checkpoints.  FIXME ??	We assume no more than
- * one backend does this at a time.
- *
- * XXX do we have any issues with needing to checkpoint here?
- *
- * FIXME rewrite this comment
+ * This is called by vacuum after it has successfully advanced a database's
+ * datminmxid value; the cutoff value we're passed is the minimum of all
+ * databases' datminmxid values.
  */
 void
 TruncateMultiXact(MultiXactId cutoff_multi)
 {
 	int		cutoffPage;
+	MultiXactOffset	oldestOffset;
+
+	/*
+	 * First, compute the safe truncation point for MultiXactMember.
+	 * This is the starting offset of the multixact we were passed
+	 * as MultiXactOffset cutoff.
+	 */
+	{
+		int		pageno;
+		int		slotno;
+		int		entryno;
+		MultiXactOffset *offptr;
+
+		/* lock is acquired by SimpleLruReadPage_ReadOnly */
+
+		pageno = MultiXactIdToOffsetPage(cutoff_multi);
+		entryno = MultiXactIdToOffsetEntry(cutoff_multi);
+
+		slotno = SimpleLruReadPage_ReadOnly(MultiXactOffsetCtl, pageno,
+											cutoff_multi);
+		offptr = (MultiXactOffset *)
+			MultiXactOffsetCtl->shared->page_buffer[slotno];
+		offptr += entryno;
+		oldestOffset = *offptr;
+
+		LWLockRelease(MultiXactOffsetControlLock);
+	}
 
 	/* truncate MultiXactOffset */
 	SimpleLruTruncate(MultiXactOffsetCtl,
 					  MultiXactIdToOffsetPage(cutoff_multi));
 
-	/*
-	 * FIXME -- ...??
-	 */
-	cutoffPage = MXOffsetToMemberPage(cutoff_multi);
-
-	SimpleLruTruncate(MultiXactMemberCtl, cutoffPage);
+	/* truncate MultiXactMembers and we're done */
+	SimpleLruTruncate(MultiXactMemberCtl,
+					  MXOffsetToMemberPage(oldestOffset));
 }
 
 /*
@@ -2231,26 +2256,12 @@ MultiXactOffsetPrecedes(MultiXactOffset offset1, MultiXactOffset offset2)
 	return (diff < 0);
 }
 
-static void
-WriteMZeroOffsetPageXlogRec(int pageno)
-{
-	XLogRecData	rdata;
-	MxactZeroOffPg zerooff;
-
-	zerooff.pageno = pageno;
-
-	rdata.data = (char *) (&zerooff);
-	rdata.len = sizeof(MxactZeroOffPg);
-	rdata.buffer = InvalidBuffer;
-	rdata.next = NULL;
-	(void) XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_ZERO_OFF_PAGE, &rdata);
-}
-
 /*
- * Write an xlog record reflecting the zeroing of either a MEMBERs page.
+ * Write an xlog record reflecting the zeroing of either a MEMBERs or
+ * OFFSETs page (info shows which)
  */
 static void
-WriteMZeroMemberPageXlogRec(int pageno)
+WriteMZeroPageXlogRec(int pageno, uint8 info)
 {
 	XLogRecData rdata;
 
@@ -2258,7 +2269,7 @@ WriteMZeroMemberPageXlogRec(int pageno)
 	rdata.len = sizeof(int);
 	rdata.buffer = InvalidBuffer;
 	rdata.next = NULL;
-	(void) XLogInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_ZERO_MEM_PAGE, &rdata);
+	(void) XLogInsert(RM_MULTIXACT_ID, info, &rdata);
 }
 
 /*
@@ -2274,14 +2285,14 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 
 	if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE)
 	{
-		MxactZeroOffPg zerooff;
+		int			pageno;
 		int			slotno;
 
-		memcpy(&zerooff, XLogRecGetData(record), sizeof(MxactZeroOffPg));
+		memcpy(&pageno, XLogRecGetData(record), sizeof(int));
 
 		LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
-		slotno = ZeroMultiXactOffsetPage(zerooff.pageno, false);
+		slotno = ZeroMultiXactOffsetPage(pageno, false);
 		SimpleLruWritePage(MultiXactOffsetCtl, slotno);
 		Assert(!MultiXactOffsetCtl->shared->page_dirty[slotno]);
 
@@ -2304,7 +2315,8 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 	}
 	else if (info == XLOG_MULTIXACT_CREATE_ID)
 	{
-		xl_multixact_create *xlrec = (xl_multixact_create *) XLogRecGetData(record);
+		xl_multixact_create *xlrec =
+			(xl_multixact_create *) XLogRecGetData(record);
 		MultiXactMember *members = xlrec->members;
 		TransactionId max_xid;
 		int			i;
@@ -2315,7 +2327,8 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		/*
 		 * Make sure nextMXact/nextOffset are beyond what this record has.
 		 */
-		MultiXactAdvanceNextMXact(xlrec->mid + 1, xlrec->moff + xlrec->nmembers);
+		MultiXactAdvanceNextMXact(xlrec->mid + 1,
+								  xlrec->moff + xlrec->nmembers);
 
 		/*
 		 * Make sure nextXid is beyond any XID mentioned in the record. This
@@ -2354,10 +2367,10 @@ multixact_desc(StringInfo buf, uint8 xl_info, char *rec)
 
 	if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE)
 	{
-		MxactZeroOffPg zerooff;
+		int			pageno;
 
-		memcpy(&zerooff, XLogRecGetData(rec), sizeof(MxactZeroOffPg));
-		appendStringInfo(buf, "zero offsets page: %d", zerooff.pageno);
+		memcpy(&pageno, rec, sizeof(int));
+		appendStringInfo(buf, "zero offsets page: %d", pageno);
 	}
 	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
 	{
