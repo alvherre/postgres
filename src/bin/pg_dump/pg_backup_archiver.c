@@ -126,7 +126,7 @@ static void vdie_horribly(ArchiveHandle *AH, const char *modulename,
 	__attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 0), noreturn));
 
 static void dumpTimestamp(ArchiveHandle *AH, const char *msg, time_t tim);
-static void SetOutput(ArchiveHandle *AH, char *filename, int compression);
+static void SetOutput(ArchiveHandle *AH, const char *filename, int compression);
 static OutputContext SaveOutput(ArchiveHandle *AH);
 static void RestoreOutput(ArchiveHandle *AH, OutputContext savedContext);
 
@@ -1173,7 +1173,7 @@ archprintf(Archive *AH, const char *fmt,...)
  *******************************/
 
 static void
-SetOutput(ArchiveHandle *AH, char *filename, int compression)
+SetOutput(ArchiveHandle *AH, const char *filename, int compression)
 {
 	int			fn;
 
@@ -1451,6 +1451,16 @@ die_horribly(ArchiveHandle *AH, const char *modulename, const char *fmt,...)
 	va_start(ap, fmt);
 	vdie_horribly(AH, modulename, fmt, ap);
 	va_end(ap);
+}
+
+/* As above, but with a complaint about a particular query. */
+void
+die_on_query_failure(ArchiveHandle *AH, const char *modulename,
+					 const char *query)
+{
+	write_msg(modulename, "query failed: %s",
+			  PQerrorMessage(AH->connection));
+	die_horribly(AH, modulename, "query was: %s\n", query);
 }
 
 /* on some error, we may decide to go on... */

@@ -123,6 +123,22 @@ LOG_LWDEBUG(const char *where, LWLockId lockid, const char *msg)
 
 #ifdef LWLOCK_STATS
 
+static void init_lwlock_stats(void);
+static void print_lwlock_stats(int code, Datum arg);
+
+static void
+init_lwlock_stats(void)
+{
+	int		   *LWLockCounter = (int *) ((char *) LWLockArray - 2 * sizeof(int));
+	int			numLocks = LWLockCounter[1];
+
+	sh_acquire_counts = calloc(numLocks, sizeof(int));
+	ex_acquire_counts = calloc(numLocks, sizeof(int));
+	block_counts = calloc(numLocks, sizeof(int));
+	counts_for_pid = MyProcPid;
+	on_shmem_exit(print_lwlock_stats, 0);
+}
+
 static void
 print_lwlock_stats(int code, Datum arg)
 {
@@ -332,16 +348,7 @@ LWLockAcquire(LWLockId lockid, LWLockMode mode)
 #ifdef LWLOCK_STATS
 	/* Set up local count state first time through in a given process */
 	if (counts_for_pid != MyProcPid)
-	{
-		int		   *LWLockCounter = (int *) ((char *) LWLockArray - 2 * sizeof(int));
-		int			numLocks = LWLockCounter[1];
-
-		sh_acquire_counts = calloc(numLocks, sizeof(int));
-		ex_acquire_counts = calloc(numLocks, sizeof(int));
-		block_counts = calloc(numLocks, sizeof(int));
-		counts_for_pid = MyProcPid;
-		on_shmem_exit(print_lwlock_stats, 0);
-	}
+		init_lwlock_stats();
 	/* Count lock acquisition attempts */
 	if (mode == LW_EXCLUSIVE)
 		ex_acquire_counts[lockid]++;
@@ -565,7 +572,7 @@ LWLockConditionalAcquire(LWLockId lockid, LWLockMode mode)
 }
 
 /*
- * LWLockWaitUntilFree - Wait until a lock is free
+ * LWLockAcquireOrWait - Acquire lock, or wait until it's free
  *
  * The semantics of this function are a bit funky.  If the lock is currently
  * free, it is acquired in the given mode, and the function returns true.  If
@@ -579,14 +586,20 @@ LWLockConditionalAcquire(LWLockId lockid, LWLockMode mode)
  * wake up, observe that their records have already been flushed, and return.
  */
 bool
-LWLockWaitUntilFree(LWLockId lockid, LWLockMode mode)
+LWLockAcquireOrWait(LWLockId lockid, LWLockMode mode)
 {
 	volatile LWLock *lock = &(LWLockArray[lockid].lock);
 	PGPROC	   *proc = MyProc;
 	bool		mustwait;
 	int			extraWaits = 0;
 
-	PRINT_LWDEBUG("LWLockWaitUntilFree", lockid, lock);
+	PRINT_LWDEBUG("LWLockAcquireOrWait", lockid, lock);
+
+#ifdef LWLOCK_STATS
+	/* Set up local count state first time through in a given process */
+	if (counts_for_pid != MyProcPid)
+		init_lwlock_stats();
+#endif
 
 	/* Ensure we will have room to remember the lock */
 	if (num_held_lwlocks >= MAX_SIMUL_LWLOCKS)
@@ -652,7 +665,7 @@ LWLockWaitUntilFree(LWLockId lockid, LWLockMode mode)
 		 * Wait until awakened.  Like in LWLockAcquire, be prepared for bogus
 		 * wakups, because we share the semaphore with ProcWaitForSignal.
 		 */
-		LOG_LWDEBUG("LWLockWaitUntilFree", lockid, "waiting");
+		LOG_LWDEBUG("LWLockAcquireOrWait", lockid, "waiting");
 
 #ifdef LWLOCK_STATS
 		block_counts[lockid]++;
@@ -671,7 +684,7 @@ LWLockWaitUntilFree(LWLockId lockid, LWLockMode mode)
 
 		TRACE_POSTGRESQL_LWLOCK_WAIT_DONE(lockid, mode);
 
-		LOG_LWDEBUG("LWLockWaitUntilFree", lockid, "awakened");
+		LOG_LWDEBUG("LWLockAcquireOrWait", lockid, "awakened");
 	}
 	else
 	{
@@ -689,7 +702,7 @@ LWLockWaitUntilFree(LWLockId lockid, LWLockMode mode)
 	{
 		/* Failed to get lock, so release interrupt holdoff */
 		RESUME_INTERRUPTS();
-		LOG_LWDEBUG("LWLockWaitUntilFree", lockid, "failed");
+		LOG_LWDEBUG("LWLockAcquireOrWait", lockid, "failed");
 		TRACE_POSTGRESQL_LWLOCK_WAIT_UNTIL_FREE_FAIL(lockid, mode);
 	}
 	else
