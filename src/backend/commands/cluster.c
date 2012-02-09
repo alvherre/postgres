@@ -1203,11 +1203,13 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 	 * and then fail to commit the pg_class update.
 	 */
 
-	/* set rel1's frozen Xid */
+	/* set rel1's frozen Xid and minimum MultiXid */
 	if (relform1->relkind != RELKIND_INDEX)
 	{
 		Assert(TransactionIdIsNormal(frozenXid));
 		relform1->relfrozenxid = frozenXid;
+		Assert(MultiXactIdIsValid(frozenMulti));
+		relform1->relminmxid = frozenMulti;
 	}
 
 	/* swap size statistics too, since new rel has freshly-updated stats */

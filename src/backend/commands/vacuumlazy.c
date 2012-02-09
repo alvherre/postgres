@@ -39,6 +39,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/multixact.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
 #include "catalog/storage.h"
@@ -166,6 +167,7 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	double		new_rel_tuples;
 	BlockNumber new_rel_allvisible;
 	TransactionId new_frozen_xid;
+	MultiXactId	new_min_multi;
 
 	/* measure elapsed time iff autovacuum logging requires it */
 	if (IsAutoVacuumWorkerProcess() && Log_autovacuum_min_duration >= 0)
@@ -252,12 +254,17 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	if (vacrelstats->scanned_pages < vacrelstats->rel_pages)
 		new_frozen_xid = InvalidTransactionId;
 
+	new_min_multi = MultiXactFrzLimit;
+	if (vacrelstats->scanned_pages < vacrelstats->rel_pages)
+		new_min_multi = InvalidMultiXactId;
+
 	vac_update_relstats(onerel,
 						new_rel_pages,
 						new_rel_tuples,
 						new_rel_allvisible,
 						vacrelstats->hasindex,
-						new_frozen_xid);
+						new_frozen_xid,
+						new_min_multi);
 
 	/* report results to the stats collector, too */
 	pgstat_report_vacuum(RelationGetRelid(onerel),
@@ -1188,7 +1195,8 @@ lazy_cleanup_index(Relation indrel,
 							stats->num_index_tuples,
 							0,
 							false,
-							InvalidTransactionId);
+							InvalidTransactionId,
+							InvalidMultiXactId);
 
 	ereport(elevel,
 			(errmsg("index \"%s\" now contains %.0f row versions in %u pages",

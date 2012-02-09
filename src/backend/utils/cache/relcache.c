@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "access/multixact.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
@@ -2605,7 +2606,8 @@ RelationBuildLocalRelation(const char *relname,
  * the XIDs that will be put into the new relation contents.
  */
 void
-RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid)
+RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,
+						  MultiXactId minmulti)
 {
 	Oid			newrelfilenode;
 	RelFileNodeBackend newrnode;
@@ -2618,6 +2620,7 @@ RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid)
 			relation->rd_rel->relkind == RELKIND_SEQUENCE) ?
 		   freezeXid == InvalidTransactionId :
 		   TransactionIdIsNormal(freezeXid));
+	Assert(TransactionIdIsNormal(freezeXid) == MultiXactIdIsValid(minmulti));
 
 	/* Allocate a new relfilenode */
 	newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace, NULL,
@@ -2673,6 +2676,7 @@ RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid)
 		classform->relallvisible = 0;
 	}
 	classform->relfrozenxid = freezeXid;
+	classform->relminmxid = minmulti;
 
 	simple_heap_update(pg_class, &tuple->t_self, tuple);
 	CatalogUpdateIndexes(pg_class, tuple);

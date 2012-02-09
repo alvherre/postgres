@@ -274,11 +274,13 @@ static MemoryContext MXactContext = NULL;
 #define debug_elog3(a,b,c) elog(a,b,c)
 #define debug_elog4(a,b,c,d) elog(a,b,c,d)
 #define debug_elog5(a,b,c,d,e) elog(a,b,c,d,e)
+#define debug_elog6(a,b,c,d,e,f) elog(a,b,c,d,e,f)
 #else
 #define debug_elog2(a,b)
 #define debug_elog3(a,b,c)
 #define debug_elog4(a,b,c,d)
 #define debug_elog5(a,b,c,d,e)
+#define debug_elog6(a,b,c,d,e,f)
 #endif
 
 /* internal MultiXactId management */
@@ -307,7 +309,7 @@ static bool MultiXactOffsetPrecedes(MultiXactOffset offset1,
 						MultiXactOffset offset2);
 static void ExtendMultiXactOffset(MultiXactId multi);
 static void ExtendMultiXactMember(MultiXactOffset offset, int nmembers);
-static void WriteMZeroPageXlogRec(int pageno, int8 info);
+static void WriteMZeroPageXlogRec(int pageno, uint8 info);
 
 
 /*
@@ -1068,7 +1070,7 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	 *
 	 * An ID older than MultiXactState->oldestMultiXactId cannot possibly be
 	 * useful; it should have already been frozen by vacuum.  We've truncated
-	 * the on-disk structures anyway.  Since returning the wrong state could
+	 * the on-disk structures anyway.  Since returning the wrong values could
 	 * lead to an incorrect visibility result, this now raises an error.
 	 * Versions prior to 9.2 silently returned an empty array, but this is no
 	 * longer safe.
@@ -1715,8 +1717,9 @@ ZeroMultiXactMemberPage(int pageno, bool writeXlog)
  * This must be called ONCE during postmaster or standalone-backend startup.
  *
  * StartupXLOG has already established nextMXact/nextOffset by calling
- * MultiXactSetNextMXact and/or MultiXactAdvanceNextMXact.	Note that we
- * may already have replayed WAL data into the SLRU files.
+ * MultiXactSetNextMXact and/or MultiXactAdvanceNextMXact, and the oldestMulti
+ * info from pg_control and/or MultiXactAdvanceOldest.  Note that we may
+ * already have replayed WAL data into the SLRU files.
  *
  * We don't need any locks here, really; the SLRU locks are taken
  * only because slru.c expects to be called with locks held.
@@ -1813,21 +1816,25 @@ ShutdownMultiXact(void)
 }
 
 /*
- * Get the next MultiXactId and offset to save in a checkpoint record
+ * Get the MultiXact data to save in a checkpoint record
  */
 void
 MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset)
+						 MultiXactOffset *nextMultiOffset,
+						 MultiXactId *oldestMulti,
+						 Oid *oldestMultiDB)
 {
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
 	*nextMulti = MultiXactState->nextMXact;
 	*nextMultiOffset = MultiXactState->nextOffset;
+	*oldestMulti = MultiXactState->oldestMultiXactId;
+	*oldestMultiDB = MultiXactState->oldestMultiXactDB;
 	LWLockRelease(MultiXactGenLock);
 
-	debug_elog4(DEBUG2,
-				"MultiXact: checkpoint is nextMulti %u, nextOffset %u",
-				*nextMulti, *nextMultiOffset);
+	debug_elog6(DEBUG2,
+				"MultiXact: checkpoint is nextMulti %u, nextOffset %u, oldestMulti %u in DB %u",
+				*nextMulti, *nextMultiOffset, *oldestMulti, *oldestMultiDB);
 }
 
 /*
@@ -1942,12 +1949,12 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 	 * database, it'll call here, and we'll signal the postmaster to start
 	 * another iteration immediately if there are still any old databases.
 	 */
-	if (!MultiXactIdPrecedes(multiVacLimit, curMulti) &&
+	if (MultiXactIdPrecedes(multiVacLimit, curMulti) &&
 		IsUnderPostmaster && !InRecovery)
 		SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
 
 	/* Give an immediate warning if past the wrap warn point */
-	if (!MultiXactIdPrecedes(multiWarnLimit, curMulti) && !InRecovery)
+	if (MultiXactIdPrecedes(multiWarnLimit, curMulti) && !InRecovery)
 	{
 		char	   *oldest_datname;
 
@@ -2005,6 +2012,16 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 					minMultiOffset);
 		MultiXactState->nextOffset = minMultiOffset;
 	}
+}
+
+/*
+ * FIXME write this
+ */
+void
+MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
+{
+	if (MultiXactIdPrecedes(MultiXactState->oldestMultiXactId, oldestMulti))
+		SetMultiXactIdLimit(oldestMulti, oldestMultiDB);
 }
 
 /*
@@ -2152,7 +2169,6 @@ GetOldestMultiXactId(void)
 void
 TruncateMultiXact(MultiXactId cutoff_multi)
 {
-	int		cutoffPage;
 	MultiXactOffset	oldestOffset;
 
 	/*

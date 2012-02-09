@@ -590,7 +590,8 @@ void
 vac_update_relstats(Relation relation,
 					BlockNumber num_pages, double num_tuples,
 					BlockNumber num_all_visible_pages,
-					bool hasindex, TransactionId frozenxid)
+					bool hasindex, TransactionId frozenxid,
+					MultiXactId minmulti)
 {
 	Oid			relid = RelationGetRelid(relation);
 	Relation	rd;
@@ -664,6 +665,14 @@ vac_update_relstats(Relation relation,
 		dirty = true;
 	}
 
+	/* relminmxid must never go backward, either */
+	if (MultiXactIdIsValid(minmulti) &&
+		MultiXactIdPrecedes(pgcform->relminmxid, minmulti))
+	{
+		pgcform->relminmxid = minmulti;
+		dirty = true;
+	}
+
 	/* If anything changed, write out the tuple. */
 	if (dirty)
 		heap_inplace_update(rd, ctup);
@@ -711,7 +720,7 @@ vac_update_datfrozenxid(void)
 	newFrozenXid = GetOldestXmin(true, true);
 
 	/* FIXME what should we initialize this to? */
-	newFrozenMulti = FirstMultiXactId;
+	newFrozenMulti = ReadNextMultiXactId();
 
 	/*
 	 * We must seqscan pg_class to find the minimum Xid, because there is no
@@ -735,6 +744,7 @@ vac_update_datfrozenxid(void)
 			continue;
 
 		Assert(TransactionIdIsNormal(classForm->relfrozenxid));
+		Assert(MultiXactIdIsValid(classForm->relminmxid));
 
 		if (TransactionIdPrecedes(classForm->relfrozenxid, newFrozenXid))
 			newFrozenXid = classForm->relfrozenxid;

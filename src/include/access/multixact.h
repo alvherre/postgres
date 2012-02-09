@@ -20,7 +20,7 @@
  * 2.
  */
 #define InvalidMultiXactId	((MultiXactId) 0)
-#define FirstMultiXactId	((MultiXactId) 2)
+#define FirstMultiXactId	((MultiXactId) 1)
 #define MaxMultiXactId		((MultiXactId) 0xFFFFFFFF)
 
 #define MultiXactIdIsValid(multi) ((multi) != InvalidMultiXactId)
@@ -102,14 +102,17 @@ extern void SetMultiXactIdLimit(MultiXactId oldest_datminmxid,
 					Oid oldest_datoid);
 extern void MultiXactGetCheckptMulti(bool is_shutdown,
 						 MultiXactId *nextMulti,
-						 MultiXactOffset *nextMultiOffset);
+						 MultiXactOffset *nextMultiOffset,
+						 MultiXactId *oldestMulti,
+						 Oid *oldestMultiDB);
 extern void CheckPointMultiXact(void);
 extern MultiXactId GetOldestMultiXactId(void);
-extern void TruncateMultiXact(TransactionId oldestXid);
+extern void TruncateMultiXact(MultiXactId cutoff_multi);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti,
 					  MultiXactOffset nextMultiOffset);
 extern void MultiXactAdvanceNextMXact(MultiXactId minMulti,
 						  MultiXactOffset minMultiOffset);
+extern void MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB);
 
 extern void multixact_twophase_recover(TransactionId xid, uint16 info,
 						   void *recdata, uint32 len);

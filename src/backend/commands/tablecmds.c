@@ -1103,6 +1103,7 @@ ExecuteTruncate(TruncateStmt *stmt)
 		{
 			Oid			heap_relid;
 			Oid			toast_relid;
+			MultiXactId	minmulti;
 
 			/*
 			 * This effectively deletes all rows in the table, and may be done
@@ -1112,6 +1113,8 @@ ExecuteTruncate(TruncateStmt *stmt)
 			 */
 			CheckTableForSerializableConflictIn(rel);
 
+			minmulti = GetOldestMultiXactId();
+
 			/*
 			 * Need the full transaction-safe pushups.
 			 *
@@ -1119,7 +1122,7 @@ ExecuteTruncate(TruncateStmt *stmt)
 			 * as the relfilenode value. The old storage file is scheduled for
 			 * deletion at commit.
 			 */
-			RelationSetNewRelfilenode(rel, RecentXmin);
+			RelationSetNewRelfilenode(rel, RecentXmin, minmulti);
 
 			heap_relid = RelationGetRelid(rel);
 			toast_relid = rel->rd_rel->reltoastrelid;
@@ -1130,7 +1133,7 @@ ExecuteTruncate(TruncateStmt *stmt)
 			if (OidIsValid(toast_relid))
 			{
 				rel = relation_open(toast_relid, AccessExclusiveLock);
-				RelationSetNewRelfilenode(rel, RecentXmin);
+				RelationSetNewRelfilenode(rel, RecentXmin, minmulti);
 				heap_close(rel, NoLock);
 			}
 

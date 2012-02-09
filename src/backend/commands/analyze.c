@@ -16,6 +16,7 @@
 
 #include <math.h>
 
+#include "access/multixact.h"
 #include "access/transam.h"
 #include "access/tupconvert.h"
 #include "access/tuptoaster.h"
@@ -538,7 +539,8 @@ do_analyze_rel(Relation onerel, VacuumStmt *vacstmt, bool inh)
 							totalrows,
 							visibilitymap_count(onerel),
 							hasindex,
-							InvalidTransactionId);
+							InvalidTransactionId,
+							InvalidMultiXactId);
 
 	/*
 	 * Same for indexes. Vacuum always scans all indexes, so if we're part of
@@ -558,7 +560,8 @@ do_analyze_rel(Relation onerel, VacuumStmt *vacstmt, bool inh)
 								totalindexrows,
 								0,
 								false,
-								InvalidTransactionId);
+								InvalidTransactionId,
+								InvalidMultiXactId);
 		}
 	}
 

@@ -119,7 +119,7 @@ typedef FormData_pg_class *Form_pg_class;
 #define Anum_pg_class_relhastriggers	23
 #define Anum_pg_class_relhassubclass	24
 #define Anum_pg_class_relfrozenxid		25
-#define Anum_pg_class_relfrozenmxid		26
+#define Anum_pg_class_relminmxid		26
 #define Anum_pg_class_relacl			27
 #define Anum_pg_class_reloptions		28
 
