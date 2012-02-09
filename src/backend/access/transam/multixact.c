@@ -63,8 +63,6 @@
  */
 #include "postgres.h"
 
-#include <unistd.h>
-
 #include "access/multixact.h"
 #include "access/slru.h"
 #include "access/transam.h"
