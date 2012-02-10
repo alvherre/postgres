@@ -1578,7 +1578,6 @@ multixact_twophase_postabort(TransactionId xid, uint16 info,
 	multixact_twophase_postcommit(xid, info, recdata, len);
 }
 
-
 /*
  * Initialization of shared memory for MultiXact.  We use two SLRU areas,
  * thus double memory.	Also, reserve space for the shared MultiXactState
@@ -1695,7 +1694,7 @@ ZeroMultiXactOffsetPage(int pageno, bool writeXlog)
 }
 
 /*
- * Ditto for MultiXactMember
+ * Ditto, for MultiXactMember
  */
 static int
 ZeroMultiXactMemberPage(int pageno, bool writeXlog)
@@ -2052,11 +2051,9 @@ ExtendMultiXactOffset(MultiXactId multi)
 
 	LWLockAcquire(MultiXactOffsetControlLock, LW_EXCLUSIVE);
 
-	/*
-	 * Zero the page, mark it with its truncate info, and make an XLOG entry
-	 * about it.
-	 */
+	/* Zero the page and make an XLOG entry about it */
 	ZeroMultiXactOffsetPage(pageno, true);
+
 	LWLockRelease(MultiXactOffsetControlLock);
 }
 
@@ -2161,6 +2158,30 @@ GetOldestMultiXactId(void)
 	return oldestMXact;
 }
 
+typedef struct mxtruncinfo
+{
+	int		earliestExistingPage;
+} mxtruncinfo;
+
+/*
+ * SlruScanDirectory callback
+ * 		This callback determines the earliest existing page number.
+ */
+static bool
+SlruScanDirCbFindEarliest(SlruCtl ctl, char *filename, int segpage, void *data)
+{
+	mxtruncinfo		*trunc = (mxtruncinfo *) data;
+
+	if (trunc->earliestExistingPage == -1 ||
+		ctl->PagePrecedes(segpage, trunc->earliestExistingPage))
+	{
+		elog(WARNING, "setting earliest page to %d", segpage);
+		trunc->earliestExistingPage = segpage;
+	}
+
+	return false;	/* keep going */
+}
+
 /*
  * Remove all MultiXactOffset and MultiXactMember segments before the oldest
  * ones still of interest.
@@ -2170,9 +2191,28 @@ GetOldestMultiXactId(void)
  * databases' datminmxid values.
  */
 void
-TruncateMultiXact(MultiXactId cutoff_multi)
+TruncateMultiXact(MultiXactId oldestMXact)
 {
 	MultiXactOffset	oldestOffset;
+	mxtruncinfo		trunc;
+	MultiXactId		earliest;
+
+	/*
+	 * Note we can't just plow ahead with the truncation; it's possible that
+	 * there are no segments to truncate, which is a problem because we are
+	 * going to attempt to read the offsets page to determine where to truncate
+	 * the members SLRU.  So we first scan the directory to determine the
+	 * earliest offsets page number that we can read without error.
+	 */
+	trunc.earliestExistingPage = -1;
+	SlruScanDirectory(MultiXactOffsetCtl, SlruScanDirCbFindEarliest, &trunc);
+	earliest = trunc.earliestExistingPage * MULTIXACT_OFFSETS_PER_PAGE;
+	elog(WARNING, "SlruScanDir returned earliest page %d", trunc.earliestExistingPage);
+	elog(WARNING, "earliest mxact is %u", earliest);
+
+	/* nothing to do */
+	if (MultiXactIdPrecedes(oldestMXact, earliest))
+		return;
 
 	/*
 	 * First, compute the safe truncation point for MultiXactMember.
@@ -2180,18 +2220,18 @@ TruncateMultiXact(MultiXactId cutoff_multi)
 	 * as MultiXactOffset cutoff.
 	 */
 	{
-		int		pageno;
-		int		slotno;
-		int		entryno;
+		int			pageno;
+		int			slotno;
+		int			entryno;
 		MultiXactOffset *offptr;
 
 		/* lock is acquired by SimpleLruReadPage_ReadOnly */
 
-		pageno = MultiXactIdToOffsetPage(cutoff_multi);
-		entryno = MultiXactIdToOffsetEntry(cutoff_multi);
+		pageno = MultiXactIdToOffsetPage(oldestMXact);
+		entryno = MultiXactIdToOffsetEntry(oldestMXact);
 
 		slotno = SimpleLruReadPage_ReadOnly(MultiXactOffsetCtl, pageno,
-											cutoff_multi);
+											oldestMXact);
 		offptr = (MultiXactOffset *)
 			MultiXactOffsetCtl->shared->page_buffer[slotno];
 		offptr += entryno;
@@ -2202,7 +2242,7 @@ TruncateMultiXact(MultiXactId cutoff_multi)
 
 	/* truncate MultiXactOffset */
 	SimpleLruTruncate(MultiXactOffsetCtl,
-					  MultiXactIdToOffsetPage(cutoff_multi));
+					  MultiXactIdToOffsetPage(oldestMXact));
 
 	/* truncate MultiXactMembers and we're done */
 	SimpleLruTruncate(MultiXactMemberCtl,
@@ -2236,7 +2276,7 @@ MultiXactOffsetPagePrecedes(int page1, int page2)
 
 /*
  * Decide which of two MultiXactMember page numbers is "older" for truncation
- * purposes.  There is no "invalid number" so use the numbers verbatim.
+ * purposes.  There is no "invalid offset number" so use the numbers verbatim.
  */
 static bool
 MultiXactMemberPagePrecedes(int page1, int page2)
@@ -2274,6 +2314,7 @@ MultiXactOffsetPrecedes(MultiXactOffset offset1, MultiXactOffset offset2)
 
 	return (diff < 0);
 }
+
 
 /*
  * Write an xlog record reflecting the zeroing of either a MEMBERs or
@@ -2343,9 +2384,7 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		/* Store the data back into the SLRU files */
 		RecordNewMultiXact(xlrec->mid, xlrec->moff, xlrec->nmembers, members);
 
-		/*
-		 * Make sure nextMXact/nextOffset are beyond what this record has.
-		 */
+		/* Make sure nextMXact/nextOffset are beyond what this record has */
 		MultiXactAdvanceNextMXact(xlrec->mid + 1,
 								  xlrec->moff + xlrec->nmembers);
 

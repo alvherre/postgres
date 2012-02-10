@@ -128,6 +128,17 @@ static const bool MultiXactConflicts[MaxMultiXactStatus + 1][MaxMultiXactStatus 
 #define MultiXactStatusConflict(status1, status2) \
 	MultiXactConflicts[status1][status2]
 
+/* corresponding lock mode for each multixact status */
+static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
+{
+	LockTupleKeyShare,		/* ForKeyShare */
+	LockTupleShare,			/* ForShare */
+	LockTupleUpdate,		/* ForUpdate */
+	LockTupleKeyUpdate,		/* ForKeyUpdate */
+	LockTupleUpdate,		/* Update */
+	LockTupleKeyUpdate		/* KeyUpdate */
+};
+
 /*
  * Some convenience macros to hide calls to get_lockmode_for_tuplelock().
  * These let the code specify a LockTupleMode argument, instead of having to
@@ -2540,6 +2551,7 @@ l1:
 		 * only locked the tuple without updating it.
 		 */
 		if ((tp.t_data->t_infomask & HEAP_XMAX_INVALID) ||
+			HeapTupleHeaderInfomaskIsOnlyLocked(tp.t_data->t_infomask) ||
 			HeapTupleHeaderIsOnlyLocked(tp.t_data))
 			result = HeapTupleMayBeUpdated;
 		else
@@ -2596,6 +2608,17 @@ l1:
 		visibilitymap_clear(relation, BufferGetBlockNumber(buffer),
 							vmbuffer);
 	}
+
+	/*
+	 * If this is the first possibly-multixact-able operation in the
+	 * current transaction, set my per-backend OldestMemberMXactId setting.
+	 * We can be certain that the transaction will never become a member of
+	 * any older MultiXactIds than that.  (We have to do this even if we
+	 * end up just using our own TransactionId below, since some other
+	 * backend could incorporate our XID into a MultiXact immediately
+	 * afterwards.)
+	 */
+	MultiXactIdSetOldestMember();
 
 	compute_new_xmax_infomask(HeapTupleHeaderGetRawXmax(tp.t_data),
 							  tp.t_data->t_infomask, tp.t_data->t_infomask2,
@@ -3600,6 +3623,37 @@ simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
 	}
 }
 
+typedef struct thingies
+{
+	LOCKMODE	hwlock;
+	MultiXactStatus	lockstatus;
+	MultiXactStatus	updstatus;
+} thingies;
+
+static const thingies foo[MaxLockTupleMode + 1] =
+{
+	{	/* LockTupleKeyShare */
+		AccessShareLock,
+		MultiXactStatusForKeyShare,
+		-1
+	},
+	{	/* LockTupleShare */
+		RowShareLock,
+		MultiXactStatusForShare,
+		-1
+	},
+	{	/* LockTupleUpdate */
+		ExclusiveLock,
+		MultiXactStatusForUpdate,
+		MultiXactStatusUpdate
+	},
+	{	/* LockTupleKeyUpdate */
+		AccessExclusiveLock,
+		MultiXactStatusForKeyUpdate,
+		MultiXactStatusKeyUpdate
+	}
+};
+
 /*
  * Return the appropriate LOCKMODE to acquire by LockTuple corresponding to the
  * given lock tuple mode.
@@ -3610,58 +3664,28 @@ simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
 static LOCKMODE
 get_lockmode_for_tuplelock(LockTupleMode mode)
 {
-	switch (mode)
-	{
-		case LockTupleKeyShare:
-			return AccessShareLock;
-		case LockTupleShare:
-			return RowShareLock;
-		case LockTupleUpdate:
-			return ExclusiveLock;
-		case LockTupleKeyUpdate:
-			return AccessExclusiveLock;
-		default:
-			elog(ERROR, "invalid lock tuple mode %d", mode);
-			return 0;	/* keep compiler quiet */
-	}
+	return foo[mode].hwlock;
 }
 
 /*
  * Return the MultiXactStatus corresponding to the given tuple lock mode.
  */
 static MultiXactStatus
-get_mxact_status_for_tuplelock(LockTupleMode mode)
+get_mxact_status_for_lock(LockTupleMode mode, bool is_update)
 {
-	switch (mode)
-	{
-		case LockTupleKeyShare:
-			return MultiXactStatusForKeyShare;
-		case LockTupleShare:
-			return MultiXactStatusForShare;
-		case LockTupleUpdate:
-			return MultiXactStatusForUpdate;
-		case LockTupleKeyUpdate:
-			return MultiXactStatusForKeyUpdate;
-		default:
-			elog(ERROR, "invalid tuple lock mode %d", mode);
-			return 0;	/* keep compiler quiet */
-	}
+	MultiXactStatus		retval;
+
+	if (is_update)
+		retval = foo[mode].updstatus;
+	else
+		retval = foo[mode].lockstatus;
+
+	if (retval == -1)
+		elog(ERROR, "invalid lock tuple mode %d", mode);
+
+	return retval;
 }
 
-static MultiXactStatus
-get_mxact_status_for_update(LockTupleMode mode)
-{
-	switch (mode)
-	{
-		case LockTupleUpdate:
-			return MultiXactStatusUpdate;
-		case LockTupleKeyUpdate:
-			return MultiXactStatusKeyUpdate;
-		default:
-			elog(ERROR, "invalid tuple update mode %d", mode);
-			return 0;	/* keep compiler quiet */
-	}
-}
 
 /*
  *	heap_lock_tuple - lock a tuple in shared or exclusive mode
@@ -3789,7 +3813,6 @@ l3:
 			int		i;
 			int		nmembers;
 			MultiXactMember *members;
-			MultiXactStatus cutoff = get_mxact_status_for_tuplelock(mode);
 
 			nmembers = GetMultiXactIdMembers(xwait, &members);
 
@@ -3797,7 +3820,9 @@ l3:
 			{
 				if (TransactionIdIsCurrentTransactionId(members[i].xid))
 				{
-					if (members[i].status >= cutoff)
+					LockTupleMode	membermode = MultiXactStatusLock[members[i].status];
+
+					if (membermode > mode)
 					{
 						if (have_tuple_lock)
 							UnlockTupleTuplock(relation, tid, mode);
@@ -4005,7 +4030,7 @@ l3:
 		{
 			if (infomask & HEAP_XMAX_IS_MULTI)
 			{
-				MultiXactStatus status = get_mxact_status_for_tuplelock(mode);
+				MultiXactStatus status = get_mxact_status_for_lock(mode, false);
 				int		remain;
 
 				/* We only ever lock tuples, never update them */
@@ -4125,6 +4150,7 @@ l3:
 		 */
 		if (!require_sleep ||
 			(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
+			HeapTupleHeaderInfomaskIsOnlyLocked(tuple->t_data->t_infomask) ||
 			HeapTupleHeaderIsOnlyLocked(tuple->t_data))
 			result = HeapTupleMayBeUpdated;
 		else
@@ -4175,9 +4201,11 @@ failed:
 		return HeapTupleMayBeUpdated;
 	}
 
+	/*
 	if (mode == LockTupleKeyShare ||
 		mode == LockTupleShare ||
 		mode == LockTupleUpdate)
+		*/
 	{
 		/*
 		 * If this is the first possibly-multixact-able operation in the
@@ -4377,6 +4405,8 @@ l5:
 	}
 	else if (old_infomask & HEAP_XMAX_IS_MULTI)
 	{
+		MultiXactStatus		new_status;
+
 		/*
 		 * If the XMAX is already a MultiXactId, then we need to expand it to
 		 * include add_to_xmax; but if all the members were lockers and are all
@@ -4403,8 +4433,10 @@ l5:
 			goto l5;
 		}
 
+		new_status = get_mxact_status_for_lock(mode, is_update);
+
 		new_xmax = MultiXactIdExpand((MultiXactId) xmax, add_to_xmax,
-									 get_mxact_status_for_tuplelock(mode));
+									 new_status);
 		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
 	}
 	else if (TransactionIdIsInProgress(xmax))
@@ -4415,11 +4447,7 @@ l5:
 		 * updater and our own TransactionId.
 		 */
 		MultiXactStatus		status;
-		MultiXactStatus		new_mxact_status;
-
-		new_mxact_status = is_update ?
-			get_mxact_status_for_update(mode) :
-			get_mxact_status_for_tuplelock(mode);
+		MultiXactStatus		new_status;
 
 		if (old_infomask & HEAP_XMAX_LOCK_ONLY)
 		{
@@ -4450,8 +4478,9 @@ l5:
 				status = MultiXactStatusUpdate;
 		}
 
-		new_xmax = MultiXactIdCreate(xmax, status,
-									 add_to_xmax, new_mxact_status);
+		new_status = get_mxact_status_for_lock(mode, is_update);
+
+		new_xmax = MultiXactIdCreate(xmax, status, add_to_xmax, new_status);
 		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
 	}
 	else
@@ -4955,6 +4984,44 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 	*new_infomask2 = bits2;
 }
 
+/* 
+ * Is the tuple really only locked?  It's easy to check just infomask bits if
+ * the locker is not a multi; but otherwise we need to verify that the updating
+ * transaction has not aborted.
+ *
+ * Do not call if Xmax is not valid
+ */
+bool
+HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple)
+{
+	TransactionId	xmax;
+
+	Assert(!(tuple->t_infomask & HEAP_XMAX_INVALID));
+
+	if (tuple->t_infomask & HEAP_XMAX_LOCK_ONLY)
+		return true;
+
+	/*
+	 * if HEAP_XMAX_LOCK_ONLY is not set and not a multi, then this
+	 * must necessarily have been updated
+	 */
+	if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
+		return false;
+
+	/* ... but if it's a multi, then perhaps the updating Xid aborted. */
+	xmax = HeapTupleGetUpdateXid(tuple);
+	/* this shouldn't happen, really */
+	if (!TransactionIdIsValid(xmax))
+		return true;
+	if (TransactionIdIsCurrentTransactionId(xmax))
+		return false;
+	if (TransactionIdIsInProgress(xmax))
+		return false;
+	if (TransactionIdDidCommit(xmax))
+		return false;
+	return true;
+}
+
 /*
  * HeapTupleGetUpdateXid
  *
@@ -4984,17 +5051,20 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			/* KEY SHARE lockers are okay -- ignore it */
+			/*
+			 * Ignore lockers.  Note that we should only see anything stronger
+			 * than KeyShare here if they are part of our own transaction.
+			 */
 			if (members[i].status == MultiXactStatusForKeyShare)
 				continue;
-			/*
-			 * SHARE lockers are okay, though since they normally conflict with
-			 * UPDATE, they are not expected unless they come from the same
-			 * xact as the update.
-			 */
 			if (members[i].status == MultiXactStatusForShare ||
-				members[i].status == MultiXactStatusForUpdate)
+				members[i].status == MultiXactStatusForUpdate ||
+				members[i].status == MultiXactStatusForKeyUpdate)
+			{
+				Assert(TransactionIdIsCurrentTransactionId(members[i].xid));
 				continue;
+			}
+
 			/* there should be at most one updater */
 			Assert(update_xact == InvalidTransactionId);
 			Assert(members[i].status == MultiXactStatusUpdate ||

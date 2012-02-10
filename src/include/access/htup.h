@@ -191,6 +191,9 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
  * A tuple is only locked (i.e. not updated by its Xmax) if it the
  * HEAP_XMAX_LOCK_ONLY bit is set.
  *
+ * See also HeapTupleHeaderIsOnlyLocked, which also checks for a possible
+ * aborted transaction.
+ *
  * XXX should we AssertMacro() that HEAP_XMAX_INVALID is not set?
  */
 #define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
@@ -199,9 +202,6 @@ typedef HeapTupleHeaderData *HeapTupleHeader;
 /* turn these all off when Xmax is to change */
 #define HEAP_XMAX_BITS (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | \
 						HEAP_XMAX_IS_MULTI | HEAP_LOCK_BITS)
-
-#define HeapTupleHeaderIsOnlyLocked(tup) \
-	HeapTupleHeaderInfomaskIsOnlyLocked((tup)->t_infomask)
 
 /*
  * information stored in t_infomask2:
@@ -938,7 +938,8 @@ extern Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
 			heap_getsysattr((tup), (attnum), (tupleDesc), (isnull)) \
 	)
 
-/* Prototype for HeapTupleHeader accessor in heapam.c */
+/* Prototype for HeapTupleHeader accessors in heapam.c */
+extern bool HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple);
 extern TransactionId HeapTupleGetUpdateXid(HeapTupleHeader tuple);
 
 /* prototypes for functions in common/heaptuple.c */

@@ -47,6 +47,8 @@ typedef enum
 	LockTupleKeyUpdate
 } LockTupleMode;
 
+#define MaxLockTupleMode	LockTupleKeyUpdate
+
 
 /* ----------------
  *		function prototypes for heap access method

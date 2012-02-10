@@ -470,11 +470,10 @@ vacuum_set_xid_limits(int freeze_min_age,
 		MultiXactId	mxLimit;
 
 		/*
-		 * simplistic multixactid freezing:
-		 *
-		 * limit = current value - autovacuum_max_freeze_age
+		 * simplistic multixactid freezing: use the same freezing policy as
+		 * for Xids
 		 */
-		mxLimit = GetOldestMultiXactId() - autovacuum_freeze_max_age;
+		mxLimit = GetOldestMultiXactId() - freezemin;
 		if (mxLimit < FirstMultiXactId)
 			mxLimit = FirstMultiXactId;
 
