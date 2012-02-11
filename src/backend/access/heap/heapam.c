@@ -75,7 +75,6 @@
 bool		synchronize_seqscans = true;
 
 
-static LOCKMODE get_lockmode_for_tuplelock(LockTupleMode mode);
 static HeapScanDesc heap_beginscan_internal(Relation relation,
 						Snapshot snapshot,
 						int nkeys, ScanKey key,
@@ -102,31 +101,41 @@ static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 static bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 						   int *remaining);
 
-/* multixact status conflict table */
-static const bool MultiXactConflicts[MaxMultiXactStatus + 1][MaxMultiXactStatus + 1] =
+typedef struct TupleLockExtraInfo
 {
-	{	/* ForKeyShare */
-		false, false, false, true, false, true
+	LOCKMODE	hwlock;
+	MultiXactStatus	lockstatus;
+	MultiXactStatus	updstatus;
+} TupleLockExtraInfo;
+
+/*
+ * Each tuple lock mode has a corresponding heavyweight lock, and one or two
+ * corresponding MultiXactStatuses (one to merely lock tuples, another one to
+ * update them).
+ */
+static const TupleLockExtraInfo tupleLockExtraInfo[MaxLockTupleMode + 1] =
+{
+	{	/* LockTupleKeyShare */
+		AccessShareLock,
+		MultiXactStatusForKeyShare,
+		-1	/* KeyShare does not allow updating tuples */
 	},
-	{	/* ForShare */
-		false, false, true, true, true, true
+	{	/* LockTupleShare */
+		RowShareLock,
+		MultiXactStatusForShare,
+		-1	/* Share does not allow updating tuples */
 	},
-	{	/* ForUpdate */
-		false, true, true, true, true, true
+	{	/* LockTupleUpdate */
+		ExclusiveLock,
+		MultiXactStatusForUpdate,
+		MultiXactStatusUpdate
 	},
-	{	/* ForKeyUpdate */
-		false, true, true, true, true, true
-	},
-	{	/* Update */
-		false, true, true, true, true, true
-	},
-	{	/* KeyUpdate */
-		true, true, true, true, true, true
+	{	/* LockTupleKeyUpdate */
+		AccessExclusiveLock,
+		MultiXactStatusForKeyUpdate,
+		MultiXactStatusKeyUpdate
 	}
 };
-
-#define MultiXactStatusConflict(status1, status2) \
-	MultiXactConflicts[status1][status2]
 
 /* corresponding lock mode for each multixact status */
 static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
@@ -140,16 +149,16 @@ static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
 };
 
 /*
- * Some convenience macros to hide calls to get_lockmode_for_tuplelock().
- * These let the code specify a LockTupleMode argument, instead of having to
- * translate it to LOCKMODE, which is slightly more readable.
+ * Convenience macros.  These let the code specify a LockTupleMode argument,
+ * instead of having to translate it to LOCKMODE, which is slightly more
+ * readable.
  */
 #define LockTupleTuplock(rel, tup, mode) \
-	LockTuple((rel), (tup), get_lockmode_for_tuplelock(mode))
+	LockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
 #define UnlockTupleTuplock(rel, tup, mode) \
-	UnlockTuple((rel), (tup), get_lockmode_for_tuplelock(mode))
+	UnlockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
 #define ConditionalLockTupleTuplock(rel, tup, mode) \
-	ConditionalLockTuple((rel), (tup), get_lockmode_for_tuplelock(mode))
+	ConditionalLockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
 
 
 /* ----------------------------------------------------------------
@@ -3623,49 +3632,6 @@ simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
 	}
 }
 
-typedef struct thingies
-{
-	LOCKMODE	hwlock;
-	MultiXactStatus	lockstatus;
-	MultiXactStatus	updstatus;
-} thingies;
-
-static const thingies foo[MaxLockTupleMode + 1] =
-{
-	{	/* LockTupleKeyShare */
-		AccessShareLock,
-		MultiXactStatusForKeyShare,
-		-1
-	},
-	{	/* LockTupleShare */
-		RowShareLock,
-		MultiXactStatusForShare,
-		-1
-	},
-	{	/* LockTupleUpdate */
-		ExclusiveLock,
-		MultiXactStatusForUpdate,
-		MultiXactStatusUpdate
-	},
-	{	/* LockTupleKeyUpdate */
-		AccessExclusiveLock,
-		MultiXactStatusForKeyUpdate,
-		MultiXactStatusKeyUpdate
-	}
-};
-
-/*
- * Return the appropriate LOCKMODE to acquire by LockTuple corresponding to the
- * given lock tuple mode.
- *
- * These heavyweight lock modes have been chosen because they exactly mimic
- * the lock conflict behavior that our tuple lock modes need to have.
- */
-static LOCKMODE
-get_lockmode_for_tuplelock(LockTupleMode mode)
-{
-	return foo[mode].hwlock;
-}
 
 /*
  * Return the MultiXactStatus corresponding to the given tuple lock mode.
@@ -3676,9 +3642,9 @@ get_mxact_status_for_lock(LockTupleMode mode, bool is_update)
 	MultiXactStatus		retval;
 
 	if (is_update)
-		retval = foo[mode].updstatus;
+		retval = tupleLockExtraInfo[mode].updstatus;
 	else
-		retval = foo[mode].lockstatus;
+		retval = tupleLockExtraInfo[mode].lockstatus;
 
 	if (retval == -1)
 		elog(ERROR, "invalid lock tuple mode %d", mode);
@@ -5119,13 +5085,19 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
 
 		for (i = 0; i < nmembers; i++)
 		{
+			LockTupleMode	memberlock;
+			LockTupleMode	waitinglock;
+
 			if (TransactionIdIsCurrentTransactionId(members[i].xid))
 			{
 				remain++;
 				continue;
 			}
 
-			if (!MultiXactStatusConflict(members[i].status, status))
+			memberlock = tupleLockExtraInfo[members[i].status].hwlock;
+			waitinglock = tupleLockExtraInfo[status].hwlock;
+
+			if (!DoLockModesConflict(memberlock, waitinglock))
 			{
 				if (TransactionIdIsInProgress(members[i].xid))
 					remain++;
@@ -5164,6 +5136,8 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 		for (i = 0; i < nmembers; i++)
 		{
 			TransactionId member = members[i].xid;
+			LockTupleMode	memberlock;
+			LockTupleMode	waitinglock;
 
 			if (TransactionIdIsCurrentTransactionId(member))
 			{
@@ -5171,7 +5145,10 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 				continue;
 			}
 
-			if (!MultiXactStatusConflict(members[i].status, status))
+			memberlock = tupleLockExtraInfo[members[i].status].hwlock;
+			waitinglock = tupleLockExtraInfo[status].hwlock;
+
+			if (!DoLockModesConflict(memberlock, waitinglock))
 			{
 				if (TransactionIdIsInProgress(members[i].xid))
 					remain++;

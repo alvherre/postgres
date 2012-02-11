@@ -115,6 +115,21 @@ static const char *const lock_mode_names[] =
 };
 
 /*
+ * Given two lock modes, return whether they would conflict.
+ */
+bool
+DoLockModesConflict(LOCKMODE mode1, LOCKMODE mode2)
+{
+	LOCKMASK	mask1 = LOCKBIT_ON(mode1);
+	LOCKMASK	mask2 = LOCKBIT_ON(mode2);
+
+	if (!(mask1 & mask2))
+		return true;
+
+	return false;
+}
+
+/*
  * Count of the number of fast path lock slots we believe to be used.  This
  * might be higher than the real number if another backend has transferred
  * our locks to the primary lock table, but it can never be lower than the
