@@ -160,6 +160,9 @@ static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
 #define ConditionalLockTupleTuplock(rel, tup, mode) \
 	ConditionalLockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
 
+/* Get the corresponding LOCKMODE for a given MultiXactStatus */
+#define LOCKMODE_from_mxstatus(status) \
+			(tupleLockExtraInfo[MultiXactStatusLock[(status)]].hwlock)
 
 /* ----------------------------------------------------------------
  *						 heap support routines
@@ -5017,21 +5020,16 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			/*
-			 * Ignore lockers.  Note that we should only see anything stronger
-			 * than KeyShare here if they are part of our own transaction.
-			 */
-			if (members[i].status == MultiXactStatusForKeyShare)
-				continue;
-			if (members[i].status == MultiXactStatusForShare ||
+			/* Ignore lockers */
+			if (members[i].status == MultiXactStatusForKeyShare ||
+				members[i].status == MultiXactStatusForShare ||
 				members[i].status == MultiXactStatusForUpdate ||
 				members[i].status == MultiXactStatusForKeyUpdate)
-			{
-				Assert(TransactionIdIsCurrentTransactionId(members[i].xid));
 				continue;
-			}
 
 			/* there should be at most one updater */
+			/* FIXME -- what if an aborted subxact updates the tuple
+			 * and it's then deleted by another subxact? */
 			Assert(update_xact == InvalidTransactionId);
 			Assert(members[i].status == MultiXactStatusUpdate ||
 				   members[i].status == MultiXactStatusKeyUpdate);
@@ -5085,26 +5083,24 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
 
 		for (i = 0; i < nmembers; i++)
 		{
-			LockTupleMode	memberlock;
-			LockTupleMode	waitinglock;
+			TransactionId memxid = members[i].xid;
+			MultiXactStatus memstatus = members[i].status;
 
-			if (TransactionIdIsCurrentTransactionId(members[i].xid))
+			if (TransactionIdIsCurrentTransactionId(memxid))
 			{
 				remain++;
 				continue;
 			}
 
-			memberlock = tupleLockExtraInfo[members[i].status].hwlock;
-			waitinglock = tupleLockExtraInfo[status].hwlock;
-
-			if (!DoLockModesConflict(memberlock, waitinglock))
+			if (!DoLockModesConflict(LOCKMODE_from_mxstatus(memstatus),
+									 LOCKMODE_from_mxstatus(status)))
 			{
-				if (TransactionIdIsInProgress(members[i].xid))
+				if (TransactionIdIsInProgress(memxid))
 					remain++;
 				continue;
 			}
 
-			XactLockTableWait(members[i].xid);
+			XactLockTableWait(memxid);
 		}
 	}
 
@@ -5135,26 +5131,23 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 
 		for (i = 0; i < nmembers; i++)
 		{
-			TransactionId member = members[i].xid;
-			LockTupleMode	memberlock;
-			LockTupleMode	waitinglock;
+			TransactionId memxid = members[i].xid;
+			MultiXactStatus memstatus = members[i].status;
 
-			if (TransactionIdIsCurrentTransactionId(member))
+			if (TransactionIdIsCurrentTransactionId(memxid))
 			{
 				remain++;
 				continue;
 			}
 
-			memberlock = tupleLockExtraInfo[members[i].status].hwlock;
-			waitinglock = tupleLockExtraInfo[status].hwlock;
-
-			if (!DoLockModesConflict(memberlock, waitinglock))
+			if (!DoLockModesConflict(LOCKMODE_from_mxstatus(memstatus),
+									 LOCKMODE_from_mxstatus(status)))
 			{
-				if (TransactionIdIsInProgress(members[i].xid))
+				if (TransactionIdIsInProgress(memxid))
 					remain++;
 				continue;
 			}
-			result = ConditionalXactLockTableWait(member);
+			result = ConditionalXactLockTableWait(memxid);
 			if (!result)
 				break;
 		}

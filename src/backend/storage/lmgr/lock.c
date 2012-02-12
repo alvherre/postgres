@@ -123,7 +123,7 @@ DoLockModesConflict(LOCKMODE mode1, LOCKMODE mode2)
 	LOCKMASK	mask1 = LOCKBIT_ON(mode1);
 	LOCKMASK	mask2 = LOCKBIT_ON(mode2);
 
-	if (!(mask1 & mask2))
+	if (mask1 & mask2)
 		return true;
 
 	return false;
