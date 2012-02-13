@@ -2016,7 +2016,8 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 }
 
 /*
- * FIXME write this
+ * Update our oldestMultiXactId value, but only if it's more recent than
+ * what we had.
  */
 void
 MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
