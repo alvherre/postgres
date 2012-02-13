@@ -1400,6 +1400,8 @@ mxstatus_to_string(MultiXactStatus status)
 			return "sh";
 		case MultiXactStatusForUpdate:
 			return "forupd";
+		case MultiXactStatusForKeyUpdate:
+			return "forkeyupd";
 		case MultiXactStatusUpdate:
 			return "upd";
 		case MultiXactStatusKeyUpdate:
