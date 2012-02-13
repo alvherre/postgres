@@ -79,47 +79,17 @@ key            value
 1              1              
 step s2c: COMMIT;
 
-starting permutation: s2l s1l s1svp s1d s2c s1r s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
-key            value          
-
-1              1              
-step s1l: SELECT * FROM foo FOR KEY SHARE;
-key            value          
-
-1              1              
-step s1svp: SAVEPOINT f;
-step s1d: DELETE FROM foo; <waiting ...>
-step s2c: COMMIT;
-step s1d: <... completed>
-step s1r: ROLLBACK TO f;
-step s1c: COMMIT;
-
-starting permutation: s2l s1l s1svp s2c s1d s1r s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
-key            value          
-
-1              1              
-step s1l: SELECT * FROM foo FOR KEY SHARE;
-key            value          
-
-1              1              
-step s1svp: SAVEPOINT f;
-step s2c: COMMIT;
-step s1d: DELETE FROM foo;
-step s1r: ROLLBACK TO f;
-step s1c: COMMIT;
-
 starting permutation: s2l s1l s2c s1svp s1d s1r s1c
 step s2l: SELECT * FROM foo FOR KEY UPDATE;
 key            value          
 
 1              1              
-step s1l: SELECT * FROM foo FOR KEY SHARE;
+step s1l: SELECT * FROM foo FOR KEY SHARE; <waiting ...>
+step s2c: COMMIT;
+step s1l: <... completed>
 key            value          
 
 1              1              
-step s2c: COMMIT;
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
