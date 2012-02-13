@@ -272,13 +272,11 @@ static MemoryContext MXactContext = NULL;
 #define debug_elog2(a,b) elog(a,b)
 #define debug_elog3(a,b,c) elog(a,b,c)
 #define debug_elog4(a,b,c,d) elog(a,b,c,d)
-#define debug_elog5(a,b,c,d,e) elog(a,b,c,d,e)
 #define debug_elog6(a,b,c,d,e,f) elog(a,b,c,d,e,f)
 #else
 #define debug_elog2(a,b)
 #define debug_elog3(a,b,c)
 #define debug_elog4(a,b,c,d)
-#define debug_elog5(a,b,c,d,e)
 #define debug_elog6(a,b,c,d,e,f)
 #endif
 
@@ -378,9 +376,8 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
 
 	newMulti = CreateMultiXactId(2, members);
 
-	/* XXX -- need better debug? */
-	debug_elog5(DEBUG2, "Create: returning %u for %u, %u",
-				newMulti, xid1, xid2);
+	debug_elog3(DEBUG2, "Create: %s",
+				mxid_to_string(newMulti, 2, members));
 
 	return newMulti;
 }
