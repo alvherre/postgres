@@ -4210,8 +4210,7 @@ failed:
 	 * Also reset the HOT UPDATE bit, but only if there's no update; otherwise
 	 * we would break the HOT chain.
 	 */
-	tuple->t_data->t_infomask &= ~(HEAP_LOCK_BITS | HEAP_XMAX_IS_MULTI |
-								   HEAP_XMAX_INVALID);
+	tuple->t_data->t_infomask &= ~HEAP_XMAX_BITS;
 	tuple->t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
 	tuple->t_data->t_infomask |= new_infomask;
 	tuple->t_data->t_infomask2 |= new_infomask2;
@@ -4555,8 +4554,7 @@ l4:
 
 	/* And set them. */
 	HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
-	mytup.t_data->t_infomask &= ~(HEAP_LOCK_BITS | HEAP_XMAX_IS_MULTI |
-								  HEAP_XMAX_INVALID);
+	mytup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
 	mytup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
 	mytup.t_data->t_infomask |= new_infomask;
 	mytup.t_data->t_infomask2 |= new_infomask2;
