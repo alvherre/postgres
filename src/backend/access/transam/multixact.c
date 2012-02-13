@@ -267,7 +267,6 @@ typedef struct mXactCacheEnt
 static mXactCacheEnt *MXactCache = NULL;
 static MemoryContext MXactContext = NULL;
 
-
 #ifdef MULTIXACT_DEBUG
 #define debug_elog2(a,b) elog(a,b)
 #define debug_elog3(a,b,c) elog(a,b,c)
@@ -875,9 +874,12 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 
+	/* Handle wraparound of the nextMXact counter */
+	if (MultiXactState->nextMXact < FirstMultiXactId)
+		MultiXactState->nextMXact = FirstMultiXactId;
+
+	/* Assign the MXID */
 	result = MultiXactState->nextMXact;
-	if (result < FirstMultiXactId)
-		result = FirstMultiXactId;
 
 	/*----------
 	 * Check to see if it's safe to assign another MultiXactId.  This protects
@@ -921,20 +923,19 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 			char	   *oldest_datname = get_database_name(oldest_datoid);
 
 			/* complain even if that DB has disappeared */
-			/* XXX need better wording for these errors */
 			if (oldest_datname)
 				ereport(ERROR,
 						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("database is not accepting commands to avoid wraparound data loss in database \"%s\"",
+						 errmsg("database is not accepting commands that generate new MultiXactIds to avoid wraparound data loss in database \"%s\"",
 								oldest_datname),
-						 errhint("Stop the postmaster and use a standalone backend to vacuum that database.\n"
+						 errhint("Execute a database-wide VACUUM in that database.\n"
 								 "You might also need to commit or roll back old prepared transactions.")));
 			else
 				ereport(ERROR,
 						(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-						 errmsg("database is not accepting commands to avoid wraparound data loss in database with OID %u",
+						 errmsg("database is not accepting commands that generate new MultiXactIds to avoid wraparound data loss in database with OID %u",
 								oldest_datoid),
-						 errhint("Stop the postmaster and use a standalone backend to vacuum that database.\n"
+						 errhint("Execute a database-wide VACUUM in that database.\n"
 								 "You might also need to commit or roll back old prepared transactions.")));
 		}
 		else if (!MultiXactIdPrecedes(result, multiWarnLimit))
@@ -944,17 +945,17 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 			/* complain even if that DB has disappeared */
 			if (oldest_datname)
 				ereport(WARNING,
-						(errmsg("database \"%s\" must be vacuumed within %u transactions",
+						(errmsg("database \"%s\" must be vacuumed before %u more MultiXactIds are used",
 								oldest_datname,
 								multiWrapLimit - result),
-						 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+						 errhint("Execute a database-wide VACUUM in that database.\n"
 								 "You might also need to commit or roll back old prepared transactions.")));
 			else
 				ereport(WARNING,
-						(errmsg("database with OID %u must be vacuumed within %u transactions",
+						(errmsg("database with OID %u must be vacuumed before %u more MultiXactIds are used",
 								oldest_datoid,
 								multiWrapLimit - result),
-						 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+						 errhint("Execute a database-wide VACUUM in that database.\n"
 								 "You might also need to commit or roll back old prepared transactions.")));
 		}
 
@@ -965,12 +966,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
 			result = FirstMultiXactId;
 	}
 
-	/* Assign the MXID */
-	MultiXactState->nextMXact = result;
-
-	/*
-	 * Make sure there is room for it in the file.
-	 */
+	/* Make sure there is room for the MXID in the file.  */
 	ExtendMultiXactOffset(result);
 
 	/*
@@ -1972,11 +1968,11 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 
 		if (oldest_datname)
 			ereport(WARNING,
-			(errmsg("database \"%s\" must be vacuumed before %u more MultiXactId are used",
-					oldest_datname,
-					multiWrapLimit - curMulti),
-			 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
-					 "You might also need to commit or roll back old prepared transactions.")));
+					(errmsg("database \"%s\" must be vacuumed before %u more MultiXactId are used",
+							oldest_datname,
+							multiWrapLimit - curMulti),
+					 errhint("To avoid a database shutdown, execute a database-wide VACUUM in that database.\n"
+							 "You might also need to commit or roll back old prepared transactions.")));
 		else
 			ereport(WARNING,
 					(errmsg("database with OID %u must be vacuumed before %u more MultiXactId are used",

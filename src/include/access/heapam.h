@@ -38,12 +38,9 @@ typedef enum
 	LockTupleKeyShare,
 	/* SELECT FOR SHARE */
 	LockTupleShare,
-	/*
-	 * SELECT FOR UPDATE, and also plain UPDATE when the "key" columns are
-	 * not modified
-	 */
+	/* SELECT FOR UPDATE, and UPDATEs that don't modify key columns */
 	LockTupleUpdate,
-	/* other UPDATEs, and DELETE */
+	/* SELECT FOR KEY UPDATE, UPDATEs that modify key columns, and DELETE */
 	LockTupleKeyUpdate
 } LockTupleMode;
 

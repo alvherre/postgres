@@ -4167,23 +4167,15 @@ failed:
 	}
 
 	/*
-	if (mode == LockTupleKeyShare ||
-		mode == LockTupleShare ||
-		mode == LockTupleUpdate)
-		*/
-	{
-		/*
-		 * If this is the first possibly-multixact-able operation in the
-		 * current transaction, set my per-backend OldestMemberMXactId setting.
-		 * We can be certain that the transaction will never become a member of
-		 * any older MultiXactIds than that.  (We have to do this even if we
-		 * end up just using our own TransactionId below, since some other
-		 * backend could incorporate our XID into a MultiXact immediately
-		 * afterwards.)
-		 */
-		MultiXactIdSetOldestMember();
-	}
-
+	 * If this is the first possibly-multixact-able operation in the
+	 * current transaction, set my per-backend OldestMemberMXactId setting.
+	 * We can be certain that the transaction will never become a member of
+	 * any older MultiXactIds than that.  (We have to do this even if we
+	 * end up just using our own TransactionId below, since some other
+	 * backend could incorporate our XID into a MultiXact immediately
+	 * afterwards.)
+	 */
+	MultiXactIdSetOldestMember();
 
 	/*
 	 * Compute the new xmax and infomask to store into the tuple.  Note we do
@@ -4947,12 +4939,12 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 	*new_infomask2 = bits2;
 }
 
-/* 
+/*
  * Is the tuple really only locked?  It's easy to check just infomask bits if
  * the locker is not a multi; but otherwise we need to verify that the updating
  * transaction has not aborted.
  *
- * Do not call if Xmax is not valid
+ * Do not call if Xmax is flagged as invalid.
  */
 bool
 HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple)
