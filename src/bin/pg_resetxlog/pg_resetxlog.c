@@ -327,7 +327,18 @@ main(int argc, char *argv[])
 		ControlFile.checkPointCopy.nextOid = set_oid;
 
 	if (set_mxid != 0)
+	{
 		ControlFile.checkPointCopy.nextMulti = set_mxid;
+
+		/*
+		 * For the moment, just set the oldestMulti to a value that will force
+		 * immediate autovacuum-for-wraparound. See above.
+		 */
+		ControlFile.checkPointCopy.oldestMulti = set_mxid - 2000000000;
+		if (ControlFile.checkPointCopy.oldestMulti < FirstMultiXactId)
+			ControlFile.checkPointCopy.oldestMulti += FirstMultiXactId;
+		ControlFile.checkPointCopy.oldestMultiDB = InvalidOid;
+	}
 
 	if (set_mxoff != -1)
 		ControlFile.checkPointCopy.nextMultiOffset = set_mxoff;
@@ -497,6 +508,8 @@ GuessControlValues(void)
 	ControlFile.checkPointCopy.nextMultiOffset = 0;
 	ControlFile.checkPointCopy.oldestXid = FirstNormalTransactionId;
 	ControlFile.checkPointCopy.oldestXidDB = InvalidOid;
+	ControlFile.checkPointCopy.oldestMulti = FirstMultiXactId;
+	ControlFile.checkPointCopy.oldestMultiDB = InvalidOid;
 	ControlFile.checkPointCopy.time = (pg_time_t) time(NULL);
 	ControlFile.checkPointCopy.oldestActiveXid = InvalidTransactionId;
 
@@ -587,6 +600,10 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.oldestXidDB);
 	printf(_("Latest checkpoint's oldestActiveXID:  %u\n"),
 		   ControlFile.checkPointCopy.oldestActiveXid);
+	printf(_("Latest checkpoint's oldestMultiXid:   %u\n"),
+		   ControlFile.checkPointCopy.oldestMulti);
+	printf(_("Latest checkpoint's oldestMulti's DB: %u\n"),
+		   ControlFile.checkPointCopy.oldestMultiDB);
 	printf(_("Maximum data alignment:               %u\n"),
 		   ControlFile.maxAlign);
 	/* we don't print floatFormat since can't say much useful about it */
