@@ -86,7 +86,7 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 				ItemPointerData from, Buffer newbuf, HeapTuple newtup,
 				bool all_visible_cleared, bool new_all_visible_cleared);
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
-					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay);
+					   HeapTuple oldtup, HeapTuple newtup);
 static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
 						  uint16 old_infomask2, TransactionId add_to_xmax,
 						  LockTupleMode mode, bool is_update,
@@ -2881,7 +2881,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	 * updates that don't manipulate key columns, not those that
 	 * serendipitiously arrive at the same key values.
 	 */
-	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup, false))
+	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup))
 	{
 		tuplock = LockTupleUpdate;
 		mxact_status = MultiXactStatusUpdate;
@@ -3334,8 +3334,7 @@ l2:
 		 * to do a HOT update.	Check if any of the index columns have been
 		 * changed.  If not, then HOT update is possible.
 		 */
-		if (HeapSatisfiesHOTUpdate(relation, hot_attrs, &oldtup, heaptup,
-								   true))
+		if (HeapSatisfiesHOTUpdate(relation, hot_attrs, &oldtup, heaptup))
 			use_hot_update = true;
 	}
 	else
@@ -3574,12 +3573,9 @@ heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum,
  */
 static bool
 HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
-					   HeapTuple oldtup, HeapTuple newtup, bool empty_okay)
+					   HeapTuple oldtup, HeapTuple newtup)
 {
 	int			attrnum;
-
-	if (!empty_okay && bms_is_empty(hot_attrs))
-		return false;
 
 	while ((attrnum = bms_first_member(hot_attrs)) >= 0)
 	{
