@@ -68,6 +68,10 @@
  */
 #define VISIBILITY_MAP_CRASHSAFE_CAT_VER 201107031
 
+/*
+ * pg_multixact format changed in commit abcde12345
+ */
+#define MULTIXACT_FORMATCHANGE_CAT_VER 201202151
 
 /*
  * Each relation is represented by a relinfo structure.
@@ -137,6 +141,8 @@ typedef struct
 	uint32		chkpnt_tli;
 	uint32		chkpnt_nxtxid;
 	uint32		chkpnt_nxtoid;
+	uint32		chkpnt_nxtmulti;
+	uint32		chkpnt_nxtmxoff;
 	uint32		align;
 	uint32		blocksz;
 	uint32		largesz;

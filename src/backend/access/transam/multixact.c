@@ -1019,9 +1019,15 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
  * GetMultiXactIdMembers
  *		Returns the set of MultiXactMembers that make up a MultiXactId
  *
- * We used to return -1 if the MultiXactId was too old to possibly have any
- * members still running, but no longer, because that's a dangerous condition;
- * see comments below.
+ * If the given MultiXactId is older than the value we know to be oldest, we
+ * return -1.  The caller is expected to verify that it's a valid case:
+ * currently the only way for that to happen is that an old cluster was
+ * upgraded with pg_upgrade and some tuples in it were share-locked.
+ *
+ * Other border conditions, such as trying to read a value that's larger than
+ * the value currently known as the next to assign, raise an error.  Previously
+ * these also returned -1, but since this can lead to the wrong visibility
+ * results, it is dangerous to do that.
  */
 int
 GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
@@ -1062,19 +1068,20 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	 *
 	 * An ID older than MultiXactState->oldestMultiXactId cannot possibly be
 	 * useful; it should have already been frozen by vacuum.  We've truncated
-	 * the on-disk structures anyway.  Since returning the wrong values could
-	 * lead to an incorrect visibility result, this now raises an error.
-	 * Versions prior to 9.2 silently returned an empty array, but this is no
-	 * longer safe.
+	 * the on-disk structures anyway.  Returning the wrong values could lead to
+	 * an incorrect visibility result.  However, to support pg_upgrade we need
+	 * to allow an empty set to be returned regardless; the caller is expected
+	 * to check that it's an allowed condition (such as ensuring that the
+	 * infomask bits set on the tuple are consistent with the pg_upgrade
+	 * scenario).
 	 *
 	 * Conversely, an ID >= nextMXact shouldn't ever be seen here; if it is
 	 * seen, it implies undetected ID wraparound has occurred.	This raises
-	 * an error, as in the case above.
+	 * a hard error now.
 	 *
 	 * Shared lock is enough here since we aren't modifying any global state.
-	 *
-	 * Acquire the shared lock just long enough to grab the current counter
-	 * values.	We may need both nextMXact and nextOffset; see below.
+	 * Acquire it just long enough to grab the current counter values.	We may
+	 * need both nextMXact and nextOffset; see below.
 	 */
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
 
@@ -1085,10 +1092,12 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	LWLockRelease(MultiXactGenLock);
 
 	if (MultiXactIdPrecedes(multi, oldestMXact))
-		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("MultiXactId %u does no longer exist -- apparent wraparound",
-						multi)));
+	{
+		elog(DEBUG1,
+			 "MultiXactId %u does no longer exist -- apparent wraparound",
+			 multi);
+		return -1;
+	}
 
 	if (!MultiXactIdPrecedes(multi, nextMXact))
 		ereport(ERROR,

@@ -3787,7 +3787,11 @@ l3:
 			int		nmembers;
 			MultiXactMember *members;
 
-			nmembers = GetMultiXactIdMembers(xwait, &members);
+			nmembers = GetMultiXactIdMembers(xwait, &members, true);
+			if (nmembers == -1 &&
+				(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+				!(infomask & HEAP_XMAX_LOCK_ONLY))
+				elog(ERROR, "invalid infomask with old MultiXactId value");
 
 			for (i = 0; i < nmembers; i++)
 			{
@@ -3939,7 +3943,12 @@ l3:
 				int		nmembers;
 				MultiXactMember *members;
 
-				nmembers = GetMultiXactIdMembers(xwait, &members);
+				nmembers = GetMultiXactIdMembers(xwait, &members, true);
+				if (nmembers == -1 &&
+					(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+					!(infomask & HEAP_XMAX_LOCK_ONLY))
+					elog(ERROR, "invalid infomask with old MultiXactId value");
+
 				if (nmembers <= 0)
 				{
 					/*
@@ -4907,7 +4916,11 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 	uint16	bits2 = 0;
 	bool	has_update = false;
 
-	nmembers = GetMultiXactIdMembers(multi, &members);
+	/*
+	 * We only use this in multis we just created, so they cannot be values
+	 * pre-pg_upgrade.
+	 */
+	nmembers = GetMultiXactIdMembers(multi, &members, false);
 
 	for (i = 0; i < nmembers; i++)
 	{
@@ -5005,8 +5018,12 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 	Assert(!(tuple->t_infomask & HEAP_XMAX_LOCK_ONLY));
 	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
 
+	/*
+	 * Since we know the LOCK_ONLY bit is not set, this cannot be a 
+	 * multi from pre-pg_upgrade.
+	 */
 	nmembers = GetMultiXactIdMembers(HeapTupleHeaderGetRawXmax(tuple),
-									 &members);
+									 &members, false);
 
 	if (nmembers > 0)
 	{
@@ -5069,7 +5086,11 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
 	int			nmembers;
 	int			remain = 0;
 
-	nmembers = GetMultiXactIdMembers(multi, &members);
+	nmembers = GetMultiXactIdMembers(multi, &members, true);
+	if (nmembers == -1 &&
+		(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+		!(infomask & HEAP_XMAX_LOCK_ONLY))
+		elog(ERROR, "invalid infomask with old MultiXactId value");
 
 	if (nmembers >= 0)
 	{
@@ -5117,7 +5138,11 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 	int			nmembers;
 	int			remain = 0;
 
-	nmembers = GetMultiXactIdMembers(multi, &members);
+	nmembers = GetMultiXactIdMembers(multi, &members, true);
+	if (nmembers == -1 &&
+		(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+		!(infomask & HEAP_XMAX_LOCK_ONLY))
+		elog(ERROR, "invalid infomask with old MultiXactId value");
 
 	if (nmembers >= 0)
 	{

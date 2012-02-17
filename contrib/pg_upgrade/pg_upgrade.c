@@ -289,23 +289,26 @@ create_new_objects(void)
 	uninstall_support_functions_from_new_cluster();
 }
 
-
+/*
+ * Delete the given subdirectory contents from the new cluster, and copy the
+ * files from the old cluster into it.
+ */
 static void
-copy_clog_xlog_xid(void)
+copy_subdir_files(char *subdir)
 {
-	char		old_clog_path[MAXPGPATH];
-	char		new_clog_path[MAXPGPATH];
+	char		old_path[MAXPGPATH];
+	char		new_path[MAXPGPATH];
 
-	/* copy old commit logs to new data dir */
-	prep_status("Deleting new commit clogs");
+	prep_status("Deleting files from new %s", subdir);
 
-	snprintf(old_clog_path, sizeof(old_clog_path), "%s/pg_clog", old_cluster.pgdata);
-	snprintf(new_clog_path, sizeof(new_clog_path), "%s/pg_clog", new_cluster.pgdata);
-	if (!rmtree(new_clog_path, true))
-		pg_log(PG_FATAL, "could not delete directory \"%s\"\n", new_clog_path);
+	snprintf(old_path, sizeof(old_path), "%s/%s", old_cluster.pgdata, subdir);
+	snprintf(new_path, sizeof(new_path), "%s/%s", new_cluster.pgdata, subdir);
+	if (!rmtree(new_path, true))
+		pg_log(PG_FATAL, "could not delete directory \"%s\"\n", new_path);
 	check_ok();
 
-	prep_status("Copying old commit clogs to new server");
+	prep_status("Copying old %s to new server", subdir);
+
 #ifndef WIN32
 	exec_prog(true, SYSTEMQUOTE "%s \"%s\" \"%s\"" SYSTEMQUOTE,
 			  "cp -Rf",
@@ -314,14 +317,62 @@ copy_clog_xlog_xid(void)
 	exec_prog(true, SYSTEMQUOTE "%s \"%s\" \"%s\\\"" SYSTEMQUOTE,
 			  "xcopy /e /y /q /r",
 #endif
-			  old_clog_path, new_clog_path);
+			  old_path, new_path);
+
 	check_ok();
+}
+
+static void
+copy_clog_xlog_xid(void)
+{
+
+	/* copy old commit logs to new data dir */
+	copy_subdir_files("pg_clog");
 
 	/* set the next transaction id of the new cluster */
 	prep_status("Setting next transaction ID for new cluster");
 	exec_prog(true, SYSTEMQUOTE "\"%s/pg_resetxlog\" -f -x %u \"%s\" > " DEVNULL SYSTEMQUOTE,
 			  new_cluster.bindir, old_cluster.controldata.chkpnt_nxtxid, new_cluster.pgdata);
 	check_ok();
+
+	/*
+	 * If both new and old are after the pg_multixact change commit, copy those
+	 * files too.  If the old server is before that change and the new server
+	 * is after, then we don't copy anything but we need to reset pg_control so
+	 * that the new server doesn't attempt to read multis older than the cutoff
+	 * value.
+	 */
+	if (old_cluster.controldata.cat_ver >= MULTIXACT_FORMATCHANGE_CAT_VER &&
+		new_cluster.controldata.cat_ver >= MULTIXACT_FORMATCHANGE_CAT_VER)
+	{
+		copy_subdir_files("pg_multixact/offsets");
+		copy_subdir_files("pg_multixact/members");
+		prep_status("Setting next multixact ID and offset for new cluster");
+		/*
+		 * we preserve all files and contents, so we must preserve both "next"
+		 * counters here.  Oldest age does not matter much.
+		 */
+		exec_prog(true, SYSTEMQUOTE "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" > " DEVNULL SYSTEMQUOTE,
+				  new_cluster.bindir,
+				  old_cluster.controldata.chkpnt_nxtmxoff,
+				  old_cluster.controldata.chkpnt_nxtmulti, 0,
+				  new_cluster.pgdata);
+		check_ok();
+	}
+	else if (new_cluster.controldata.cat_ver >= MULTIXACT_FORMATCHANGE_CAT_VER)
+	{
+		prep_status("Setting oldest multixact ID on new cluster");
+		/*
+		 * We don't preserve files in this case, but it's important that the
+		 * oldest age is set to the latest value used by the old system, so
+		 * that we return correctly for multis queried.
+		 */
+		exec_prog(true, SYSTEMQUOTE "\"%s/pg_resetxlog\" -m %u,%u \"%s\" > " DEVNULL SYSTEMQUOTE,
+				  new_cluster.bindir,
+				  old_cluster.controldata.chkpnt_nxtmulti, 0,
+				  new_cluster.pgdata);
+		check_ok();
+	}
 
 	/* now reset the wal archives in the new cluster */
 	prep_status("Resetting WAL archives");
