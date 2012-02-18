@@ -395,6 +395,10 @@ MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
  *
  * NB - we don't worry about our local MultiXactId cache here, because that
  * is handled by the lower-level routines.
+ *
+ * Note: It is critical that MultiXactIds that come from an old cluster (i.e.
+ * one upgraded by pg_upgrade from a cluster older than this feature) are not
+ * passed in.
  */
 MultiXactId
 MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
@@ -412,7 +416,12 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 	debug_elog4(DEBUG2, "Expand: received multi %u, xid %u",
 				multi, xid);
 
-	nmembers = GetMultiXactIdMembers(multi, &members);
+	/*
+	 * Note: we don't allow for old multis here.  The reason is that the
+	 * only caller of this function does a check that the multixact is
+	 * no longer running.
+	 */
+	nmembers = GetMultiXactIdMembers(multi, &members, false);
 
 	if (nmembers < 0)
 	{
@@ -497,7 +506,11 @@ MultiXactIdIsRunning(MultiXactId multi)
 
 	debug_elog3(DEBUG2, "IsRunning %u?", multi);
 
-	nmembers = GetMultiXactIdMembers(multi, &members);
+	nmembers = GetMultiXactIdMembers(multi, &members, true);
+	/*
+	 * XXX we don't have the infomask to run the required consistency check
+	 * here; the required notational overhead seems excessive.
+	 */
 
 	if (nmembers < 0)
 	{
@@ -1030,7 +1043,7 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
  * results, it is dangerous to do that.
  */
 int
-GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
+GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members, bool allow_old)
 {
 	int			pageno;
 	int			prev_pageno;
@@ -1070,14 +1083,16 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 	 * useful; it should have already been frozen by vacuum.  We've truncated
 	 * the on-disk structures anyway.  Returning the wrong values could lead to
 	 * an incorrect visibility result.  However, to support pg_upgrade we need
-	 * to allow an empty set to be returned regardless; the caller is expected
-	 * to check that it's an allowed condition (such as ensuring that the
-	 * infomask bits set on the tuple are consistent with the pg_upgrade
-	 * scenario).
+	 * to allow an empty set to be returned regardless, if the caller is
+	 * willing to accept it; the caller is expected to check that it's an
+	 * allowed condition (such as ensuring that the infomask bits set on the
+	 * tuple are consistent with the pg_upgrade scenario).  If the caller is
+	 * expecting this to be called only on recently created multis, then we
+	 * raise an error.
 	 *
 	 * Conversely, an ID >= nextMXact shouldn't ever be seen here; if it is
 	 * seen, it implies undetected ID wraparound has occurred.	This raises
-	 * a hard error now.
+	 * a hard error.
 	 *
 	 * Shared lock is enough here since we aren't modifying any global state.
 	 * Acquire it just long enough to grab the current counter values.	We may
@@ -1093,7 +1108,7 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members)
 
 	if (MultiXactIdPrecedes(multi, oldestMXact))
 	{
-		elog(DEBUG1,
+		elog(allow_old ? DEBUG1 : ERROR,
 			 "MultiXactId %u does no longer exist -- apparent wraparound",
 			 multi);
 		return -1;

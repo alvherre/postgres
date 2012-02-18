@@ -86,7 +86,8 @@ extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid,
 extern MultiXactId ReadNextMultiXactId(void);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern void MultiXactIdSetOldestMember(void);
-extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids);
+extern int	GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **xids,
+					  bool allow_old);
 extern bool MultiXactIdPrecedes(MultiXactId multi1, MultiXactId multi2);
 
 extern void AtEOXact_MultiXact(void);

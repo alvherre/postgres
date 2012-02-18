@@ -97,9 +97,9 @@ static HTSU_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple,
 static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 					   uint16 *new_infomask2);
 static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-				int *remaining);
+				int *remaining, uint16 infomask);
 static bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-						   int *remaining);
+						   int *remaining, uint16 infomask);
 
 typedef struct TupleLockExtraInfo
 {
@@ -2523,7 +2523,8 @@ l1:
 			int		remain;
 
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate, &remain);
+			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate,
+							&remain, infomask);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -2991,7 +2992,8 @@ l2:
 			int				remain;
 
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, mxact_status, &remain);
+			MultiXactIdWait((MultiXactId) xwait, mxact_status, &remain,
+							infomask);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -3789,8 +3791,8 @@ l3:
 
 			nmembers = GetMultiXactIdMembers(xwait, &members, true);
 			if (nmembers == -1 &&
-				(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-				!(infomask & HEAP_XMAX_LOCK_ONLY))
+				((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+				!(infomask & HEAP_XMAX_LOCK_ONLY)))
 				elog(ERROR, "invalid infomask with old MultiXactId value");
 
 			for (i = 0; i < nmembers; i++)
@@ -3945,8 +3947,8 @@ l3:
 
 				nmembers = GetMultiXactIdMembers(xwait, &members, true);
 				if (nmembers == -1 &&
-					(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-					!(infomask & HEAP_XMAX_LOCK_ONLY))
+					((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+					!(infomask & HEAP_XMAX_LOCK_ONLY)))
 					elog(ERROR, "invalid infomask with old MultiXactId value");
 
 				if (nmembers <= 0)
@@ -4022,14 +4024,15 @@ l3:
 				/* wait for multixact to end */
 				if (nowait)
 				{
-					if (!ConditionalMultiXactIdWait((MultiXactId) xwait, status, &remain))
+					if (!ConditionalMultiXactIdWait((MultiXactId) xwait,
+													status, &remain, infomask))
 						ereport(ERROR,
 								(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 								 errmsg("could not obtain lock on row in relation \"%s\"",
 										RelationGetRelationName(relation))));
 				}
 				else
-					MultiXactIdWait((MultiXactId) xwait, status, &remain);
+					MultiXactIdWait((MultiXactId) xwait, status, &remain, infomask);
 
 				/* if there are updates, follow the update chain */
 				if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
@@ -4306,7 +4309,7 @@ failed:
 /*
  * Given an original set of Xmax and infomask, and a transaction (identified by
  * add_to_xmax) acquiring a new lock of some mode, compute the new Xmax and
- * corresponding infomask to use on the tuple.
+ * corresponding infomasks to use on the tuple.
  *
  * Note that this might have side effects such as creating a new MultiXactId.
  *
@@ -4314,7 +4317,7 @@ failed:
  * that will have set the HEAP_XMAX_INVALID bit if the xmax was a MultiXactId
  * but it was not running anymore. There is a race condition, which is that the
  * MultiXactId may have finished since then, but that uncommon case is handled
- * within MultiXactIdExpand.
+ * either here, or within MultiXactIdExpand.
  *
  * There is a similar race condition possible when the old xmax was a regular
  * TransactionId.  We test TransactionIdIsInProgress again just to narrow the
@@ -4393,6 +4396,9 @@ l5:
 		 * even if there are lockers, we would remove all traces of the
 		 * updater, and only lockers would remain.  So next time around things
 		 * would clear up.
+		 *
+		 * This check is critical for databases upgraded by pg_upgrade; inside
+		 * MultiXactIdExpand it's a assumed that such multis are not passed.
 		 */
 		if ((old_infomask & HEAP_XMAX_LOCK_ONLY) &&
 			!MultiXactIdIsRunning(xmax))
@@ -5078,9 +5084,12 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
  *
  * We return the number of members that are still running, including any
  * (non-aborted) subtransactions of our own transaction.
+ *
+ * The infomask is passed for consistency checks.
  */
 static void
-MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
+MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining,
+				uint16 infomask)
 {
 	MultiXactMember *members;
 	int			nmembers;
@@ -5088,8 +5097,8 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
 
 	nmembers = GetMultiXactIdMembers(multi, &members, true);
 	if (nmembers == -1 &&
-		(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-		!(infomask & HEAP_XMAX_LOCK_ONLY))
+		((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+		 !(infomask & HEAP_XMAX_LOCK_ONLY)))
 		elog(ERROR, "invalid infomask with old MultiXactId value");
 
 	if (nmembers >= 0)
@@ -5131,7 +5140,7 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining)
  */
 static bool
 ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-						   int *remaining)
+						   int *remaining, uint16 infomask)
 {
 	bool		result = true;
 	MultiXactMember *members;
@@ -5140,8 +5149,8 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 
 	nmembers = GetMultiXactIdMembers(multi, &members, true);
 	if (nmembers == -1 &&
-		(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-		!(infomask & HEAP_XMAX_LOCK_ONLY))
+		((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
+		 !(infomask & HEAP_XMAX_LOCK_ONLY)))
 		elog(ERROR, "invalid infomask with old MultiXactId value");
 
 	if (nmembers >= 0)
