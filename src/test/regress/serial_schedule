@@ -42,6 +42,7 @@ test: tstypes
 test: comments
 test: geometry
 test: horology
+test: regex
 test: oidjoins
 test: type_sanity
 test: opr_sanity
@@ -50,6 +51,7 @@ test: create_function_1
 test: create_type
 test: create_table
 test: create_function_2
+test: create_function_3
 test: copy
 test: copyselect
 test: create_misc

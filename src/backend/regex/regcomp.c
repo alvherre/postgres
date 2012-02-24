@@ -356,6 +356,7 @@ pg_regcomp(regex_t *re,
 	ZAPCNFA(g->search);
 	v->nfa = newnfa(v, v->cm, (struct nfa *) NULL);
 	CNOERR();
+	/* set up a reasonably-sized transient cvec for getcvec usage */
 	v->cv = newcvec(100, 20);
 	if (v->cv == NULL)
 		return freev(v, REG_ESPACE);
@@ -1087,8 +1088,12 @@ parseqatom(struct vars * v,
 		NOERR();
 	}
 
-	/* it's quantifier time; first, turn x{0,...} into x{1,...}|empty */
-	if (m == 0)
+	/*
+	 * It's quantifier time.  If the atom is just a BACKREF, we'll let it deal
+	 * with quantifiers internally.  Otherwise, the first step is to turn
+	 * x{0,...} into x{1,...}|empty
+	 */
+	if (m == 0 && atomtype != BACKREF)
 	{
 		EMPTYARC(s2, atom->end);	/* the bypass */
 		assert(PREF(qprefer) != 0);
