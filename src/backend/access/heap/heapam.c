@@ -4459,6 +4459,16 @@ l5:
 
 		new_status = get_mxact_status_for_lock(mode, is_update);
 
+		/*
+		 * If the existing locker is identical to the new one, we can act as
+		 * though there is no existing locker and have the upper block handle
+		 * this.
+		 */
+		if (xmax == add_to_xmax && new_status == status)
+		{
+			old_infomask |= HEAP_XMAX_INVALID;
+			goto l5;
+		}
 		new_xmax = MultiXactIdCreate(xmax, status, add_to_xmax, new_status);
 		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
 	}
