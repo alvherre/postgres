@@ -4532,9 +4532,11 @@ l4:
 	xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
 
 	/*
-	 * If this tuple is updated and the key has been modified (or deleted), we
-	 * need to sleep on the updating transaction.  For other updates we can
-	 * just plough ahead.
+	 * If this tuple is updated and the key has been modified (or deleted),
+	 * what we do depends on the status of the updating transaction: if it's
+	 * live, we sleep until it finishes; if it has committed, we have to fail
+	 * (i.e. return HeapTupleUpdated); if it aborted, we ignore it.  For
+	 * updates that didn't touch the key, we can just plough ahead.
 	 */
 	if (!(old_infomask & HEAP_XMAX_INVALID) &&
 		(mytup.t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED))
