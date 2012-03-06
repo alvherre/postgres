@@ -2200,7 +2200,6 @@ SlruScanDirCbFindEarliest(SlruCtl ctl, char *filename, int segpage, void *data)
 	if (trunc->earliestExistingPage == -1 ||
 		ctl->PagePrecedes(segpage, trunc->earliestExistingPage))
 	{
-		elog(WARNING, "setting earliest page to %d", segpage);
 		trunc->earliestExistingPage = segpage;
 	}
 
@@ -2232,8 +2231,6 @@ TruncateMultiXact(MultiXactId oldestMXact)
 	trunc.earliestExistingPage = -1;
 	SlruScanDirectory(MultiXactOffsetCtl, SlruScanDirCbFindEarliest, &trunc);
 	earliest = trunc.earliestExistingPage * MULTIXACT_OFFSETS_PER_PAGE;
-	elog(WARNING, "SlruScanDir returned earliest page %d", trunc.earliestExistingPage);
-	elog(WARNING, "earliest mxact is %u", earliest);
 
 	/* nothing to do */
 	if (MultiXactIdPrecedes(oldestMXact, earliest))
