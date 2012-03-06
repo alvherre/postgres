@@ -271,11 +271,13 @@ static MemoryContext MXactContext = NULL;
 #define debug_elog2(a,b) elog(a,b)
 #define debug_elog3(a,b,c) elog(a,b,c)
 #define debug_elog4(a,b,c,d) elog(a,b,c,d)
+#define debug_elog5(a,b,c,d,e) elog(a,b,c,d,e)
 #define debug_elog6(a,b,c,d,e,f) elog(a,b,c,d,e,f)
 #else
 #define debug_elog2(a,b)
 #define debug_elog3(a,b,c)
 #define debug_elog4(a,b,c,d)
+#define debug_elog5(a,b,c,d,e)
 #define debug_elog6(a,b,c,d,e,f)
 #endif
 
@@ -293,7 +295,8 @@ static int	mXactCacheGetById(MultiXactId multi, MultiXactMember **members);
 static void mXactCachePut(MultiXactId multi, int nmembers,
 			  MultiXactMember *members);
 
-static char * mxid_to_string(MultiXactId multi, int nmembers,
+static char *mxstatus_to_string(MultiXactStatus status);
+static char *mxid_to_string(MultiXactId multi, int nmembers,
 			   MultiXactMember *members);
 
 /* management of SLRU infrastructure */
@@ -413,8 +416,8 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 	AssertArg(MultiXactIdIsValid(multi));
 	AssertArg(TransactionIdIsValid(xid));
 
-	debug_elog4(DEBUG2, "Expand: received multi %u, xid %u",
-				multi, xid);
+	debug_elog5(DEBUG2, "Expand: received multi %u, xid %u status %s",
+				multi, xid, mxstatus_to_string(status));
 
 	/*
 	 * Note: we don't allow for old multis here.  The reason is that the
@@ -743,12 +746,14 @@ CreateMultiXactId(int nmembers, MultiXactMember *members)
 	/*
 	 * XXX Note: there's a lot of padding space in MultiXactMember.  We could
 	 * find a more compact representation of this Xlog record -- perhaps all the
-	 * status flags in one XLogRecData, then all the xids in another one?
+	 * status flags in one XLogRecData, then all the xids in another one?  Not
+	 * clear that it's worth the trouble though.
 	 */
 	rdata[0].data = (char *) (&xlrec);
-	rdata[0].len = MinSizeOfMultiXactCreate;
+	rdata[0].len = SizeOfMultiXactCreate;
 	rdata[0].buffer = InvalidBuffer;
 	rdata[0].next = &(rdata[1]);
+
 	rdata[1].data = (char *) members;
 	rdata[1].len = nmembers * sizeof(MultiXactMember);
 	rdata[1].buffer = InvalidBuffer;
@@ -2397,12 +2402,12 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 	{
 		xl_multixact_create *xlrec =
 			(xl_multixact_create *) XLogRecGetData(record);
-		MultiXactMember *members = xlrec->members;
 		TransactionId max_xid;
 		int			i;
 
 		/* Store the data back into the SLRU files */
-		RecordNewMultiXact(xlrec->mid, xlrec->moff, xlrec->nmembers, members);
+		RecordNewMultiXact(xlrec->mid, xlrec->moff, xlrec->nmembers,
+						   xlrec->members);
 
 		/* Make sure nextMXact/nextOffset are beyond what this record has */
 		MultiXactAdvanceNextMXact(xlrec->mid + 1,
@@ -2416,8 +2421,8 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 		max_xid = record->xl_xid;
 		for (i = 0; i < xlrec->nmembers; i++)
 		{
-			if (TransactionIdPrecedes(max_xid, members[i].xid))
-				max_xid = members[i].xid;
+			if (TransactionIdPrecedes(max_xid, xlrec->members[i].xid))
+				max_xid = xlrec->members[i].xid;
 		}
 
 		/*
@@ -2461,10 +2466,13 @@ multixact_desc(StringInfo buf, uint8 xl_info, char *rec)
 	{
 		xl_multixact_create *xlrec = (xl_multixact_create *) rec;
 
-		appendStringInfo(buf, "create multixact offset %u: %s",
-						 xlrec->moff,
+		appendStringInfo(buf, "create multixact %u offset %u",
+						 xlrec->mid, xlrec->moff);
+#if 0
+		appendStringInfo(buf, "members: %s", 
 						 mxid_to_string(xlrec->mid, xlrec->nmembers,
 										xlrec->members));
+#endif
 	}
 	else
 		appendStringInfo(buf, "UNKNOWN");
