@@ -46,11 +46,11 @@ changing its key.
 
 The conflict table is:
 
-				KEY UPDATE		UPDATE		SHARE		KEY SHARE
-KEY UPDATE		 conflict		conflict	conflict	conflict
-UPDATE			 conflict		conflict	conflict
-SHARE			 conflict		conflict
-KEY SHARE		 conflict
+                KEY UPDATE        UPDATE        SHARE        KEY SHARE
+KEY UPDATE       conflict        conflict      conflict      conflict
+UPDATE           conflict        conflict      conflict
+SHARE            conflict        conflict
+KEY SHARE        conflict
 
 When there is a single locker in a tuple, we can just store the locking info
 in the tuple itself.  We do this by storing the locker's Xid in XMAX, and
