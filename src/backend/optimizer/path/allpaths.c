@@ -18,6 +18,7 @@
 #include <math.h>
 
 #include "catalog/pg_class.h"
+#include "foreign/fdwapi.h"
 #include "nodes/nodeFuncs.h"
 #ifdef OPTIMIZER_DEBUG
 #include "nodes/print.h"
@@ -399,15 +400,18 @@ set_foreign_size(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 
 /*
  * set_foreign_pathlist
- *		Build the (single) access path for a foreign table RTE
+ *		Build access paths for a foreign table RTE
  */
 static void
 set_foreign_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
-	/* Generate appropriate path */
-	add_path(rel, (Path *) create_foreignscan_path(root, rel));
+	FdwRoutine *fdwroutine;
 
-	/* Select cheapest path (pretty easy in this case...) */
+	/* Call the FDW's PlanForeignScan function to generate path(s) */
+	fdwroutine = GetFdwRoutineByRelId(rte->relid);
+	fdwroutine->PlanForeignScan(rte->relid, root, rel);
+
+	/* Select cheapest path */
 	set_cheapest(rel);
 }
 
@@ -492,7 +496,8 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 		 * reconstitute the RestrictInfo layer.
 		 */
 		childquals = get_all_actual_clauses(rel->baserestrictinfo);
-		childquals = (List *) adjust_appendrel_attrs((Node *) childquals,
+		childquals = (List *) adjust_appendrel_attrs(root,
+													 (Node *) childquals,
 													 appinfo);
 		childqual = eval_const_expressions(root, (Node *)
 										   make_ands_explicit(childquals));
@@ -532,10 +537,12 @@ set_append_rel_size(PlannerInfo *root, RelOptInfo *rel,
 		 * while constructing attr_widths estimates below, though.
 		 */
 		childrel->joininfo = (List *)
-			adjust_appendrel_attrs((Node *) rel->joininfo,
+			adjust_appendrel_attrs(root,
+								   (Node *) rel->joininfo,
 								   appinfo);
 		childrel->reltargetlist = (List *)
-			adjust_appendrel_attrs((Node *) rel->reltargetlist,
+			adjust_appendrel_attrs(root,
+								   (Node *) rel->reltargetlist,
 								   appinfo);
 
 		/*
@@ -1042,16 +1049,9 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 			RestrictInfo *rinfo = (RestrictInfo *) lfirst(l);
 			Node	   *clause = (Node *) rinfo->clause;
 
-			/*
-			 * XXX.  You might wonder why we're testing rte->security_barrier
-			 * qual-by-qual here rather than hoisting the test up into the
-			 * surrounding if statement; after all, the answer will be the
-			 * same for all quals.  The answer is that we expect to shortly
-			 * change this logic to allow pushing down some quals that use only
-			 * "leakproof" operators even through a security barrier.
-			 */
 			if (!rinfo->pseudoconstant &&
-				!rte->security_barrier &&
+				(!rte->security_barrier ||
+				 !contain_leaky_functions(clause)) &&
 				qual_is_pushdown_safe(subquery, rti, clause, differentTypes))
 			{
 				/* Push it down */

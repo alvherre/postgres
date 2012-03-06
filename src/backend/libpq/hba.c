@@ -1391,7 +1391,7 @@ parse_hba_auth_opt(char *name, char *val, HbaLine *hbaline, int line_num)
 			hbaline->auth_method != uaGSS &&
 			hbaline->auth_method != uaSSPI &&
 			hbaline->auth_method != uaCert)
-			INVALID_AUTH_OPTION("map", gettext_noop("ident, peer, krb5, gssapi, sspi and cert"));
+			INVALID_AUTH_OPTION("map", gettext_noop("ident, peer, krb5, gssapi, sspi, and cert"));
 		hbaline->usermap = pstrdup(val);
 	}
 	else if (strcmp(name, "clientcert") == 0)
@@ -1417,7 +1417,7 @@ parse_hba_auth_opt(char *name, char *val, HbaLine *hbaline, int line_num)
 				ereport(LOG,
 						(errcode(ERRCODE_CONFIG_FILE_ERROR),
 						 errmsg("client certificates can only be checked if a root certificate store is available"),
-						 errhint("Make sure the root.crt file is present and readable."),
+						 errhint("Make sure the configuration parameter \"ssl_ca_file\" is set."),
 				   errcontext("line %d of configuration file \"%s\"",
 							  line_num, HbaFileName)));
 				return false;
@@ -1510,7 +1510,7 @@ parse_hba_auth_opt(char *name, char *val, HbaLine *hbaline, int line_num)
 		if (hbaline->auth_method != uaKrb5 &&
 			hbaline->auth_method != uaGSS &&
 			hbaline->auth_method != uaSSPI)
-			INVALID_AUTH_OPTION("krb_realm", gettext_noop("krb5, gssapi and sspi"));
+			INVALID_AUTH_OPTION("krb_realm", gettext_noop("krb5, gssapi, and sspi"));
 		hbaline->krb_realm = pstrdup(val);
 	}
 	else if (strcmp(name, "include_realm") == 0)
@@ -1518,7 +1518,7 @@ parse_hba_auth_opt(char *name, char *val, HbaLine *hbaline, int line_num)
 		if (hbaline->auth_method != uaKrb5 &&
 			hbaline->auth_method != uaGSS &&
 			hbaline->auth_method != uaSSPI)
-			INVALID_AUTH_OPTION("include_realm", gettext_noop("krb5, gssapi and sspi"));
+			INVALID_AUTH_OPTION("include_realm", gettext_noop("krb5, gssapi, and sspi"));
 		if (strcmp(val, "1") == 0)
 			hbaline->include_realm = true;
 		else

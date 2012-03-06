@@ -480,6 +480,7 @@ extern Datum pg_rotate_logfile(PG_FUNCTION_ARGS);
 extern Datum pg_sleep(PG_FUNCTION_ARGS);
 extern Datum pg_get_keywords(PG_FUNCTION_ARGS);
 extern Datum pg_typeof(PG_FUNCTION_ARGS);
+extern Datum pg_collation_for(PG_FUNCTION_ARGS);
 
 /* oid.c */
 extern Datum oidin(PG_FUNCTION_ARGS);
@@ -624,6 +625,7 @@ extern Datum pg_get_ruledef(PG_FUNCTION_ARGS);
 extern Datum pg_get_ruledef_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_ext(PG_FUNCTION_ARGS);
+extern Datum pg_get_viewdef_wrap(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name(PG_FUNCTION_ARGS);
 extern Datum pg_get_viewdef_name_ext(PG_FUNCTION_ARGS);
 extern Datum pg_get_indexdef(PG_FUNCTION_ARGS);

@@ -216,8 +216,6 @@ extern int	wal_level;
 /* Do we need to WAL-log information required only for Hot Standby? */
 #define XLogStandbyInfoActive() (wal_level >= WAL_LEVEL_HOT_STANDBY)
 
-#define WAL_DEBUG
-
 #ifdef WAL_DEBUG
 extern bool XLOG_DEBUG;
 #endif

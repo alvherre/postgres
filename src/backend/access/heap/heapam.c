@@ -4428,6 +4428,16 @@ l5:
 
 		new_status = get_mxact_status_for_lock(mode, is_update);
 
+		/*
+		 * If the existing locker is identical to the new one, we can act as
+		 * though there is no existing locker and have the upper block handle
+		 * this.
+		 */
+		if (xmax == add_to_xmax && new_status == status)
+		{
+			old_infomask |= HEAP_XMAX_INVALID;
+			goto l5;
+		}
 		new_xmax = MultiXactIdCreate(xmax, status, add_to_xmax, new_status);
 		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
 	}
@@ -4491,9 +4501,11 @@ l4:
 	xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
 
 	/*
-	 * If this tuple is updated and the key has been modified (or deleted), we
-	 * need to sleep on the updating transaction.  For other updates we can
-	 * just plough ahead.
+	 * If this tuple is updated and the key has been modified (or deleted),
+	 * what we do depends on the status of the updating transaction: if it's
+	 * live, we sleep until it finishes; if it has committed, we have to fail
+	 * (i.e. return HeapTupleUpdated); if it aborted, we ignore it.  For
+	 * updates that didn't touch the key, we can just plough ahead.
 	 */
 	if (!(old_infomask & HEAP_XMAX_INVALID) &&
 		(mytup.t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED))
@@ -4936,18 +4948,19 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 }
 
 /*
- * Is the tuple really only locked?  It's easy to check just infomask bits if
- * the locker is not a multi; but otherwise we need to verify that the updating
- * transaction has not aborted.
+ * Is the tuple really only locked?  That is, is it not updated?
  *
- * Do not call if Xmax is flagged as invalid.
+ * It's easy to check just infomask bits if the locker is not a multi; but
+ * otherwise we need to verify that the updating transaction has not aborted.
  */
 bool
 HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple)
 {
 	TransactionId	xmax;
 
-	Assert(!(tuple->t_infomask & HEAP_XMAX_INVALID));
+	/* if there's no valid Xmax, then there's obviously no update either */
+	if (tuple->t_infomask & HEAP_XMAX_INVALID)
+		return true;
 
 	if (tuple->t_infomask & HEAP_XMAX_LOCK_ONLY)
 		return true;

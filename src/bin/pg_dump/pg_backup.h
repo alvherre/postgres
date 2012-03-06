@@ -159,15 +159,14 @@ typedef struct _restoreOptions
  * Main archiver interface.
  */
 
-
-/* Lets the archive know we have a DB connection to shutdown if it dies */
-
-PGconn *ConnectDatabase(Archive *AH,
+extern void ConnectDatabase(Archive *AH,
 				const char *dbname,
 				const char *pghost,
 				const char *pgport,
 				const char *username,
 				enum trivalue prompt_password);
+extern void DisconnectDatabase(Archive *AHX);
+extern PGconn *GetConnection(Archive *AHX);
 
 /* Called to add a TOC entry */
 extern void ArchiveEntry(Archive *AHX,

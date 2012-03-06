@@ -668,6 +668,70 @@ SET ENABLE_SEQSCAN TO OFF;
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-ssl-ca-file" xreflabel="ssl_ca_file">
+      <term><varname>ssl_ca_file</varname> (<type>string</type>)</term>
+      <indexterm>
+       <primary><varname>ssl_ca_file</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies the name of the file containing the SSL server certificate
+        authority (CA).  The default is empty, meaning no CA file is loaded,
+        and client certificate verification is not performed.  (In previous
+        releases of PostgreSQL, the name of this file was hard-coded
+        as <filename>root.crt</filename>.)  Relative paths are relative to the
+        data directory.  This parameter can only be set at server start.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-ssl-cert-file" xreflabel="ssl_cert_file">
+      <term><varname>ssl_cert_file</varname> (<type>string</type>)</term>
+      <indexterm>
+       <primary><varname>ssl_cert_file</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies the name of the file containing the SSL server certificate.
+        The default is <filename>server.crt</filename>.  Relative paths are
+        relative to the data directory.  This parameter can only be set at
+        server start.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-ssl-crl-file" xreflabel="ssl_crl_file">
+      <term><varname>ssl_crl_file</varname> (<type>string</type>)</term>
+      <indexterm>
+       <primary><varname>ssl_crl_file</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies the name of the file containing the SSL server certificate
+        revocation list (CRL).  The default is empty, meaning no CRL file is
+        loaded.  (In previous releases of PostgreSQL, the name of this file was
+        hard-coded as <filename>root.crl</filename>.)  Relative paths are
+        relative to the data directory.  This parameter can only be set at
+        server start.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-ssl-key-file" xreflabel="ssl_key_file">
+      <term><varname>ssl_key_file</varname> (<type>string</type>)</term>
+      <indexterm>
+       <primary><varname>ssl_key_file</> configuration parameter</primary>
+      </indexterm>
+      <listitem>
+       <para>
+        Specifies the name of the file containing the SSL server private key.
+        The default is <filename>server.key</filename>.  Relative paths are
+        relative to the data directory.  This parameter can only be set at
+        server start.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-ssl-renegotiation-limit" xreflabel="ssl_renegotiation_limit">
       <term><varname>ssl_renegotiation_limit</varname> (<type>integer</type>)</term>
       <indexterm>
@@ -2604,6 +2668,26 @@ SET ENABLE_SEQSCAN TO OFF;
         parameters.
        </para>
 
+       <para>
+        Random access to mechanical disk storage is normally much more expensive
+        than four-times sequential access.  However, a lower default is used
+        (4.0) because the majority of random accesses to disk, such as indexed
+        reads, are assumed to be in cache.  The default value can be thought of
+        as modeling random access as 40 times slower than sequential, while
+        expecting 90% of random reads to be cached.
+       </para>
+
+       <para>
+        If you believe a 90% cache rate is an incorrect assumption
+        for your workload, you can increase random_page_cost to better
+        reflect the true cost of random storage reads. Correspondingly,
+        if your data is likely to be completely in cache, such as when
+        the database is smaller than the total server memory, decreasing
+        random_page_cost can be appropriate.  Storage that has a low random
+        read cost relative to sequential, e.g. solid-state drives, might
+        also be better modeled with a lower value for random_page_cost.
+       </para>
+
        <tip>
         <para>
          Although the system will let you set <varname>random_page_cost</> to
@@ -3039,7 +3123,7 @@ SELECT * FROM parent WHERE key = 2400;
         value</> (<acronym>CSV</>) format, which is convenient for
         loading logs into programs.
         See <xref linkend="runtime-config-logging-csvlog"> for details.
-        <varname>logging_collector</varname> must be enabled to generate
+        <xref linkend="guc-logging-collector"> must be enabled to generate
         CSV-format log output.
        </para>
 
@@ -3079,24 +3163,39 @@ local0.*    /var/log/postgresql
       </indexterm>
       <listitem>
        <para>
-         This parameter captures plain and CSV-format log messages
-         sent to <application>stderr</> and redirects them into log files.
+         This parameter enables the <firstterm>logging collector</>, which
+         is a background process that captures log messages
+         sent to <systemitem>stderr</> and redirects them into log files.
          This approach is often more useful than
          logging to <application>syslog</>, since some types of messages
-         might not appear in <application>syslog</> output (a common example
-         is dynamic-linker failure messages).
+         might not appear in <application>syslog</> output.  (One common
+         example is dynamic-linker failure messages; another is error messages
+         produced by scripts such as <varname>archive_command</>.)
          This parameter can only be set at server start.
        </para>
 
        <note>
         <para>
+         It is possible to log to <systemitem>stderr</> without using the
+         logging collector; the log messages will just go to wherever the
+         server's <systemitem>stderr</> is directed.  However, that method is
+         only suitable for low log volumes, since it provides no convenient
+         way to rotate log files.  Also, on some platforms not using the
+         logging collector can result in lost or garbled log output, because
+         multiple processes writing concurrently to the same log file can
+         overwrite each other's output.
+        </para>
+       </note>
+
+       <note>
+        <para>
           The logging collector is designed to never lose messages.  This means
           that in case of extremely high load, server processes could be
-          blocked due to trying to send additional log messages when the
+          blocked while trying to send additional log messages when the
           collector has fallen behind.  In contrast, <application>syslog</>
-          prefers to drop messages if it cannot write them, which means it's
-          less reliable in those cases but it will not block the rest of the
-          system.
+          prefers to drop messages if it cannot write them, which means it
+          may fail to log some messages in such cases but it will not block
+          the rest of the system.
         </para>
        </note>
 

@@ -124,31 +124,6 @@ SetHintBits(HeapTupleHeader tuple, Buffer buffer,
 }
 
 /*
- * only to be called when the multixact that marked the tuple has no live
- * members left
- */
-static inline void
-ResetMultiHintBit(HeapTupleHeader tuple, Buffer buffer,
-				  TransactionId xid, bool mark_committed)
-{
-	Assert(tuple->t_infomask & HEAP_XMAX_IS_MULTI);
-	Assert(!(tuple->t_infomask & HEAP_XMAX_INVALID));
-	Assert(!MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)));
-
-	tuple->t_infomask &= ~HEAP_XMAX_BITS;
-	HeapTupleHeaderSetXmax(tuple, xid);
-	if (!TransactionIdIsValid(xid))
-		tuple->t_infomask |= HEAP_XMAX_INVALID;
-	/* note that HEAP_UPDATE_KEY_REVOKED persists, if set */
-
-	if (mark_committed)
-		SetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED, xid);
-	else
-		SetBufferCommitInfoNeedsSave(buffer);
-}
-
-
-/*
  * HeapTupleSetHintBits --- exported version of SetHintBits()
  *
  * This must be separate because of C99's brain-dead notions about how to
@@ -787,7 +762,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 			if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 				return HeapTupleBeingUpdated;
 
-			ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 			return HeapTupleMayBeUpdated;
 		}
 
@@ -797,7 +772,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 			if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 				return HeapTupleBeingUpdated;
 
-			ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 			return HeapTupleMayBeUpdated;
 		}
 
@@ -814,11 +789,13 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		if (TransactionIdDidCommit(xmax))
 		{
+#if 0
 			ResetMultiHintBit(tuple, buffer, xmax, true);
+#endif
 			return HeapTupleUpdated;
 		}
 		/* it must have aborted or crashed */
-		ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+		SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 		return HeapTupleMayBeUpdated;
 	}
 
@@ -1364,7 +1341,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 			{
 				if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 					return HEAPTUPLE_LIVE;
-				ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 
 			}
 			else
@@ -1417,7 +1394,9 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 		{
 			if (!TransactionIdPrecedes(xmax, OldestXmin))
 			{
+#if 0
 				ResetMultiHintBit(tuple, buffer, xmax, true);
+#endif
 				return HEAPTUPLE_RECENTLY_DEAD;
 			}
 			else
@@ -1428,7 +1407,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 			/*
 			 * Not in Progress, Not Committed, so either Aborted or crashed.
 			 */
-			ResetMultiHintBit(tuple, buffer, InvalidTransactionId, false);
+			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 			return HEAPTUPLE_LIVE;
 		}
 
