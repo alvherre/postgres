@@ -81,9 +81,57 @@ in a transaction do not conflict with other tuple locks in the same
 transaction, so it's possible to have otherwise conflicting locks in a
 MultiXact if they belong to the same transaction).
 
-The possiblity of having an update within a MultiXact means that they must
+Note that each lock is attributed to the subtransaction that acquires it.
+This means that a subtransaction that aborts is seen as though it releases the
+locks it acquired; concurrent transactions can then proceed without having to
+wait for the main transaction to finish.  It also means that a subtransaction
+can upgrade to a stronger lock level than an earlier transaction had, and if
+the subxact aborts, the earlier, weaker lock is kept.
+
+The possibility of having an update within a MultiXact means that they must
 persist across crashes and restarts: a future reader of the tuple needs to
 figure out whether the update committed or aborted.  So we have a requirement
 that pg_multixact needs to retain pages of its data until we're certain that
-the MultiXacts in them are no longer of interest.  VACUUM is in charge of
-removing old MultiXacts at the time of tuple freezing.
+the MultiXacts in them are no longer of interest.
+
+VACUUM is in charge of removing old MultiXacts at the time of tuple freezing.
+This works in the same way that pg_clog segments are removed: we have a
+pg_class column that stores the earliest multixact that could possibly be
+stored in the table; the minimum of all such values is stored in a pg_database
+column.  VACUUM computes the minimum across all pg_database values, and
+removes pg_multixact segments older than the minimum.
+
+Hint Bits
+---------
+
+The following hint bits are applicable:
+
+- HEAP_XMAX_INVALID
+  Any tuple with this hint bit set does not have a valid value stored in XMAX.
+
+- HEAP_XMAX_IS_MULTI
+  This bit is set if the tuple's Xmax is a MultiXactId (as opposed to a
+  regular TransactionId).
+
+- HEAP_XMAX_LOCK_ONLY
+  This bit is set when the XMAX is a locker only; that is, if it's a
+  multixact, it does not contain an update among its members.  It's set when
+  the XMAX is a plain Xid that locked the tuple, as well.
+
+- HEAP_XMAX_KEYSHR_LOCK
+- HEAP_XMAX_EXCL_LOCK
+  These bits indicate the strength of the lock acquired; they are useful when
+  the XMAX is not a MultiXactId.  If it's a multi, the info is to be found in
+  the member flags.  If HEAP_XMAX_IS_MULTI is not set and HEAP_XMAX_LOCK_ONLY
+  is set, then one of these *must* be set as well.
+  Note there is no hint bit for a SELECT FOR SHARE lock.  Also there is no
+  separate bit for a SELECT FOR KEY UPDATE lock; this is implemented by the
+  HEAP_UPDATE_KEY_REVOKED bit.
+
+- HEAP_UPDATE_KEY_REVOKED
+  This bit lives in t_infomask2.  If set, indicates that a transaction updated
+  this tuple and changed the key values, or a transaction deleted the tuple.
+  It's set regardless of whether the XMAX is a TransactionId or a MultiXactId.
+
+We currently never set the HEAP_XMAX_COMMITTED when the HEAP_XMAX_IS_MULTI bit
+is set.
