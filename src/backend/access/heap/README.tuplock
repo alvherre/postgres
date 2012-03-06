@@ -1,0 +1,89 @@
+Locking tuples
+--------------
+
+Because the shared-memory lock table is of finite size, but users could
+reasonably want to lock large numbers of tuples, we do not rely on the
+standard lock manager to store tuple-level locks over the long term.  Instead,
+a tuple is marked as locked by setting the current transaction's XID as its
+XMAX, and setting additional infomask bits to distinguish this usage from the
+more normal case of having deleted the tuple.  When multiple transactions
+concurrently lock a tuple, a MultiXact is used; see below.
+
+When it is necessary to wait for a tuple-level lock to be released, the basic
+delay is provided by XactLockTableWait or MultiXactIdWait on the contents of
+the tuple's XMAX.  However, that mechanism will release all waiters
+concurrently, so there would be a race condition as to which waiter gets the
+tuple, potentially leading to indefinite starvation of some waiters.  The
+possibility of share-locking makes the problem much worse --- a steady stream
+of share-lockers can easily block an exclusive locker forever.  To provide
+more reliable semantics about who gets a tuple-level lock first, we use the
+standard lock manager.  The protocol for waiting for a tuple-level lock is
+really
+
+     LockTuple()
+     XactLockTableWait()
+     mark tuple as locked by me
+     UnlockTuple()
+
+When there are multiple waiters, arbitration of who is to get the lock next
+is provided by LockTuple().  However, at most one tuple-level lock will
+be held or awaited per backend at any time, so we don't risk overflow
+of the lock table.  Note that incoming share-lockers are required to
+do LockTuple as well, if there is any conflict, to ensure that they don't
+starve out waiting exclusive-lockers.  However, if there is not any active
+conflict for a tuple, we don't incur any extra overhead.
+
+We provide four levels of tuple locking strength: SELECT FOR KEY UPDATE is
+super-exclusive locking (used to delete tuples and more generally to update
+tuples modifying the values of the columns that make up the key of the tuple);
+SELECT FOR UPDATE is a standards-compliant exclusive lock; SELECT FOR SHARE
+implements shared locks; and finally SELECT FOR KEY SHARE is a super-weak mode
+that does not conflict with exclusive mode, but conflicts with SELECT FOR KEY
+UPDATE.  This last mode implements a mode just strong enough to implement RI
+checks, i.e. it ensures that tuples do not go away from under a check, without
+blocking when some other transaction that want to update the tuple without
+changing its key.
+
+The conflict table is:
+
+				KEY UPDATE		UPDATE		SHARE		KEY SHARE
+KEY UPDATE		 conflict		conflict	conflict	conflict
+UPDATE			 conflict		conflict	conflict
+SHARE			 conflict		conflict
+KEY SHARE		 conflict
+
+When there is a single locker in a tuple, we can just store the locking info
+in the tuple itself.  We do this by storing the locker's Xid in XMAX, and
+setting hint bits specifying the locking strength.  There is one exception
+here: since hint bit space is limited, we do not provide a separate hint bit
+for SELECT FOR SHARE, so we have to use the extended info in a MultiXact in
+that case.  (The other cases, SELECT FOR UPDATE and SELECT FOR KEY SHARE, are
+presumably more commonly used due to being the standards-mandated locking
+mechanism, or heavily used by the RI code, so we want to provide fast paths
+for those.)
+
+MultiXacts
+----------
+
+A tuple header provides very limited space for storing information about tuple
+locking and updates: there is room only for a single Xid and a small number of
+hint bits.  Whenever we need to store more than one lock, we replace the first
+locker's Xid with a new MultiXactId.  Each MultiXact provides extended locking
+data; it comprises an array of Xids plus some flags bits for each one.  The
+flags are currently used to store the locking strength of each member
+transaction.  (The flags also distinguish a pure locker from an actual
+updater.)
+
+In earlier PostgreSQL releases, a MultiXact always meant that the tuple was
+locked in shared mode by multiple transactions.  This is no longer the case; a
+MultiXact may contain an update or delete Xid.  (Keep in mind that tuple locks
+in a transaction do not conflict with other tuple locks in the same
+transaction, so it's possible to have otherwise conflicting locks in a
+MultiXact if they belong to the same transaction).
+
+The possiblity of having an update within a MultiXact means that they must
+persist across crashes and restarts: a future reader of the tuple needs to
+figure out whether the update committed or aborted.  So we have a requirement
+that pg_multixact needs to retain pages of its data until we're certain that
+the MultiXacts in them are no longer of interest.  VACUUM is in charge of
+removing old MultiXacts at the time of tuple freezing.
