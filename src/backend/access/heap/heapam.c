@@ -4979,18 +4979,19 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 }
 
 /*
- * Is the tuple really only locked?  It's easy to check just infomask bits if
- * the locker is not a multi; but otherwise we need to verify that the updating
- * transaction has not aborted.
+ * Is the tuple really only locked?  That is, is it not updated?
  *
- * Do not call if Xmax is flagged as invalid.
+ * It's easy to check just infomask bits if the locker is not a multi; but
+ * otherwise we need to verify that the updating transaction has not aborted.
  */
 bool
 HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple)
 {
 	TransactionId	xmax;
 
-	Assert(!(tuple->t_infomask & HEAP_XMAX_INVALID));
+	/* if there's no valid Xmax, then there's obviously no update either */
+	if (tuple->t_infomask & HEAP_XMAX_INVALID)
+		return true;
 
 	if (tuple->t_infomask & HEAP_XMAX_LOCK_ONLY)
 		return true;
