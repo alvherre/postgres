@@ -82,7 +82,7 @@ static bool segment_callback(XLogRecPtr segendpos, uint32 timeline);
 
 #ifdef HAVE_LIBZ
 static const char *
-get_gz_error(gzFile *gzf)
+get_gz_error(gzFile gzf)
 {
 	int			errnum;
 	const char *errmsg;
@@ -450,7 +450,7 @@ ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
 	FILE	   *tarfile = NULL;
 
 #ifdef HAVE_LIBZ
-	gzFile	   *ztarfile = NULL;
+	gzFile		ztarfile = NULL;
 #endif
 
 	if (PQgetisnull(res, rownum, 0))
@@ -1245,7 +1245,7 @@ main(int argc, char **argv)
 					streamwal = true;
 				else
 				{
-					fprintf(stderr, _("%s: invalid xlog option \"%s\", must be empty, \"fetch\" or \"stream\"\n"),
+					fprintf(stderr, _("%s: invalid xlog option \"%s\", must be empty, \"fetch\", or \"stream\"\n"),
 							progname, optarg);
 					exit(1);
 				}

@@ -10717,6 +10717,19 @@ func_expr:	func_name '(' ')' over_clause
 					n->location = @1;
 					$$ = (Node *)n;
 				}
+			| COLLATION FOR '(' a_expr ')'
+				{
+					FuncCall *n = makeNode(FuncCall);
+					n->funcname = SystemFuncName("pg_collation_for");
+					n->args = list_make1($4);
+					n->agg_order = NIL;
+					n->agg_star = FALSE;
+					n->agg_distinct = FALSE;
+					n->func_variadic = FALSE;
+					n->over = NULL;
+					n->location = @1;
+					$$ = (Node *)n;
+				}
 			| CURRENT_DATE
 				{
 					/*
@@ -12168,7 +12181,6 @@ unreserved_keyword:
 			| CLASS
 			| CLOSE
 			| CLUSTER
-			| COLLATION
 			| COMMENT
 			| COMMENTS
 			| COMMIT
@@ -12507,6 +12519,7 @@ reserved_keyword:
 			| CAST
 			| CHECK
 			| COLLATE
+			| COLLATION
 			| COLUMN
 			| CONSTRAINT
 			| CREATE

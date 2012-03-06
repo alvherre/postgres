@@ -313,8 +313,6 @@ main(int argc, char *argv[])
 			printf(_("Type \"help\" for help.\n\n"));
 		if (!pset.notty)
 			initializeInput(options.no_readline ? 0 : 1);
-		if (options.action_string)		/* -f - was used */
-			pset.inputfile = "<stdin>";
 
 		successResult = MainLoop(stdin);
 	}
@@ -593,6 +591,7 @@ process_psqlrc(char *argv0)
 	char		rc_file[MAXPGPATH];
 	char		my_exec_path[MAXPGPATH];
 	char		etc_path[MAXPGPATH];
+	char       *envrc;
 
 	find_my_exec(argv0, my_exec_path);
 	get_etc_path(my_exec_path, etc_path);
@@ -600,7 +599,14 @@ process_psqlrc(char *argv0)
 	snprintf(rc_file, MAXPGPATH, "%s/%s", etc_path, SYSPSQLRC);
 	process_psqlrc_file(rc_file);
 
-	if (get_home_path(home))
+	envrc = getenv("PSQLRC");
+	
+	if (envrc != NULL && strlen(envrc) > 0)
+	{
+		expand_tilde(&envrc);
+		process_psqlrc_file(envrc);
+	}
+	else if (get_home_path(home))
 	{
 		snprintf(rc_file, MAXPGPATH, "%s/%s", home, PSQLRC);
 		process_psqlrc_file(rc_file);
