@@ -964,9 +964,8 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 				/*
 				 * Similar situation to INSERT_IN_PROGRESS case.
 				 */
-				Assert(!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
 				if (!is_system_catalog &&
-					!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple->t_data)))
+					!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetUpdateXid(tuple->t_data)))
 					elog(WARNING, "concurrent delete in progress within table \"%s\"",
 						 RelationGetRelationName(OldHeap));
 				/* treat as recently dead */
