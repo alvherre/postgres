@@ -778,6 +778,7 @@ vac_update_datfrozenxid(void)
 		dirty = true;
 	}
 
+	/* ditto */
 	if (MultiXactIdPrecedes(dbform->datminmxid, newFrozenMulti))
 	{
 		dbform->datminmxid = newFrozenMulti;
@@ -896,7 +897,7 @@ vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti)
 	 * signalling twice?
 	 */
 	SetTransactionIdLimit(frozenXID, oldestxid_datoid);
-	SetMultiXactIdLimit(frozenMulti, oldestmulti_datoid);
+	MultiXactAdvanceOldest(frozenMulti, oldestmulti_datoid);
 }
 
 
