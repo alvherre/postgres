@@ -20,6 +20,7 @@
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#include "catalog/objectaccess.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_attrdef.h"
@@ -560,17 +561,21 @@ findDependentObjects(const ObjectAddress *object,
 				 * another object, or is part of the extension that is the
 				 * other object.  We have three cases:
 				 *
-				 * 1. At the outermost recursion level, disallow the DROP. (We
-				 * just ereport here, rather than proceeding, since no other
-				 * dependencies are likely to be interesting.)	However, if
-				 * the owning object is listed in pendingObjects, just release
-				 * the caller's lock and return; we'll eventually complete the
-				 * DROP when we reach that entry in the pending list.
+				 * 1. At the outermost recursion level, we normally disallow
+				 * the DROP.  (We just ereport here, rather than proceeding,
+				 * since no other dependencies are likely to be interesting.)
+				 * However, there are exceptions.
 				 */
 				if (stack == NULL)
 				{
 					char	   *otherObjDesc;
 
+					/*
+					 * Exception 1a: if the owning object is listed in
+					 * pendingObjects, just release the caller's lock and
+					 * return.  We'll eventually complete the DROP when we
+					 * reach that entry in the pending list.
+					 */
 					if (pendingObjects &&
 						object_address_present(&otherObject, pendingObjects))
 					{
@@ -579,6 +584,21 @@ findDependentObjects(const ObjectAddress *object,
 						ReleaseDeletionLock(object);
 						return;
 					}
+
+					/*
+					 * Exception 1b: if the owning object is the extension
+					 * currently being created/altered, it's okay to continue
+					 * with the deletion.  This allows dropping of an
+					 * extension's objects within the extension's scripts,
+					 * as well as corner cases such as dropping a transient
+					 * object created within such a script.
+					 */
+					if (creating_extension &&
+						otherObject.classId == ExtensionRelationId &&
+						otherObject.objectId == CurrentExtensionObject)
+						break;
+
+					/* No exception applies, so throw the error */
 					otherObjDesc = getObjectDescription(&otherObject);
 					ereport(ERROR,
 							(errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
@@ -971,6 +991,15 @@ deleteOneObject(const ObjectAddress *object, Relation depRel, int flags)
 	int			nkeys;
 	SysScanDesc scan;
 	HeapTuple	tup;
+
+	/* DROP hook of the objects being removed */
+	if (object_access_hook)
+	{
+		ObjectAccessDrop	drop_arg;
+		drop_arg.dropflags = flags;
+		InvokeObjectAccessHook(OAT_DROP, object->classId, object->objectId,
+							   object->objectSubId, &drop_arg);
+	}
 
 	/*
 	 * First remove any pg_depend records that link from this object to
@@ -1711,6 +1740,37 @@ find_expr_references_walker(Node *node,
 					break;
 				default:
 					break;
+			}
+		}
+
+		/*
+		 * If the query is an INSERT or UPDATE, we should create a dependency
+		 * on each target column, to prevent the specific target column from
+		 * being dropped.  Although we will visit the TargetEntry nodes again
+		 * during query_tree_walker, we won't have enough context to do this
+		 * conveniently, so do it here.
+		 */
+		if (query->commandType == CMD_INSERT ||
+			query->commandType == CMD_UPDATE)
+		{
+			RangeTblEntry *rte;
+
+			if (query->resultRelation <= 0 ||
+				query->resultRelation > list_length(query->rtable))
+				elog(ERROR, "invalid resultRelation %d",
+					 query->resultRelation);
+			rte = rt_fetch(query->resultRelation, query->rtable);
+			if (rte->rtekind == RTE_RELATION)
+			{
+				foreach(lc, query->targetList)
+				{
+					TargetEntry *tle = (TargetEntry *) lfirst(lc);
+
+					if (tle->resjunk)
+						continue;		/* ignore junk tlist items */
+					add_object_address(OCLASS_CLASS, rte->relid, tle->resno,
+									   context->addrs);
+				}
 			}
 		}
 

@@ -207,7 +207,7 @@ format_numeric_locale(const char *my_str)
 				leading_digits;
 	int			groupdigits = atoi(grouping);
 	int			new_str_start = 0;
-	char	   *new_str = new_str = pg_local_malloc(
+	char	   *new_str = pg_local_malloc(
 									 strlen_with_numeric_locale(my_str) + 1);
 
 	leading_digits = (int_len % groupdigits != 0) ?
@@ -735,7 +735,7 @@ print_aligned_text(const printTableContent *cont, FILE *fout)
 		(output_columns < total_header_width || output_columns < width_total))
 	{
 		print_aligned_vertical(cont, fout);
-		return;
+		goto cleanup;
 	}
 
 	/* If we wrapped beyond the display width, use the pager */
@@ -1050,6 +1050,7 @@ print_aligned_text(const printTableContent *cont, FILE *fout)
 		fputc('\n', fout);
 	}
 
+cleanup:
 	/* clean up */
 	for (i = 0; i < col_count; i++)
 	{
@@ -1210,8 +1211,8 @@ print_aligned_vertical(const printTableContent *cont, FILE *fout)
 	 * We now have all the information we need to setup the formatting
 	 * structures
 	 */
-	dlineptr = pg_local_malloc((sizeof(*dlineptr) + 1) * dheight);
-	hlineptr = pg_local_malloc((sizeof(*hlineptr) + 1) * hheight);
+	dlineptr = pg_local_malloc((sizeof(*dlineptr)) * (dheight + 1));
+	hlineptr = pg_local_malloc((sizeof(*hlineptr)) * (hheight + 1));
 
 	dlineptr->ptr = pg_local_malloc(dformatsize);
 	hlineptr->ptr = pg_local_malloc(hformatsize);

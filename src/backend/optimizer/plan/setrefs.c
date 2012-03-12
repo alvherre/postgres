@@ -15,7 +15,6 @@
  */
 #include "postgres.h"
 
-#include "access/hash.h"
 #include "access/transam.h"
 #include "catalog/pg_type.h"
 #include "nodes/makefuncs.h"
@@ -429,6 +428,8 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 					fix_scan_list(root, splan->scan.plan.targetlist, rtoffset);
 				splan->scan.plan.qual =
 					fix_scan_list(root, splan->scan.plan.qual, rtoffset);
+				splan->fdw_exprs =
+					fix_scan_list(root, splan->fdw_exprs, rtoffset);
 			}
 			break;
 
@@ -1830,14 +1831,11 @@ record_plan_function_dependency(PlannerInfo *root, Oid funcid)
 		/*
 		 * It would work to use any syscache on pg_proc, but the easiest is
 		 * PROCOID since we already have the function's OID at hand.  Note
-		 * that plancache.c knows we use PROCOID.  Also, we're perhaps
-		 * assuming more than we should about how CatalogCacheComputeHashValue
-		 * computes hash values...
+		 * that plancache.c knows we use PROCOID.
 		 */
 		inval_item->cacheId = PROCOID;
-		inval_item->hashValue =
-			DatumGetUInt32(DirectFunctionCall1(hashoid,
-											   ObjectIdGetDatum(funcid)));
+		inval_item->hashValue = GetSysCacheHashValue1(PROCOID,
+													  ObjectIdGetDatum(funcid));
 
 		root->glob->invalItems = lappend(root->glob->invalItems, inval_item);
 	}

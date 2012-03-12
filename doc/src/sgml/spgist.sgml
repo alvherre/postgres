@@ -100,6 +100,18 @@
   value when that is needed.
  </para>
 
+ <note>
+  <para>
+   The <acronym>SP-GiST</acronym> core code takes care of NULL entries.
+   Although <acronym>SP-GiST</acronym> indexes do store entries for nulls
+   in indexed columns, this is hidden from the index operator class code:
+   no null index entries or search conditions will ever be passed to the
+   operator class methods.  (It is assumed that <acronym>SP-GiST</acronym>
+   operators are strict and so cannot succeed for NULL values.)  NULLs
+   are therefore not discussed further here.
+  </para>
+ </note>
+
  <para>
   There are five user-defined methods that an index operator class for
   <acronym>SP-GiST</acronym> must provide.  All five follow the convention
@@ -439,8 +451,8 @@ CREATE FUNCTION my_inner_consistent(internal, internal) RETURNS void ...
 <programlisting>
 typedef struct spgInnerConsistentIn
 {
-    StrategyNumber strategy;    /* operator strategy number */
-    Datum       query;          /* operator's RHS value */
+    ScanKey     scankeys;       /* array of operators and comparison values */
+    int         nkeys;          /* length of array */
 
     Datum       reconstructedValue;     /* value reconstructed at parent */
     int         level;          /* current level (counting from zero) */
@@ -463,8 +475,17 @@ typedef struct spgInnerConsistentOut
 } spgInnerConsistentOut;
 </programlisting>
 
-       <structfield>strategy</> and
-       <structfield>query</> describe the index search condition.
+       The array <structfield>scankeys</>, of length <structfield>nkeys</>,
+       describes the index search condition(s).  These conditions are
+       combined with AND &mdash; only index entries that satisfy all of
+       them are interesting.  (Note that <structfield>nkeys</> = 0 implies
+       that all index entries satisfy the query.)  Usually the consistent
+       function only cares about the <structfield>sk_strategy</> and
+       <structfield>sk_argument</> fields of each array entry, which
+       respectively give the indexable operator and comparison value.
+       In particular it is not necessary to check <structfield>sk_flags</> to
+       see if the comparison value is NULL, because the SP-GiST core code
+       will filter out such conditions.
        <structfield>reconstructedValue</> is the value reconstructed for the
        parent tuple; it is <literal>(Datum) 0</> at the root level or if the
        <function>inner_consistent</> function did not provide a value at the
@@ -527,8 +548,8 @@ CREATE FUNCTION my_leaf_consistent(internal, internal) RETURNS bool ...
 <programlisting>
 typedef struct spgLeafConsistentIn
 {
-    StrategyNumber strategy;    /* operator strategy number */
-    Datum       query;          /* operator's RHS value */
+    ScanKey     scankeys;       /* array of operators and comparison values */
+    int         nkeys;          /* length of array */
 
     Datum       reconstructedValue;     /* value reconstructed at parent */
     int         level;          /* current level (counting from zero) */
@@ -544,8 +565,17 @@ typedef struct spgLeafConsistentOut
 } spgLeafConsistentOut;
 </programlisting>
 
-       <structfield>strategy</> and
-       <structfield>query</> define the index search condition.
+       The array <structfield>scankeys</>, of length <structfield>nkeys</>,
+       describes the index search condition(s).  These conditions are
+       combined with AND &mdash; only index entries that satisfy all of
+       them satisfy the query.  (Note that <structfield>nkeys</> = 0 implies
+       that all index entries satisfy the query.)  Usually the consistent
+       function only cares about the <structfield>sk_strategy</> and
+       <structfield>sk_argument</> fields of each array entry, which
+       respectively give the indexable operator and comparison value.
+       In particular it is not necessary to check <structfield>sk_flags</> to
+       see if the comparison value is NULL, because the SP-GiST core code
+       will filter out such conditions.
        <structfield>reconstructedValue</> is the value reconstructed for the
        parent tuple; it is <literal>(Datum) 0</> at the root level or if the
        <function>inner_consistent</> function did not provide a value at the
@@ -566,8 +596,8 @@ typedef struct spgLeafConsistentOut
        <structfield>leafValue</> must be set to the value originally supplied
        to be indexed for this leaf tuple.  Also,
        <structfield>recheck</> may be set to <literal>true</> if the match
-       is uncertain and so the operator must be re-applied to the actual heap
-       tuple to verify the match.
+       is uncertain and so the operator(s) must be re-applied to the actual
+       heap tuple to verify the match.
       </para>
      </listitem>
     </varlistentry>
