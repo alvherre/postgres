@@ -296,8 +296,10 @@ static void mXactCachePut(MultiXactId multi, int nmembers,
 			  MultiXactMember *members);
 
 static char *mxstatus_to_string(MultiXactStatus status);
+#ifdef MULTIXACT_DEBUG
 static char *mxid_to_string(MultiXactId multi, int nmembers,
 			   MultiXactMember *members);
+#endif
 
 /* management of SLRU infrastructure */
 static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog);
@@ -1437,6 +1439,7 @@ mxstatus_to_string(MultiXactStatus status)
 	}
 }
 
+#ifdef MULTIXACT_DEBUG
 static char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
@@ -1461,6 +1464,7 @@ mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 	pfree(buf.data);
 	return str;
 }
+#endif
 
 /*
  * AtEOXact_MultiXact
