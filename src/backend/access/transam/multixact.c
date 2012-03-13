@@ -1273,6 +1273,81 @@ retry:
 	return truelength;
 }
 
+#include "funcapi.h"
+#include "catalog/pg_type.h"
+
+typedef struct multixact
+{
+	MultiXactMember	*members;
+	int				nmembers;
+	int				iter;
+} multixact;
+
+Datum
+pg_get_multixact_members(PG_FUNCTION_ARGS)
+{
+	MultiXactId		mxid = PG_GETARG_UINT32(0);
+	multixact	   *multi;
+	FuncCallContext *funccxt;
+
+	if (mxid < FirstMultiXactId)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid MultiXactId: %u", mxid)));
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		MemoryContext oldcxt;
+		TupleDesc	tupdesc;
+
+		funccxt = SRF_FIRSTCALL_INIT();
+		oldcxt = MemoryContextSwitchTo(funccxt->multi_call_memory_ctx);
+
+		multi = palloc(sizeof(multixact));
+		multi->nmembers = GetMultiXactIdMembers(mxid, &multi->members, false);
+		multi->iter = 0;
+
+		tupdesc = CreateTemplateTupleDesc(2, false);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "xid",
+						   XIDOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "mode",
+						   TEXTOID, -1, 0);
+
+		funccxt->attinmeta = TupleDescGetAttInMetadata(tupdesc);
+		funccxt->user_fctx = multi;
+
+		MemoryContextSwitchTo(oldcxt);
+	}
+
+	funccxt = SRF_PERCALL_SETUP();
+	multi = (multixact *) funccxt->user_fctx;
+
+	while (multi->iter < multi->nmembers)
+	{
+		HeapTuple	tuple;
+		char	   *values[2];
+
+		values[0] = palloc(32);
+		sprintf(values[0], "%u", multi->members[multi->iter].xid);
+		values[1] = mxstatus_to_string(multi->members[multi->iter].status);
+
+		tuple = BuildTupleFromCStrings(funccxt->attinmeta, values);
+
+		multi->iter++;
+		pfree(values[0]);
+		SRF_RETURN_NEXT(funccxt, HeapTupleGetDatum(tuple));
+	}
+
+	if (multi->nmembers > 0)
+		pfree(multi->members);
+	pfree(multi);
+
+	SRF_RETURN_DONE(funccxt);
+
+}
+
+
+
 /*
  * mxactMemberComparator
  *		qsort comparison function for MultiXactMember
