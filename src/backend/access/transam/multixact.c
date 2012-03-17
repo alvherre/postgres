@@ -475,7 +475,8 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 
 	for (i = 0, j = 0; i < nmembers; i++)
 	{
-		if (TransactionIdIsInProgress(members[i].xid))
+		if (TransactionIdIsInProgress(members[i].xid) ||
+			members[i].status > MultiXactStatusForKeyUpdate)
 		{
 			newMembers[j].xid = members[i].xid;
 			newMembers[j++].status = members[i].status;
