@@ -459,7 +459,7 @@ typedef struct TmToChar
 {
 	struct pg_tm tm;			/* classic 'tm' struct */
 	fsec_t		fsec;			/* fractional seconds */
-	char	   *tzn;			/* timezone */
+	const char *tzn;			/* timezone */
 } TmToChar;
 
 #define tmtcTm(_X)	(&(_X)->tm)
@@ -1104,6 +1104,7 @@ NUMDesc_prepare(NUMDesc *num, FormatNode *n)
 			case NUM_D:
 				num->flag |= NUM_F_LDECIMAL;
 				num->need_locale = TRUE;
+				/* FALLTHROUGH */
 			case NUM_DEC:
 				if (IS_DECIMAL(num))
 					ereport(ERROR,

@@ -969,7 +969,6 @@ timestamptz_date(PG_FUNCTION_ARGS)
 			   *tm = &tt;
 	fsec_t		fsec;
 	int			tz;
-	char	   *tzn;
 
 	if (TIMESTAMP_IS_NOBEGIN(timestamp))
 		DATE_NOBEGIN(result);
@@ -977,7 +976,7 @@ timestamptz_date(PG_FUNCTION_ARGS)
 		DATE_NOEND(result);
 	else
 	{
-		if (timestamp2tm(timestamp, &tz, tm, &fsec, &tzn, NULL) != 0)
+		if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0)
 			ereport(ERROR,
 					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 					 errmsg("timestamp out of range")));
@@ -1131,7 +1130,7 @@ time_out(PG_FUNCTION_ARGS)
 	char		buf[MAXDATELEN + 1];
 
 	time2tm(time, tm, &fsec);
-	EncodeTimeOnly(tm, fsec, NULL, DateStyle, buf);
+	EncodeTimeOnly(tm, fsec, false, 0, DateStyle, buf);
 
 	result = pstrdup(buf);
 	PG_RETURN_CSTRING(result);
@@ -1576,12 +1575,11 @@ timestamptz_time(PG_FUNCTION_ARGS)
 			   *tm = &tt;
 	int			tz;
 	fsec_t		fsec;
-	char	   *tzn;
 
 	if (TIMESTAMP_NOT_FINITE(timestamp))
 		PG_RETURN_NULL();
 
-	if (timestamp2tm(timestamp, &tz, tm, &fsec, &tzn, NULL) != 0)
+	if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("timestamp out of range")));
@@ -1918,7 +1916,7 @@ timetz_out(PG_FUNCTION_ARGS)
 	char		buf[MAXDATELEN + 1];
 
 	timetz2tm(time, tm, &fsec, &tz);
-	EncodeTimeOnly(tm, fsec, &tz, DateStyle, buf);
+	EncodeTimeOnly(tm, fsec, true, tz, DateStyle, buf);
 
 	result = pstrdup(buf);
 	PG_RETURN_CSTRING(result);
@@ -2450,12 +2448,11 @@ timestamptz_timetz(PG_FUNCTION_ARGS)
 			   *tm = &tt;
 	int			tz;
 	fsec_t		fsec;
-	char	   *tzn;
 
 	if (TIMESTAMP_NOT_FINITE(timestamp))
 		PG_RETURN_NULL();
 
-	if (timestamp2tm(timestamp, &tz, tm, &fsec, &tzn, NULL) != 0)
+	if (timestamp2tm(timestamp, &tz, tm, &fsec, NULL, NULL) != 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
 				 errmsg("timestamp out of range")));

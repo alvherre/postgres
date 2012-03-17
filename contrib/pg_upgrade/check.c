@@ -165,12 +165,13 @@ issue_warnings(char *sequence_script_file_name)
 		if (sequence_script_file_name)
 		{
 			prep_status("Adjusting sequences");
-			exec_prog(true,
-					  SYSTEMQUOTE "\"%s/psql\" --set ON_ERROR_STOP=on "
+			exec_prog(true, true, UTILITY_LOG_FILE,
+					  SYSTEMQUOTE "\"%s/psql\" --echo-queries "
+					  "--set ON_ERROR_STOP=on "
 					  "--no-psqlrc --port %d --username \"%s\" "
-					  "-f \"%s\" --dbname template1 >> \"%s\"" SYSTEMQUOTE,
+					  "-f \"%s\" --dbname template1 >> \"%s\" 2>&1" SYSTEMQUOTE,
 					  new_cluster.bindir, new_cluster.port, os_info.user,
-					  sequence_script_file_name, log_opts.filename2);
+					  sequence_script_file_name, UTILITY_LOG_FILE);
 			unlink(sequence_script_file_name);
 			check_ok();
 		}
@@ -192,21 +193,20 @@ issue_warnings(char *sequence_script_file_name)
 
 
 void
-output_completion_banner(char *deletion_script_file_name)
+output_completion_banner(char *analyze_script_file_name,
+						 char *deletion_script_file_name)
 {
 	/* Did we copy the free space files? */
 	if (GET_MAJOR_VERSION(old_cluster.major_version) >= 804)
 		pg_log(PG_REPORT,
-			   "Optimizer statistics are not transferred by pg_upgrade so\n"
-			   "consider running:\n"
-			   "    vacuumdb --all --analyze-only\n"
-			   "on the newly-upgraded cluster.\n\n");
+			   "Optimizer statistics are not transferred by pg_upgrade so,\n"
+			   "once you start the new server, consider running:\n"
+			   "    %s\n\n", analyze_script_file_name);
 	else
 		pg_log(PG_REPORT,
 			   "Optimizer statistics and free space information are not transferred\n"
-			   "by pg_upgrade so consider running:\n"
-			   "    vacuumdb --all --analyze\n"
-			   "on the newly-upgraded cluster.\n\n");
+			   "by pg_upgrade so, once you start the new server, consider running:\n"
+			   "    %s\n\n", analyze_script_file_name);
 
 	pg_log(PG_REPORT,
 		   "Running this script will delete the old cluster's data files:\n"
@@ -379,6 +379,130 @@ check_new_cluster_is_empty(void)
 
 
 /*
+ * create_script_for_cluster_analyze()
+ *
+ *	This incrementally generates better optimizer statistics
+ */
+void
+create_script_for_cluster_analyze(char **analyze_script_file_name)
+{
+	FILE	   *script = NULL;
+
+	*analyze_script_file_name = pg_malloc(MAXPGPATH);
+
+	prep_status("Creating script to analyze new cluster");
+
+	snprintf(*analyze_script_file_name, MAXPGPATH, "analyze_new_cluster.%s",
+			 SCRIPT_EXT);
+
+	if ((script = fopen_priv(*analyze_script_file_name, "w")) == NULL)
+		pg_log(PG_FATAL, "Could not open file \"%s\": %s\n",
+			   *analyze_script_file_name, getErrorText(errno));
+
+#ifndef WIN32
+	/* add shebang header */
+	fprintf(script, "#!/bin/sh\n\n");
+#endif
+
+	fprintf(script, "echo %sThis script will generate minimal optimizer statistics rapidly%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %sso your system is usable, and then gather statistics twice more%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %swith increasing accuracy.  When it is done, your system will%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %shave the default level of optimizer statistics.%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo\n\n");
+
+	fprintf(script, "echo %sIf you have used ALTER TABLE to modify the statistics target for%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %sany tables, you might want to remove them and restore them after%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %srunning this script because they will delay fast statistics generation.%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo\n\n");
+
+	fprintf(script, "echo %sIf you would like default statistics as quickly as possible, cancel%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %sthis script and run:%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %s    vacuumdb --all %s%s\n", ECHO_QUOTE,
+		/* Did we copy the free space files? */
+		(GET_MAJOR_VERSION(old_cluster.major_version) >= 804) ?
+		"--analyze-only" : "--analyze", ECHO_QUOTE);
+	fprintf(script, "echo\n\n");
+
+#ifndef WIN32
+	fprintf(script, "sleep 2\n");
+	fprintf(script, "PGOPTIONS='-c default_statistics_target=1 -c vacuum_cost_delay=0'\n");
+	/* only need to export once */
+	fprintf(script, "export PGOPTIONS\n");
+#else
+	fprintf(script, "REM simulate sleep 2\n");
+	fprintf(script, "PING 1.1.1.1 -n 1 -w 2000 > nul\n");
+	fprintf(script, "SET PGOPTIONS=-c default_statistics_target=1 -c vacuum_cost_delay=0\n");
+#endif
+
+	fprintf(script, "echo %sGenerating minimal optimizer statistics (1 target)%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %s--------------------------------------------------%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "vacuumdb --all --analyze-only\n");
+	fprintf(script, "echo\n");
+	fprintf(script, "echo %sThe server is now available with minimal optimizer statistics.%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %sQuery performance will be optimal once this script completes.%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo\n\n");
+
+#ifndef WIN32
+	fprintf(script, "sleep 2\n");
+	fprintf(script, "PGOPTIONS='-c default_statistics_target=10'\n");
+#else
+	fprintf(script, "REM simulate sleep\n");
+	fprintf(script, "PING 1.1.1.1 -n 1 -w 2000 > nul\n");
+	fprintf(script, "SET PGOPTIONS=-c default_statistics_target=10\n");
+#endif
+
+	fprintf(script, "echo %sGenerating medium optimizer statistics (10 targets)%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %s---------------------------------------------------%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "vacuumdb --all --analyze-only\n");
+	fprintf(script, "echo\n\n");
+
+#ifndef WIN32
+	fprintf(script, "unset PGOPTIONS\n");
+#else
+	fprintf(script, "SET PGOPTIONS\n");
+#endif
+
+	fprintf(script, "echo %sGenerating default (full) optimizer statistics (100 targets?)%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "echo %s-------------------------------------------------------------%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+	fprintf(script, "vacuumdb --all %s\n",
+		/* Did we copy the free space files? */
+		(GET_MAJOR_VERSION(old_cluster.major_version) >= 804) ?
+		"--analyze-only" : "--analyze");
+
+	fprintf(script, "echo\n\n");
+	fprintf(script, "echo %sDone%s\n",
+					ECHO_QUOTE, ECHO_QUOTE);
+
+	fclose(script);
+
+#ifndef WIN32
+	if (chmod(*analyze_script_file_name, S_IRWXU) != 0)
+		pg_log(PG_FATAL, "Could not add execute permission to file \"%s\": %s\n",
+			   *analyze_script_file_name, getErrorText(errno));
+#endif
+
+	check_ok();
+}
+
+
+/*
  * create_script_for_old_cluster_deletion()
  *
  *	This is particularly useful for tablespace deletion.
@@ -393,10 +517,10 @@ create_script_for_old_cluster_deletion(char **deletion_script_file_name)
 
 	prep_status("Creating script to delete old cluster");
 
-	snprintf(*deletion_script_file_name, MAXPGPATH, "%s/delete_old_cluster.%s",
-			 os_info.cwd, SCRIPT_EXT);
+	snprintf(*deletion_script_file_name, MAXPGPATH, "delete_old_cluster.%s",
+			 SCRIPT_EXT);
 
-	if ((script = fopen(*deletion_script_file_name, "w")) == NULL)
+	if ((script = fopen_priv(*deletion_script_file_name, "w")) == NULL)
 		pg_log(PG_FATAL, "Could not open file \"%s\": %s\n",
 			   *deletion_script_file_name, getErrorText(errno));
 
@@ -541,8 +665,8 @@ check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster)
 		return;
 	}
 
-	snprintf(output_path, sizeof(output_path), "%s/contrib_isn_and_int8_pass_by_value.txt",
-			 os_info.cwd);
+	snprintf(output_path, sizeof(output_path),
+			 "contrib_isn_and_int8_pass_by_value.txt");
 
 	for (dbnum = 0; dbnum < cluster->dbarr.ndbs; dbnum++)
 	{
@@ -569,7 +693,7 @@ check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster)
 		for (rowno = 0; rowno < ntups; rowno++)
 		{
 			found = true;
-			if (script == NULL && (script = fopen(output_path, "w")) == NULL)
+			if (script == NULL && (script = fopen_priv(output_path, "w")) == NULL)
 				pg_log(PG_FATAL, "Could not open file \"%s\": %s\n",
 					   output_path, getErrorText(errno));
 			if (!db_used)
@@ -628,8 +752,7 @@ check_for_reg_data_type_usage(ClusterInfo *cluster)
 
 	prep_status("Checking for reg* system OID user data types");
 
-	snprintf(output_path, sizeof(output_path), "%s/tables_using_reg.txt",
-			 os_info.cwd);
+	snprintf(output_path, sizeof(output_path), "tables_using_reg.txt");
 
 	for (dbnum = 0; dbnum < cluster->dbarr.ndbs; dbnum++)
 	{
@@ -675,7 +798,7 @@ check_for_reg_data_type_usage(ClusterInfo *cluster)
 		for (rowno = 0; rowno < ntups; rowno++)
 		{
 			found = true;
-			if (script == NULL && (script = fopen(output_path, "w")) == NULL)
+			if (script == NULL && (script = fopen_priv(output_path, "w")) == NULL)
 				pg_log(PG_FATAL, "Could not open file \"%s\": %s\n",
 					   output_path, getErrorText(errno));
 			if (!db_used)

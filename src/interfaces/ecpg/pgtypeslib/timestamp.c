@@ -119,7 +119,7 @@ SetEpochTimestamp(void)
  *	local time zone. If out of this range, leave as GMT. - tgl 97/05/27
  */
 static int
-timestamp2tm(timestamp dt, int *tzp, struct tm * tm, fsec_t *fsec, char **tzn)
+timestamp2tm(timestamp dt, int *tzp, struct tm * tm, fsec_t *fsec, const char **tzn)
 {
 #ifdef HAVE_INT64_TIMESTAMP
 	int64		dDate,
@@ -224,7 +224,7 @@ recalc_t:
 
 			*tzp = -tm->tm_gmtoff;		/* tm_gmtoff is Sun/DEC-ism */
 			if (tzn != NULL)
-				*tzn = (char *) tm->tm_zone;
+				*tzn = tm->tm_zone;
 #elif defined(HAVE_INT_TIMEZONE)
 			*tzp = (tm->tm_isdst > 0) ? TIMEZONE_GLOBAL - SECS_PER_HOUR : TIMEZONE_GLOBAL;
 			if (tzn != NULL)
@@ -354,7 +354,6 @@ PGTYPEStimestamp_to_asc(timestamp tstamp)
 	struct tm	tt,
 			   *tm = &tt;
 	char		buf[MAXDATELEN + 1];
-	char	   *tzn = NULL;
 	fsec_t		fsec;
 	int			DateStyle = 1;	/* this defaults to ISO_DATES, shall we make
 								 * it an option? */
@@ -362,7 +361,7 @@ PGTYPEStimestamp_to_asc(timestamp tstamp)
 	if (TIMESTAMP_NOT_FINITE(tstamp))
 		EncodeSpecialTimestamp(tstamp, buf);
 	else if (timestamp2tm(tstamp, NULL, tm, &fsec, NULL) == 0)
-		EncodeDateTime(tm, fsec, NULL, &tzn, DateStyle, buf, 0);
+		EncodeDateTime(tm, fsec, false, 0, NULL, DateStyle, buf, 0);
 	else
 	{
 		errno = PGTYPES_TS_BAD_TIMESTAMP;
