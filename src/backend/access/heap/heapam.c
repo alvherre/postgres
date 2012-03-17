@@ -93,7 +93,8 @@ static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
 						  TransactionId *result_xmax, uint16 *result_infomask,
 						  uint16 *result_infomask2);
 static HTSU_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple,
-						TransactionId xid, LockTupleMode mode);
+						ItemPointer ctid, TransactionId xid,
+						LockTupleMode mode);
 static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 					   uint16 *new_infomask2);
 static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
@@ -3735,13 +3736,13 @@ l3:
 		uint16		infomask;
 		uint16		infomask2;
 		bool		require_sleep;
-		ItemPointerData	updated_tid;
+		ItemPointerData	ctid;
 
 		/* must copy state data before unlocking buffer */
 		xwait = HeapTupleHeaderGetRawXmax(tuple->t_data);
 		infomask = tuple->t_data->t_infomask;
 		infomask2 = tuple->t_data->t_infomask2;
-		ItemPointerCopy(&tuple->t_data->t_ctid, &updated_tid);
+		ItemPointerCopy(&tuple->t_data->t_ctid, &ctid);
 
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
@@ -3843,7 +3844,7 @@ l3:
 			{
 				HTSU_Result		res;
 
-				res = heap_lock_updated_tuple(relation, tuple,
+				res = heap_lock_updated_tuple(relation, tuple, &ctid,
 											  GetCurrentTransactionId(),
 											  mode);
 				if (res != HeapTupleMayBeUpdated)
@@ -4008,7 +4009,7 @@ l3:
 				{
 					HTSU_Result		res;
 
-					res = heap_lock_updated_tuple(relation, tuple,
+					res = heap_lock_updated_tuple(relation, tuple, &ctid,
 												  GetCurrentTransactionId(),
 												  mode);
 					if (res != HeapTupleMayBeUpdated)
@@ -4061,7 +4062,7 @@ l3:
 				{
 					HTSU_Result		res;
 
-					res = heap_lock_updated_tuple(relation, tuple,
+					res = heap_lock_updated_tuple(relation, tuple, &ctid,
 												  GetCurrentTransactionId(),
 												  mode);
 					if (res != HeapTupleMayBeUpdated)
@@ -4635,10 +4636,10 @@ l4:
  * transaction doing it is finished.
  */
 static HTSU_Result
-heap_lock_updated_tuple(Relation rel, HeapTuple tuple, TransactionId xid,
-						LockTupleMode mode)
+heap_lock_updated_tuple(Relation rel, HeapTuple tuple, ItemPointer ctid,
+						TransactionId xid, LockTupleMode mode)
 {
-	if (!ItemPointerEquals(&tuple->t_self, &tuple->t_data->t_ctid))
+	if (!ItemPointerEquals(&tuple->t_self, ctid))
 	{
 		/*
 		 * If this is the first possibly-multixact-able operation in the
@@ -4651,8 +4652,7 @@ heap_lock_updated_tuple(Relation rel, HeapTuple tuple, TransactionId xid,
 		 */
 		MultiXactIdSetOldestMember();
 
-		return heap_lock_updated_tuple_rec(rel, &tuple->t_data->t_ctid,
-										   xid, mode);
+		return heap_lock_updated_tuple_rec(rel, ctid, xid, mode);
 	}
 
 	/* nothing to lock */
