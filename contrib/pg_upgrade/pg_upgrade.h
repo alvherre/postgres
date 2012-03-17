@@ -100,9 +100,9 @@ extern char *output_files[];
 #define VISIBILITY_MAP_CRASHSAFE_CAT_VER 201107031
 
 /*
- * pg_multixact format changed in commit abcde12345
+ * pg_multixact format changed in this catversion:
  */
-#define MULTIXACT_FORMATCHANGE_CAT_VER 201202151
+#define MULTIXACT_FORMATCHANGE_CAT_VER 201203171
 
 /*
  * Each relation is represented by a relinfo structure.
