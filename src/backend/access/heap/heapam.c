@@ -3040,7 +3040,7 @@ l2:
 		{
 			/*
 			 * If it's just a key-share locker, and we're not changing the
-			 * key columns, we don't need to wait for it to wait; but we
+			 * key columns, we don't need to wait for it to end; but we
 			 * need to preserve it as locker.
 			 */
 			if ((infomask & HEAP_XMAX_KEYSHR_LOCK) && key_intact)
@@ -3149,9 +3149,8 @@ l2:
 	}
 
 	/*
-	 * If the tuple we're updating is locked, we need to preserve this in the
-	 * new tuple's Xmax as well as in the old tuple.  Prepare the new xmax
-	 * value for these uses.
+	 * If the tuple we're updating is locked, we need to preserve the locking
+	 * info in the old tuple's Xmax.  Prepare a new Xmax value for this.
 	 */
 	compute_new_xmax_infomask(HeapTupleHeaderGetRawXmax(oldtup.t_data),
 							  oldtup.t_data->t_infomask,
@@ -3160,6 +3159,7 @@ l2:
 							  &xmax_old_tuple, &infomask_old_tuple,
 							  &infomask2_old_tuple);
 
+	/* And also prepare an Xmax value for the new copy of the tuple */
 	if ((oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) ||
 		(checked_lockers && !locker_remains))
 		xmax_new_tuple = InvalidTransactionId;
@@ -4445,8 +4445,8 @@ l5:
 			 TransactionIdDidCommit(xmax))
 	{
 		/*
-		 * Not a multi, not in progress -- but it's an update, so we gotta
-		 * preserve him as updater of the tuple.
+		 * It's a committed update, so we gotta preserve him as updater of the
+		 * tuple.
 		 */
 		MultiXactStatus		status;
 		MultiXactStatus		new_status;
@@ -4486,7 +4486,9 @@ l5:
 /*
  * Recursive part of heap_lock_updated_tuple
  *
- * See the function below.
+ * Fetch the tuple pointed to by tid in rel, and mark it as locked by the given
+ * xid with the given mode; if this tuple is updated, recurse to lock the new
+ * version as well.
  */
 static HTSU_Result
 heap_lock_updated_tuple_rec(Relation rel, ItemPointer tid, TransactionId xid,
@@ -4562,13 +4564,14 @@ l4:
 		}
 	}
 
+	/* compute the new Xmax and infomask values for the tuple ... */
 	compute_new_xmax_infomask(xmax, old_infomask, mytup.t_data->t_infomask2,
 							  xid, mode, false,
 							  &new_xmax, &new_infomask, &new_infomask2);
 
 	START_CRIT_SECTION();
 
-	/* And set them. */
+	/* ... and set them */
 	HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
 	mytup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
 	mytup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
@@ -4621,16 +4624,15 @@ l4:
 
 /*
  * heap_lock_updated_tuple
- * 		Follow update chain when locking an updated tuple
+ * 		Follow update chain when locking an updated tuple, acquiring locks on
+ * 		the updated versions.
  *
- * Given a TID corresponding to the first updated version of a tuple, acquire
- * a lock of the given mode on it in the name of the given transaction, and
- * recurse to acquire locks on all subsequent versions.
+ * The initial tuple is assumed to be already locked.
  *
  * This function doesn't check visibility, it just inconditionally marks the
- * tuple(s) as locked.  If the tuple is being deleted concurrently (or updated
- * with the key being modified), sleep until the transaction doing it is
- * finished.
+ * tuple(s) as locked.  If any tuple in the updated chain is being deleted
+ * concurrently (or updated with the key being modified), sleep until the
+ * transaction doing it is finished.
  */
 static HTSU_Result
 heap_lock_updated_tuple(Relation rel, HeapTuple tuple, TransactionId xid,
