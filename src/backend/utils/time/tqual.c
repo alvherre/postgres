@@ -1165,8 +1165,8 @@ HeapTupleSatisfiesMVCC(HeapTupleHeader tuple, Snapshot snapshot,
 	{
 		TransactionId	xmax;
 
-		if (HeapTupleHeaderInfomaskIsOnlyLocked(tuple->t_infomask))
-			return true;
+		/* already checked above */
+		Assert(!HeapTupleHeaderInfomaskIsOnlyLocked(tuple->t_infomask));
 
 		xmax = HeapTupleGetUpdateXid(tuple);
 		if (!TransactionIdIsValid(xmax))
