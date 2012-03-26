@@ -1767,7 +1767,8 @@ typedef struct
     <para>
      Finally, all variable-length types must also be  passed
      by  reference.   All  variable-length  types must begin
-     with a length field of exactly 4 bytes, and all data to
+     with an opaque length field of exactly 4 bytes, which will be set
+     by SET_VARSIZE; never set this field directly! All data to
      be  stored within that type must be located in the memory
      immediately  following  that  length  field.   The
      length field contains the total length of the structure,
@@ -1833,7 +1834,7 @@ memcpy(destination->data, buffer, 40);
 ]]>
 </programlisting>
 
-     <literal>VARHDRSZ</> is the same as <literal>sizeof(int4)</>, but
+     <literal>VARHDRSZ</> is the same as <literal>sizeof(int32)</>, but
      it's considered good style to use the macro <literal>VARHDRSZ</>
      to refer to the size of the overhead for a variable-length type.
      Also, the length field <emphasis>must</> be set using the
@@ -3173,6 +3174,40 @@ CREATE FUNCTION make_array(anyelement) RETURNS anyarray
      the function separately.  The <function>PG_NARGS()</> macro and the
      methods described above must be used to determine the number of actual
      arguments and their types when using this feature.
+    </para>
+   </sect2>
+
+   <sect2 id="xfunc-transform-functions">
+    <title>Transform Functions</title>
+
+    <para>
+     Some function calls can be simplified during planning based on
+     properties specific to the function.  For example,
+     <literal>int4mul(n, 1)</> could be simplified to just <literal>n</>.
+     To define such function-specific optimizations, write a
+     <firstterm>transform function</> and place its OID in the
+     <structfield>protransform</> field of the primary function's
+     <structname>pg_proc</> entry.  The transform function must have the SQL
+     signature <literal>protransform(internal) RETURNS internal</>.  The
+     argument, actually <type>FuncExpr *</>, is a dummy node representing a
+     call to the primary function.  If the transform function's study of the
+     expression tree proves that a simplified expression tree can substitute
+     for all possible concrete calls represented thereby, build and return
+     that simplified expression.  Otherwise, return a <literal>NULL</>
+     pointer (<emphasis>not</> a SQL null).
+    </para>
+
+    <para>
+     We make no guarantee that <productname>PostgreSQL</> will never call the
+     primary function in cases that the transform function could simplify.
+     Ensure rigorous equivalence between the simplified expression and an
+     actual call to the primary function.
+    </para>
+
+    <para>
+     Currently, this facility is not exposed to users at the SQL level
+     because of security concerns, so it is only practical to use for
+     optimizing built-in functions.
     </para>
    </sect2>
 

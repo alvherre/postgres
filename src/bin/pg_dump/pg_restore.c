@@ -365,11 +365,6 @@ main(int argc, char **argv)
 				opts->format = archDirectory;
 				break;
 
-			case 'f':
-			case 'F':
-				opts->format = archFiles;
-				break;
-
 			case 't':
 			case 'T':
 				opts->format = archTar;
@@ -383,6 +378,13 @@ main(int argc, char **argv)
 	}
 
 	AH = OpenArchive(inputFileSpec, opts->format);
+
+	/*
+	 * We don't have a connection yet but that doesn't matter. The connection
+	 * is initialized to NULL and if we terminate through exit_nicely() while
+	 * it's still NULL, the cleanup function will just be a no-op.
+	 */
+	on_exit_close_archive(AH);
 
 	/* Let the archiver know how noisy to be */
 	AH->verbose = opts->verbose;

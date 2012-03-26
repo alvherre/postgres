@@ -144,7 +144,6 @@ static int	serializable_deferrable = 0;
 
 
 static void help(const char *progname);
-static void pgdump_cleanup_at_exit(int code, void *arg);
 static void setup_connection(Archive *AH, const char *dumpencoding,
 				 char *use_role);
 static ArchiveFormat parseArchiveFormat(const char *format, ArchiveMode *mode);
@@ -575,7 +574,9 @@ main(int argc, char **argv)
 
 	/* Open the output file */
 	fout = CreateArchive(filename, archiveFormat, compressLevel, archiveMode);
-	on_exit_nicely(pgdump_cleanup_at_exit, fout);
+
+	/* Register the cleanup hook */
+	on_exit_close_archive(fout);
 
 	if (fout == NULL)
 		exit_horribly(NULL, "could not open output file \"%s\" for writing\n", filename);
@@ -837,14 +838,6 @@ help(const char *progname)
 }
 
 static void
-pgdump_cleanup_at_exit(int code, void *arg)
-{
-	Archive	   *AH = (Archive *) arg;
-
-	DisconnectDatabase(AH);
-}
-
-static void
 setup_connection(Archive *AH, const char *dumpencoding, char *use_role)
 {
 	PGconn	   *conn = GetConnection(AH);
@@ -934,13 +927,6 @@ parseArchiveFormat(const char *format, ArchiveMode *mode)
 		archiveFormat = archDirectory;
 	else if (pg_strcasecmp(format, "directory") == 0)
 		archiveFormat = archDirectory;
-	else if (pg_strcasecmp(format, "f") == 0 || pg_strcasecmp(format, "file") == 0)
-
-		/*
-		 * Dump files into the current directory; for demonstration only, not
-		 * documented.
-		 */
-		archiveFormat = archFiles;
 	else if (pg_strcasecmp(format, "p") == 0)
 		archiveFormat = archNull;
 	else if (pg_strcasecmp(format, "plain") == 0)
@@ -2371,8 +2357,6 @@ dumpBlobs(Archive *fout, void *arg)
 
 		PQclear(res);
 	} while (ntups > 0);
-
-	PQclear(res);
 
 	return 1;
 }
