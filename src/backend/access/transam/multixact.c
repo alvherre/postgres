@@ -465,10 +465,14 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 	}
 
 	/*
-	 * Determine which of the members of the MultiXactId are still running,
-	 * and use them to create a new one.  (Removing dead members is just an
-	 * optimization, but a useful one.	Note we have the same race condition
-	 * here as above: j could be 0 at the end of the loop.)
+	 * Determine which of the members of the MultiXactId are still of interest.
+	 * This is any running transaction, and also any transaction that grabbed
+	 * something stronger than just a lock and was committed.  (An update that
+	 * aborted is of no interest here.)
+	 *
+	 * (Removing dead members is just an optimization, but a useful one.
+	 * Note we have the same race condition here as above: j could be 0 at the
+	 * end of the loop.)
 	 */
 	newMembers = (MultiXactMember *)
 		palloc(sizeof(MultiXactMember) * (nmembers + 1));
@@ -476,7 +480,8 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 	for (i = 0, j = 0; i < nmembers; i++)
 	{
 		if (TransactionIdIsInProgress(members[i].xid) ||
-			members[i].status > MultiXactStatusForKeyUpdate)
+			((members[i].status > MultiXactStatusForKeyUpdate) &&
+			 TransactionIdDidCommit(members[i].xid)))
 		{
 			newMembers[j].xid = members[i].xid;
 			newMembers[j++].status = members[i].status;
