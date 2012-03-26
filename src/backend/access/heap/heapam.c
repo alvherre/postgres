@@ -4388,6 +4388,29 @@ l5:
 									 new_status);
 		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
 	}
+	else if (old_infomask & HEAP_XMAX_COMMITTED)
+	{
+		/*
+		 * It's a committed update, so we gotta preserve him as updater of the
+		 * tuple.
+		 */
+		MultiXactStatus		status;
+		MultiXactStatus		new_status;
+
+		if (old_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+			status = MultiXactStatusKeyUpdate;
+		else
+			status = MultiXactStatusUpdate;
+
+		new_status = get_mxact_status_for_lock(mode, is_update);
+		/*
+		 * since it's not running, it's obviously impossible for the old
+		 * updater to be identical to the current one, so we need not check
+		 * for that case as we do in the block above.
+		 */
+		new_xmax = MultiXactIdCreate(xmax, status, add_to_xmax, new_status);
+		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
+	}
 	else if (TransactionIdIsInProgress(xmax))
 	{
 		/*
