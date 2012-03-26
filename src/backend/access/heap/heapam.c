@@ -5075,9 +5075,10 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 				members[i].status == MultiXactStatusForKeyUpdate)
 				continue;
 
-			/* there should be at most one updater */
-			/* FIXME -- what if an aborted subxact updates the tuple
-			 * and it's then deleted by another subxact? */
+			/* ignore aborted transactions */
+			if (TransactionIdDidAbort(members[i].xid))
+				continue;
+			/* there should be at most one non-aborted updater */
 			Assert(update_xact == InvalidTransactionId);
 			Assert(members[i].status == MultiXactStatusUpdate ||
 				   members[i].status == MultiXactStatusKeyUpdate);
