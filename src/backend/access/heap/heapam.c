@@ -83,8 +83,9 @@ static HeapScanDesc heap_beginscan_internal(Relation relation,
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup,
 					TransactionId xid, CommandId cid, int options);
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
-				ItemPointerData from, Buffer newbuf, HeapTuple newtup,
-				bool all_visible_cleared, bool new_all_visible_cleared);
+				Buffer newbuf, HeapTuple oldtup,
+				HeapTuple newtup, bool all_visible_cleared,
+				bool new_all_visible_cleared);
 static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
 					   HeapTuple oldtup, HeapTuple newtup);
 static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
@@ -99,8 +100,12 @@ static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 					   uint16 *new_infomask2);
 static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 				int *remaining, uint16 infomask);
-static bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-						   int *remaining, uint16 infomask);
+static bool ConditionalMultiXactIdWait(MultiXactId multi,
+						   MultiXactStatus status, int *remaining,
+						   uint16 infomask);
+static uint8 compute_infobits(uint16 infomask, uint16 infomask2);
+static void fix_infomask_from_infobits(uint8 infobits, uint16 *infomask,
+						   uint16 *infomask2);
 
 typedef struct TupleLockExtraInfo
 {
@@ -2668,8 +2673,11 @@ l1:
 		XLogRecData rdata[2];
 
 		xlrec.all_visible_cleared = all_visible_cleared;
+		xlrec.infobits_set = compute_infobits(tp.t_data->t_infomask,
+											  tp.t_data->t_infomask2);
 		xlrec.target.node = relation->rd_node;
 		xlrec.target.tid = tp.t_self;
+		xlrec.xmax = new_xmax;
 		rdata[0].data = (char *) &xlrec;
 		rdata[0].len = SizeOfHeapDelete;
 		rdata[0].buffer = InvalidBuffer;
@@ -3429,8 +3437,8 @@ l2:
 	/* XLOG stuff */
 	if (RelationNeedsWAL(relation))
 	{
-		XLogRecPtr	recptr = log_heap_update(relation, buffer, oldtup.t_self,
-											 newbuf, heaptup,
+		XLogRecPtr	recptr = log_heap_update(relation, buffer,
+											 newbuf, &oldtup, heaptup,
 											 all_visible_cleared,
 											 all_visible_cleared_new);
 
@@ -4229,17 +4237,8 @@ failed:
 		xlrec.target.node = relation->rd_node;
 		xlrec.target.tid = tuple->t_self;
 		xlrec.locking_xid = xid;
-		xlrec.infobits_set =
-			(((new_infomask & HEAP_XMAX_IS_MULTI) != 0) ?
-			 XLHL_XMAX_IS_MULTI : 0) |
-			(((new_infomask & HEAP_XMAX_LOCK_ONLY) != 0) ?
-			 XLHL_XMAX_LOCK_ONLY : 0) |
-			(((new_infomask & HEAP_XMAX_EXCL_LOCK) != 0) ?
-			 XLHL_XMAX_EXCL_LOCK : 0) |
-			(((new_infomask & HEAP_XMAX_KEYSHR_LOCK) != 0) ?
-			 XLHL_XMAX_KEYSHR_LOCK : 0) |
-			(((tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED) != 0) ?
-			 XLHL_UPDATE_KEY_REVOKED : 0);
+		xlrec.infobits_set = compute_infobits(new_infomask,
+											  tuple->t_data->t_infomask2);
 		rdata[0].data = (char *) &xlrec;
 		rdata[0].len = SizeOfHeapLock;
 		rdata[0].buffer = InvalidBuffer;
@@ -4274,6 +4273,18 @@ failed:
 		UnlockTupleTuplock(relation, tid, mode);
 
 	return HeapTupleMayBeUpdated;
+}
+
+static uint8
+compute_infobits(uint16 infomask, uint16 infomask2)
+{
+	return
+		((infomask & HEAP_XMAX_IS_MULTI) != 0 ? XLHL_XMAX_IS_MULTI : 0) |
+		((infomask & HEAP_XMAX_LOCK_ONLY) != 0 ? XLHL_XMAX_LOCK_ONLY : 0) |
+		((infomask & HEAP_XMAX_EXCL_LOCK) != 0 ? XLHL_XMAX_EXCL_LOCK : 0) |
+		((infomask & HEAP_XMAX_KEYSHR_LOCK) != 0 ? XLHL_XMAX_KEYSHR_LOCK : 0) |
+		((infomask2 & HEAP_UPDATE_KEY_REVOKED) != 0 ?
+		 XLHL_UPDATE_KEY_REVOKED : 0);
 }
 
 /*
@@ -4615,7 +4626,7 @@ l4:
 		xlrec.target.node = rel->rd_node;
 		xlrec.target.tid = mytup.t_self;
 		xlrec.xmax = new_xmax;
-		xlrec.infomask = new_infomask;
+		xlrec.infobits_set = compute_infobits(new_infomask, new_infomask2);
 
 		rdata.data = (char *) &xlrec;
 		rdata.len = SizeOfHeapLockUpdated;
@@ -5578,8 +5589,8 @@ log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer vm_buffer)
  * have modified the buffer(s) and marked them dirty.
  */
 static XLogRecPtr
-log_heap_update(Relation reln, Buffer oldbuf, ItemPointerData from,
-				Buffer newbuf, HeapTuple newtup,
+log_heap_update(Relation reln, Buffer oldbuf,
+				Buffer newbuf, HeapTuple oldtup, HeapTuple newtup,
 				bool all_visible_cleared, bool new_all_visible_cleared)
 {
 	xl_heap_update xlrec;
@@ -5598,7 +5609,10 @@ log_heap_update(Relation reln, Buffer oldbuf, ItemPointerData from,
 		info = XLOG_HEAP_UPDATE;
 
 	xlrec.target.node = reln->rd_node;
-	xlrec.target.tid = from;
+	xlrec.target.tid = oldtup->t_self;
+	xlrec.xmax = HeapTupleHeaderGetRawXmax(oldtup->t_data);
+	xlrec.infobits_set = compute_infobits(oldtup->t_data->t_infomask,
+										  oldtup->t_data->t_infomask2);
 	xlrec.all_visible_cleared = all_visible_cleared;
 	xlrec.newtid = newtup->t_self;
 	xlrec.new_all_visible_cleared = new_all_visible_cleared;
@@ -6034,8 +6048,11 @@ heap_xlog_delete(XLogRecPtr lsn, XLogRecord *record)
 	htup = (HeapTupleHeader) PageGetItem(page, lp);
 
 	htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+	htup->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
 	HeapTupleHeaderClearHotUpdated(htup);
-	HeapTupleHeaderSetXmax(htup, record->xl_xid);
+	fix_infomask_from_infobits(xlrec->infobits_set,
+							   &htup->t_infomask, &htup->t_infomask2);
+	HeapTupleHeaderSetXmax(htup, xlrec->xmax);
 	HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
 
 	/* Mark the page as a candidate for pruning */
@@ -6382,11 +6399,14 @@ heap_xlog_update(XLogRecPtr lsn, XLogRecord *record, bool hot_update)
 	htup = (HeapTupleHeader) PageGetItem(page, lp);
 
 	htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+	htup->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
 	if (hot_update)
 		HeapTupleHeaderSetHotUpdated(htup);
 	else
 		HeapTupleHeaderClearHotUpdated(htup);
-	HeapTupleHeaderSetXmax(htup, record->xl_xid);
+	fix_infomask_from_infobits(xlrec->infobits_set, &htup->t_infomask,
+							   &htup->t_infomask2);
+	HeapTupleHeaderSetXmax(htup, xlrec->xmax);
 	HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
 	/* Set forward chain link in t_ctid */
 	htup->t_ctid = xlrec->newtid;
@@ -6555,17 +6575,8 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 
 	htup = (HeapTupleHeader) PageGetItem(page, lp);
 
-	htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
-	if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
-		htup->t_infomask |= HEAP_XMAX_IS_MULTI;
-	if (xlrec->infobits_set & XLHL_XMAX_LOCK_ONLY)
-		htup->t_infomask |= HEAP_XMAX_LOCK_ONLY;
-	if (xlrec->infobits_set & XLHL_XMAX_EXCL_LOCK)
-		htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
-	if (xlrec->infobits_set & XLHL_XMAX_KEYSHR_LOCK)
-		htup->t_infomask |= HEAP_XMAX_KEYSHR_LOCK;
-	if (xlrec->infobits_set & XLHL_UPDATE_KEY_REVOKED)
-		htup->t_infomask2 |= HEAP_UPDATE_KEY_REVOKED;
+	fix_infomask_from_infobits(xlrec->infobits_set, &htup->t_infomask,
+							   &htup->t_infomask2);
 	HeapTupleHeaderClearHotUpdated(htup);
 	HeapTupleHeaderSetXmax(htup, xlrec->locking_xid);
 	HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
@@ -6575,6 +6586,26 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 	PageSetTLI(page, ThisTimeLineID);
 	MarkBufferDirty(buffer);
 	UnlockReleaseBuffer(buffer);
+}
+
+static void
+fix_infomask_from_infobits(uint8 infobits, uint16 *infomask, uint16 *infomask2)
+{
+	*infomask &= ~(HEAP_XMAX_IS_MULTI | HEAP_XMAX_LOCK_ONLY |
+				   HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_EXCL_LOCK);
+	*infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+
+	if (infobits & XLHL_XMAX_IS_MULTI)
+		*infomask |= HEAP_XMAX_IS_MULTI;
+	if (infobits & XLHL_XMAX_LOCK_ONLY)
+		*infomask |= HEAP_XMAX_LOCK_ONLY;
+	if (infobits & XLHL_XMAX_EXCL_LOCK)
+		*infomask |= HEAP_XMAX_EXCL_LOCK;
+	if (infobits & XLHL_XMAX_KEYSHR_LOCK)
+		*infomask |= HEAP_XMAX_KEYSHR_LOCK;
+
+	if (infobits & XLHL_UPDATE_KEY_REVOKED)
+		*infomask2 |= HEAP_UPDATE_KEY_REVOKED;
 }
 
 static void
@@ -6613,7 +6644,8 @@ heap_xlog_lock_updated(XLogRecPtr lsn, XLogRecord *record)
 
 	htup = (HeapTupleHeader) PageGetItem(page, lp);
 
-	htup->t_infomask |= xlrec->infomask;
+	fix_infomask_from_infobits(xlrec->infobits_set, &htup->t_infomask,
+							   &htup->t_infomask2);
 	HeapTupleHeaderSetXmax(htup, xlrec->xmax);
 
 	PageSetLSN(page, lsn);
@@ -6758,6 +6790,21 @@ out_target(StringInfo buf, xl_heaptid *target)
 					 ItemPointerGetOffsetNumber(&(target->tid)));
 }
 
+static void
+out_infobits(StringInfo buf, uint8 infobits)
+{
+	if (infobits & XLHL_XMAX_IS_MULTI)
+		appendStringInfo(buf, "IS_MULTI ");
+	if (infobits & XLHL_XMAX_LOCK_ONLY)
+		appendStringInfo(buf, "LOCK_ONLY ");
+	if (infobits & XLHL_XMAX_EXCL_LOCK)
+		appendStringInfo(buf, "EXCL_LOCK ");
+	if (infobits & XLHL_XMAX_KEYSHR_LOCK)
+		appendStringInfo(buf, "KEYSHR_LOCK ");
+	if (infobits & XLHL_UPDATE_KEY_REVOKED)
+		appendStringInfo(buf, "KEY_REVOKED ");
+}
+
 void
 heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 {
@@ -6780,6 +6827,8 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 
 		appendStringInfo(buf, "delete: ");
 		out_target(buf, &(xlrec->target));
+		appendStringInfoChar(buf, ' ');
+		out_infobits(buf, xlrec->infobits_set);
 	}
 	else if (info == XLOG_HEAP_UPDATE)
 	{
@@ -6790,6 +6839,8 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 		else
 			appendStringInfo(buf, "update: ");
 		out_target(buf, &(xlrec->target));
+		appendStringInfoChar(buf, ' ');
+		out_infobits(buf, xlrec->infobits_set);
 		appendStringInfo(buf, "; new %u/%u",
 						 ItemPointerGetBlockNumber(&(xlrec->newtid)),
 						 ItemPointerGetOffsetNumber(&(xlrec->newtid)));
@@ -6803,6 +6854,8 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 		else
 			appendStringInfo(buf, "hot_update: ");
 		out_target(buf, &(xlrec->target));
+		appendStringInfoChar(buf, ' ');
+		out_infobits(buf, xlrec->infobits_set);
 		appendStringInfo(buf, "; new %u/%u",
 						 ItemPointerGetBlockNumber(&(xlrec->newtid)),
 						 ItemPointerGetOffsetNumber(&(xlrec->newtid)));
@@ -6823,16 +6876,7 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 		appendStringInfo(buf, "lock %u: ", xlrec->locking_xid);
 		out_target(buf, &(xlrec->target));
 		appendStringInfoChar(buf, ' ');
-		if (xlrec->infobits_set & XLHL_XMAX_IS_MULTI)
-			appendStringInfo(buf, "XMAX_IS_MULTI ");
-		if (xlrec->infobits_set & XLHL_XMAX_LOCK_ONLY)
-			appendStringInfo(buf, "XMAX_LOCK_ONLY ");
-		if (xlrec->infobits_set & XLHL_XMAX_EXCL_LOCK)
-			appendStringInfo(buf, "XMAX_EXCL_LOCK ");
-		if (xlrec->infobits_set & XLHL_XMAX_KEYSHR_LOCK)
-			appendStringInfo(buf, "XMAX_KEYSHR_LOCK ");
-		if (xlrec->infobits_set & XLHL_UPDATE_KEY_REVOKED)
-			appendStringInfo(buf, "UPDATE_KEY_REVOKED ");
+		out_infobits(buf, xlrec->infobits_set);
 	}
 	else if (info == XLOG_HEAP_INPLACE)
 	{
@@ -6901,7 +6945,7 @@ heap2_desc(StringInfo buf, uint8 xl_info, char *rec)
 		xl_heap_lock_updated *xlrec = (xl_heap_lock_updated *) rec;
 
 		appendStringInfo(buf, "lock updated: xmax %u msk %04x; ", xlrec->xmax,
-						 xlrec->infomask);
+						 xlrec->infobits_set);
 		out_target(buf, &(xlrec->target));
 	}
 	else

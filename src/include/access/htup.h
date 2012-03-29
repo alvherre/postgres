@@ -667,6 +667,8 @@ typedef struct xl_heaptid
 typedef struct xl_heap_delete
 {
 	xl_heaptid	target;			/* deleted tuple id */
+	TransactionId xmax;			/* xmax of the deleted tuple */
+	uint8		infobits_set;	/* infomask bits */
 	bool		all_visible_cleared;	/* PD_ALL_VISIBLE was cleared */
 } xl_heap_delete;
 
@@ -733,7 +735,9 @@ typedef struct xl_multi_insert_tuple
 typedef struct xl_heap_update
 {
 	xl_heaptid	target;			/* deleted tuple id */
+	TransactionId xmax;			/* xmax of the old tuple */
 	ItemPointerData newtid;		/* new inserted tuple id */
+	uint8		infobits_set;	/* infomask bits to set on old tuple */
 	bool		all_visible_cleared;	/* PD_ALL_VISIBLE was cleared */
 	bool		new_all_visible_cleared;		/* same for the page of newtid */
 	/* NEW TUPLE xl_heap_header AND TUPLE DATA FOLLOWS AT END OF STRUCT */
@@ -789,7 +793,7 @@ typedef struct xl_heap_newpage
 
 #define SizeOfHeapNewpage	(offsetof(xl_heap_newpage, blkno) + sizeof(BlockNumber))
 
-/* flags for xl_heap_lock.infobits_set */
+/* flags for infobits_set */
 #define XLHL_XMAX_IS_MULTI		0x01
 #define XLHL_XMAX_LOCK_ONLY		0x02
 #define XLHL_XMAX_EXCL_LOCK		0x04
@@ -811,10 +815,10 @@ typedef struct xl_heap_lock_updated
 {
 	xl_heaptid	target;
 	TransactionId	xmax;
-	uint16		infomask;
+	uint8		infobits_set;
 } xl_heap_lock_updated;
 
-#define SizeOfHeapLockUpdated	(offsetof(xl_heap_lock_updated, infomask) + sizeof(uint16))
+#define SizeOfHeapLockUpdated	(offsetof(xl_heap_lock_updated, infobits_set) + sizeof(uint8))
 
 /* This is what we need to know about in-place update */
 typedef struct xl_heap_inplace
