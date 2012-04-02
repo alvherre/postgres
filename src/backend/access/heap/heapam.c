@@ -3744,13 +3744,13 @@ l3:
 		uint16		infomask;
 		uint16		infomask2;
 		bool		require_sleep;
-		ItemPointerData	ctid;
+		ItemPointerData	t_ctid;
 
 		/* must copy state data before unlocking buffer */
 		xwait = HeapTupleHeaderGetRawXmax(tuple->t_data);
 		infomask = tuple->t_data->t_infomask;
 		infomask2 = tuple->t_data->t_infomask2;
-		ItemPointerCopy(&tuple->t_data->t_ctid, &ctid);
+		ItemPointerCopy(&tuple->t_data->t_ctid, &t_ctid);
 
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
 
@@ -3852,7 +3852,7 @@ l3:
 			{
 				HTSU_Result		res;
 
-				res = heap_lock_updated_tuple(relation, tuple, &ctid,
+				res = heap_lock_updated_tuple(relation, tuple, &t_ctid,
 											  GetCurrentTransactionId(),
 											  mode);
 				if (res != HeapTupleMayBeUpdated)
@@ -4017,7 +4017,7 @@ l3:
 				{
 					HTSU_Result		res;
 
-					res = heap_lock_updated_tuple(relation, tuple, &ctid,
+					res = heap_lock_updated_tuple(relation, tuple, &t_ctid,
 												  GetCurrentTransactionId(),
 												  mode);
 					if (res != HeapTupleMayBeUpdated)
@@ -4070,7 +4070,7 @@ l3:
 				{
 					HTSU_Result		res;
 
-					res = heap_lock_updated_tuple(relation, tuple, &ctid,
+					res = heap_lock_updated_tuple(relation, tuple, &t_ctid,
 												  GetCurrentTransactionId(),
 												  mode);
 					if (res != HeapTupleMayBeUpdated)
