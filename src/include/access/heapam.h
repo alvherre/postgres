@@ -120,7 +120,7 @@ extern HTSU_Result heap_update(Relation relation, ItemPointer otid,
 extern HTSU_Result heap_lock_tuple(Relation relation, HeapTuple tuple,
 				Buffer *buffer, ItemPointer ctid,
 				TransactionId *update_xmax, CommandId cid,
-				LockTupleMode mode, bool nowait);
+				LockTupleMode mode, bool nowait, bool follow_update);
 extern void heap_inplace_update(Relation relation, HeapTuple tuple);
 extern bool heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 				  TransactionId cutoff_multi, Buffer buf);

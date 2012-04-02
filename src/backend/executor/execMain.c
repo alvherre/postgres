@@ -1861,7 +1861,7 @@ EvalPlanQualFetch(EState *estate, Relation relation, int lockmode,
 			test = heap_lock_tuple(relation, &tuple, &buffer,
 								   &update_ctid, &update_xmax,
 								   estate->es_output_cid,
-								   lockmode, false);
+								   lockmode, false, false);
 			/* We now have two pins on the buffer, get rid of one */
 			ReleaseBuffer(buffer);
 

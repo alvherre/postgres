@@ -2601,7 +2601,7 @@ ltrmark:;
 		test = heap_lock_tuple(relation, &tuple, &buffer,
 							   &update_ctid, &update_xmax,
 							   estate->es_output_cid,
-							   LockTupleUpdate, false);
+							   LockTupleUpdate, false, false);
 		switch (test)
 		{
 			case HeapTupleSelfUpdated:

@@ -3683,6 +3683,8 @@ get_mxact_status_for_lock(LockTupleMode mode, bool is_update)
  *		tuple's cmax if lock is successful)
  *	mode: indicates if shared or exclusive tuple lock is desired
  *	nowait: if true, ereport rather than blocking if lock not available
+ *	follow_updates: if true, follow the update chain to also lock descendant
+ *		tuples.
  *
  * Output parameters:
  *	*tuple: all fields filled in
@@ -3706,7 +3708,8 @@ get_mxact_status_for_lock(LockTupleMode mode, bool is_update)
 HTSU_Result
 heap_lock_tuple(Relation relation, HeapTuple tuple, Buffer *buffer,
 				ItemPointer ctid, TransactionId *update_xmax,
-				CommandId cid, LockTupleMode mode, bool nowait)
+				CommandId cid, LockTupleMode mode, bool nowait,
+				bool follow_updates)
 {
 	HTSU_Result result;
 	ItemPointer tid = &(tuple->t_self);
@@ -3845,10 +3848,12 @@ l3:
 		if ((mode == LockTupleKeyShare) &&
 			!(infomask2 & HEAP_UPDATE_KEY_REVOKED))
 		{
-			bool	not_updated = false;
+			bool	updated;
+
+			updated = !HeapTupleHeaderInfomaskIsOnlyLocked(infomask);
 
 			/* if there are updates, follow the update chain */
-			if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
+			if (follow_updates && updated)
 			{
 				HTSU_Result		res;
 
@@ -3863,8 +3868,6 @@ l3:
 					goto failed;
 				}
 			}
-			else
-				not_updated = true;
 
 			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -3876,7 +3879,7 @@ l3:
 			 */
 			if (!HeapTupleHeaderIsOnlyLocked(tuple->t_data) &&
 				((tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED) ||
-				 not_updated))
+				 !updated))
 				goto l3;
 			require_sleep = false;
 
@@ -4013,7 +4016,8 @@ l3:
 					MultiXactIdWait((MultiXactId) xwait, status, &remain, infomask);
 
 				/* if there are updates, follow the update chain */
-				if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
+				if (follow_updates &&
+					!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
 				{
 					HTSU_Result		res;
 
@@ -4066,7 +4070,8 @@ l3:
 					XactLockTableWait(xwait);
 
 				/* if there are updates, follow the update chain */
-				if (!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
+				if (follow_updates &&
+					!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
 				{
 					HTSU_Result		res;
 
