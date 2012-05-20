@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 
+#include "access/multixact.h"
 #include "access/transam.h"
 #include "access/xlogutils.h"
 #include "catalog/dependency.h"
@@ -286,8 +287,10 @@ ResetSequence(Oid seq_relid)
 	/*
 	 * Create a new storage file for the sequence.	We want to keep the
 	 * sequence's relfrozenxid at 0, since it won't contain any unfrozen XIDs.
+	 * Same with relminmxid, since a sequence will never contain multixacts.
 	 */
-	RelationSetNewRelfilenode(seq_rel, InvalidTransactionId);
+	RelationSetNewRelfilenode(seq_rel, InvalidTransactionId,
+							  InvalidMultiXactId);
 
 	/*
 	 * Insert the modified tuple into the new storage file.
@@ -1098,7 +1101,8 @@ read_info(SeqTable elm, Relation rel, Buffer *buf)
 	 * bit update, ie, don't bother to WAL-log it, since we can certainly do
 	 * this again if the update gets lost.
 	 */
-	if (HeapTupleHeaderGetXmax(tuple.t_data) != InvalidTransactionId)
+	Assert(!(tuple.t_data->t_infomask & HEAP_XMAX_IS_MULTI));
+	if (HeapTupleHeaderGetRawXmax(tuple.t_data) != InvalidTransactionId)
 	{
 		HeapTupleHeaderSetXmax(tuple.t_data, InvalidTransactionId);
 		tuple.t_data->t_infomask &= ~HEAP_XMAX_COMMITTED;

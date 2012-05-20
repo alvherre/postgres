@@ -39,6 +39,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/multixact.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
 #include "catalog/storage.h"
@@ -109,6 +110,7 @@ static int	elevel = -1;
 
 static TransactionId OldestXmin;
 static TransactionId FreezeLimit;
+static MultiXactId MultiXactFrzLimit;
 
 static BufferAccessStrategy vac_strategy;
 
@@ -165,6 +167,7 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	double		new_rel_tuples;
 	BlockNumber new_rel_allvisible;
 	TransactionId new_frozen_xid;
+	MultiXactId	new_min_multi;
 
 	/* measure elapsed time iff autovacuum logging requires it */
 	if (IsAutoVacuumWorkerProcess() && Log_autovacuum_min_duration >= 0)
@@ -182,7 +185,8 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 
 	vacuum_set_xid_limits(vacstmt->freeze_min_age, vacstmt->freeze_table_age,
 						  onerel->rd_rel->relisshared,
-						  &OldestXmin, &FreezeLimit, &freezeTableLimit);
+						  &OldestXmin, &FreezeLimit, &freezeTableLimit,
+						  &MultiXactFrzLimit);
 	scan_all = TransactionIdPrecedesOrEquals(onerel->rd_rel->relfrozenxid,
 											 freezeTableLimit);
 
@@ -250,12 +254,17 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	if (vacrelstats->scanned_pages < vacrelstats->rel_pages)
 		new_frozen_xid = InvalidTransactionId;
 
+	new_min_multi = MultiXactFrzLimit;
+	if (vacrelstats->scanned_pages < vacrelstats->rel_pages)
+		new_min_multi = InvalidMultiXactId;
+
 	vac_update_relstats(onerel,
 						new_rel_pages,
 						new_rel_tuples,
 						new_rel_allvisible,
 						vacrelstats->hasindex,
-						new_frozen_xid);
+						new_frozen_xid,
+						new_min_multi);
 
 	/* report results to the stats collector, too */
 	pgstat_report_vacuum(RelationGetRelid(onerel),
@@ -806,7 +815,8 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 				 * Each non-removable tuple must be checked to see if it needs
 				 * freezing.  Note we already have exclusive buffer lock.
 				 */
-				if (heap_freeze_tuple(tuple.t_data, FreezeLimit))
+				if (heap_freeze_tuple(tuple.t_data, FreezeLimit,
+									  MultiXactFrzLimit))
 					frozen[nfrozen++] = offnum;
 			}
 		}						/* scan along page */
@@ -824,7 +834,7 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 				XLogRecPtr	recptr;
 
 				recptr = log_heap_freeze(onerel, buf, FreezeLimit,
-										 frozen, nfrozen);
+										 MultiXactFrzLimit, frozen, nfrozen);
 				PageSetLSN(page, recptr);
 				PageSetTLI(page, ThisTimeLineID);
 			}
@@ -1126,7 +1136,8 @@ lazy_check_needs_freeze(Buffer buf)
 
 		tupleheader = (HeapTupleHeader) PageGetItem(page, itemid);
 
-		if (heap_tuple_needs_freeze(tupleheader, FreezeLimit, buf))
+		if (heap_tuple_needs_freeze(tupleheader, FreezeLimit,
+									MultiXactFrzLimit, buf))
 			return true;
 	}						/* scan along page */
 
@@ -1203,7 +1214,8 @@ lazy_cleanup_index(Relation indrel,
 							stats->num_index_tuples,
 							0,
 							false,
-							InvalidTransactionId);
+							InvalidTransactionId,
+							InvalidMultiXactId);
 
 	ereport(elevel,
 			(errmsg("index \"%s\" now contains %.0f row versions in %u pages",

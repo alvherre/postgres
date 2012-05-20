@@ -75,6 +75,8 @@ static void KillExistingArchiveStatus(void);
 static void WriteEmptyXLOG(void);
 static void usage(void);
 
+#define OLDEST_MULTI_AGE_MAX	2000000000
+
 
 int
 main(int argc, char *argv[])
@@ -86,6 +88,7 @@ main(int argc, char *argv[])
 	TransactionId set_xid = 0;
 	Oid			set_oid = 0;
 	MultiXactId set_mxid = 0;
+	int32		oldestMultiAge = -1;
 	MultiXactOffset set_mxoff = (MultiXactOffset) -1;
 	uint32		minXlogTli = 0,
 				minXlogId = 0,
@@ -175,15 +178,31 @@ main(int argc, char *argv[])
 
 			case 'm':
 				set_mxid = strtoul(optarg, &endptr, 0);
-				if (endptr == optarg || *endptr != '\0')
+				if (endptr == optarg || (*endptr != '\0' && *endptr != ','))
 				{
 					fprintf(stderr, _("%s: invalid argument for option -m\n"), progname);
 					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 					exit(1);
 				}
+				if (*endptr == ',')
+				{
+					oldestMultiAge = strtoul(endptr + 1, &endptr2, 0);
+					if (endptr2 == endptr + 1 || *endptr2 != '\0' || oldestMultiAge < 0)
+					{
+						fprintf(stderr, _("%s: invalid argument for option -m\n"), progname);
+						fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
+						exit(1);
+					}
+				}
 				if (set_mxid == 0)
 				{
 					fprintf(stderr, _("%s: multitransaction ID (-m) must not be 0\n"), progname);
+					exit(1);
+				}
+				if (oldestMultiAge > OLDEST_MULTI_AGE_MAX)
+				{
+					fprintf(stderr, _("%s: multitransaction oldest age (-m) cannot be greater than %d\n"),
+							progname, OLDEST_MULTI_AGE_MAX);
 					exit(1);
 				}
 				break;
@@ -327,7 +346,21 @@ main(int argc, char *argv[])
 		ControlFile.checkPointCopy.nextOid = set_oid;
 
 	if (set_mxid != 0)
+	{
 		ControlFile.checkPointCopy.nextMulti = set_mxid;
+
+		if (oldestMultiAge == -1)
+			oldestMultiAge = OLDEST_MULTI_AGE_MAX;
+
+		/*
+		 * For the moment, just set the oldestMulti to a value that will force
+		 * immediate autovacuum-for-wraparound; see above.
+		 */
+		ControlFile.checkPointCopy.oldestMulti = set_mxid - oldestMultiAge;
+		if (ControlFile.checkPointCopy.oldestMulti < FirstMultiXactId)
+			ControlFile.checkPointCopy.oldestMulti += FirstMultiXactId;
+		ControlFile.checkPointCopy.oldestMultiDB = InvalidOid;
+	}
 
 	if (set_mxoff != -1)
 		ControlFile.checkPointCopy.nextMultiOffset = set_mxoff;
@@ -497,6 +530,8 @@ GuessControlValues(void)
 	ControlFile.checkPointCopy.nextMultiOffset = 0;
 	ControlFile.checkPointCopy.oldestXid = FirstNormalTransactionId;
 	ControlFile.checkPointCopy.oldestXidDB = InvalidOid;
+	ControlFile.checkPointCopy.oldestMulti = FirstMultiXactId;
+	ControlFile.checkPointCopy.oldestMultiDB = InvalidOid;
 	ControlFile.checkPointCopy.time = (pg_time_t) time(NULL);
 	ControlFile.checkPointCopy.oldestActiveXid = InvalidTransactionId;
 
@@ -587,6 +622,10 @@ PrintControlValues(bool guessed)
 		   ControlFile.checkPointCopy.oldestXidDB);
 	printf(_("Latest checkpoint's oldestActiveXID:  %u\n"),
 		   ControlFile.checkPointCopy.oldestActiveXid);
+	printf(_("Latest checkpoint's oldestMultiXid:   %u\n"),
+		   ControlFile.checkPointCopy.oldestMulti);
+	printf(_("Latest checkpoint's oldestMulti's DB: %u\n"),
+		   ControlFile.checkPointCopy.oldestMultiDB);
 	printf(_("Maximum data alignment:               %u\n"),
 		   ControlFile.maxAlign);
 	/* we don't print floatFormat since can't say much useful about it */
@@ -1031,7 +1070,7 @@ usage(void)
 	printf(_("  -e XIDEPOCH     set next transaction ID epoch\n"));
 	printf(_("  -f              force update to be done\n"));
 	printf(_("  -l TLI,FILE,SEG force minimum WAL starting location for new transaction log\n"));
-	printf(_("  -m XID          set next multitransaction ID\n"));
+	printf(_("  -m XID[,OLDEST] set next multitransaction ID, optionally age of oldest value\n"));
 	printf(_("  -n              no update, just show extracted control values (for testing)\n"));
 	printf(_("  -o OID          set next OID\n"));
 	printf(_("  -O OFFSET       set next multitransaction offset\n"));

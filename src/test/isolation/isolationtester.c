@@ -563,6 +563,7 @@ run_permutation(TestSpec * testspec, int nsteps, Step ** steps)
 			 * steps from this session can run until it is unblocked, but it
 			 * can only be unblocked by running steps from other sessions.
 			 */
+			fflush(stdout);
 			fprintf(stderr, "invalid permutation detected\n");
 
 			/* Cancel the waiting statement from this session. */

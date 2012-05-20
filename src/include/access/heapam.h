@@ -29,11 +29,22 @@
 
 typedef struct BulkInsertStateData *BulkInsertState;
 
+/*
+ * Possible lock modes for a tuple.
+ */
 typedef enum
 {
-	LockTupleShared,
-	LockTupleExclusive
+	/* SELECT FOR KEY SHARE */
+	LockTupleKeyShare,
+	/* SELECT FOR SHARE */
+	LockTupleShare,
+	/* SELECT FOR UPDATE, and UPDATEs that don't modify key columns */
+	LockTupleUpdate,
+	/* SELECT FOR KEY UPDATE, UPDATEs that modify key columns, and DELETE */
+	LockTupleKeyUpdate
 } LockTupleMode;
+
+#define MaxLockTupleMode	LockTupleKeyUpdate
 
 
 /* ----------------
@@ -109,11 +120,12 @@ extern HTSU_Result heap_update(Relation relation, ItemPointer otid,
 extern HTSU_Result heap_lock_tuple(Relation relation, HeapTuple tuple,
 				Buffer *buffer, ItemPointer ctid,
 				TransactionId *update_xmax, CommandId cid,
-				LockTupleMode mode, bool nowait);
+				LockTupleMode mode, bool nowait, bool follow_update);
 extern void heap_inplace_update(Relation relation, HeapTuple tuple);
-extern bool heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid);
+extern bool heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
+				  TransactionId cutoff_multi);
 extern bool heap_tuple_needs_freeze(HeapTupleHeader tuple, TransactionId cutoff_xid,
-				  Buffer buf);
+				  MultiXactId cutoff_multi, Buffer buf);
 
 extern Oid	simple_heap_insert(Relation relation, HeapTuple tup);
 extern void simple_heap_delete(Relation relation, ItemPointer tid);
@@ -138,7 +150,7 @@ extern XLogRecPtr log_heap_clean(Relation reln, Buffer buffer,
 			   OffsetNumber *nowunused, int nunused,
 			   TransactionId latestRemovedXid);
 extern XLogRecPtr log_heap_freeze(Relation reln, Buffer buffer,
-				TransactionId cutoff_xid,
+				TransactionId cutoff_xid, MultiXactId cutoff_multi,
 				OffsetNumber *offsets, int offcnt);
 extern XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block,
 				 Buffer vm_buffer, TransactionId cutoff_xid);

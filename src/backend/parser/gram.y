@@ -9119,7 +9119,7 @@ for_locking_item:
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $3;
-					n->forUpdate = TRUE;
+					n->strength = LCS_FORUPDATE;
 					n->noWait = $4;
 					$$ = (Node *) n;
 				}
@@ -9127,8 +9127,24 @@ for_locking_item:
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $3;
-					n->forUpdate = FALSE;
+					n->strength = LCS_FORSHARE;
 					n->noWait = $4;
+					$$ = (Node *) n;
+				}
+			| FOR KEY SHARE locked_rels_list opt_nowait
+				{
+					LockingClause *n = makeNode(LockingClause);
+					n->lockedRels = $4;
+					n->strength = LCS_FORKEYSHARE;
+					n->noWait = $5;
+					$$ = (Node *) n;
+				}
+			| FOR KEY UPDATE locked_rels_list opt_nowait
+				{
+					LockingClause *n = makeNode(LockingClause);
+					n->lockedRels = $4;
+					n->strength = LCS_FORKEYUPDATE;
+					n->noWait = $5;
 					$$ = (Node *) n;
 				}
 		;

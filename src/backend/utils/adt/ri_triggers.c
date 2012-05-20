@@ -308,7 +308,7 @@ RI_FKey_check(PG_FUNCTION_ARGS)
 	 * Get the relation descriptors of the FK and PK tables.
 	 *
 	 * pk_rel is opened in RowShareLock mode since that's what our eventual
-	 * SELECT FOR SHARE will get on it.
+	 * SELECT FOR KEY SHARE will get on it.
 	 */
 	fk_rel = trigdata->tg_relation;
 	pk_rel = heap_open(riinfo.pk_relid, RowShareLock);
@@ -338,12 +338,12 @@ RI_FKey_check(PG_FUNCTION_ARGS)
 
 			/* ---------
 			 * The query string built is
-			 *	SELECT 1 FROM ONLY <pktable>
+			 *	SELECT 1 FROM ONLY <pktable> x FOR KEY SHARE OF x
 			 * ----------
 			 */
 			quoteRelationName(pkrelname, pk_rel);
 			snprintf(querystr, sizeof(querystr),
-					 "SELECT 1 FROM ONLY %s x FOR SHARE OF x",
+					 "SELECT 1 FROM ONLY %s x FOR KEY SHARE OF x",
 					 pkrelname);
 
 			/* Prepare and save the plan */
@@ -463,7 +463,8 @@ RI_FKey_check(PG_FUNCTION_ARGS)
 
 		/* ----------
 		 * The query string built is
-		 *	SELECT 1 FROM ONLY <pktable> WHERE pkatt1 = $1 [AND ...] FOR SHARE
+		 *	SELECT 1 FROM ONLY <pktable> x WHERE pkatt1 = $1 [AND ...]
+		 *	       FOR KEY SHARE OF x
 		 * The type id's for the $ parameters are those of the
 		 * corresponding FK attributes.
 		 * ----------
@@ -487,7 +488,7 @@ RI_FKey_check(PG_FUNCTION_ARGS)
 			querysep = "AND";
 			queryoids[i] = fk_type;
 		}
-		appendStringInfo(&querybuf, " FOR SHARE OF x");
+		appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
 
 		/* Prepare and save the plan */
 		qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids,
@@ -625,7 +626,8 @@ ri_Check_Pk_Match(Relation pk_rel, Relation fk_rel,
 
 		/* ----------
 		 * The query string built is
-		 *	SELECT 1 FROM ONLY <pktable> WHERE pkatt1 = $1 [AND ...] FOR SHARE
+		 *	SELECT 1 FROM ONLY <pktable> x WHERE pkatt1 = $1 [AND ...]
+		 *	       FOR KEY SHARE OF x
 		 * The type id's for the $ parameters are those of the
 		 * PK attributes themselves.
 		 * ----------
@@ -648,7 +650,7 @@ ri_Check_Pk_Match(Relation pk_rel, Relation fk_rel,
 			querysep = "AND";
 			queryoids[i] = pk_type;
 		}
-		appendStringInfo(&querybuf, " FOR SHARE OF x");
+		appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
 
 		/* Prepare and save the plan */
 		qplan = ri_PlanCheck(querybuf.data, riinfo->nkeys, queryoids,
@@ -712,7 +714,7 @@ RI_FKey_noaction_del(PG_FUNCTION_ARGS)
 	 * Get the relation descriptors of the FK and PK tables and the old tuple.
 	 *
 	 * fk_rel is opened in RowShareLock mode since that's what our eventual
-	 * SELECT FOR SHARE will get on it.
+	 * SELECT FOR KEY SHARE will get on it.
 	 */
 	fk_rel = heap_open(riinfo.fk_relid, RowShareLock);
 	pk_rel = trigdata->tg_relation;
@@ -780,7 +782,8 @@ RI_FKey_noaction_del(PG_FUNCTION_ARGS)
 
 				/* ----------
 				 * The query string built is
-				 *	SELECT 1 FROM ONLY <fktable> WHERE $1 = fkatt1 [AND ...]
+				 *	SELECT 1 FROM ONLY <fktable> x WHERE $1 = fkatt1 [AND ...]
+				 *	       FOR KEY SHARE OF x
 				 * The type id's for the $ parameters are those of the
 				 * corresponding PK attributes.
 				 * ----------
@@ -805,7 +808,7 @@ RI_FKey_noaction_del(PG_FUNCTION_ARGS)
 					querysep = "AND";
 					queryoids[i] = pk_type;
 				}
-				appendStringInfo(&querybuf, " FOR SHARE OF x");
+				appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
 
 				/* Prepare and save the plan */
 				qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids,
@@ -890,7 +893,7 @@ RI_FKey_noaction_upd(PG_FUNCTION_ARGS)
 	 * old tuple.
 	 *
 	 * fk_rel is opened in RowShareLock mode since that's what our eventual
-	 * SELECT FOR SHARE will get on it.
+	 * SELECT FOR KEY SHARE will get on it.
 	 */
 	fk_rel = heap_open(riinfo.fk_relid, RowShareLock);
 	pk_rel = trigdata->tg_relation;
@@ -993,7 +996,7 @@ RI_FKey_noaction_upd(PG_FUNCTION_ARGS)
 					querysep = "AND";
 					queryoids[i] = pk_type;
 				}
-				appendStringInfo(&querybuf, " FOR SHARE OF x");
+				appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
 
 				/* Prepare and save the plan */
 				qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids,
@@ -1431,7 +1434,7 @@ RI_FKey_restrict_del(PG_FUNCTION_ARGS)
 	 * Get the relation descriptors of the FK and PK tables and the old tuple.
 	 *
 	 * fk_rel is opened in RowShareLock mode since that's what our eventual
-	 * SELECT FOR SHARE will get on it.
+	 * SELECT FOR KEY SHARE will get on it.
 	 */
 	fk_rel = heap_open(riinfo.fk_relid, RowShareLock);
 	pk_rel = trigdata->tg_relation;
@@ -1489,7 +1492,8 @@ RI_FKey_restrict_del(PG_FUNCTION_ARGS)
 
 				/* ----------
 				 * The query string built is
-				 *	SELECT 1 FROM ONLY <fktable> WHERE $1 = fkatt1 [AND ...]
+				 *	SELECT 1 FROM ONLY <fktable> x WHERE $1 = fkatt1 [AND ...]
+				 *	       FOR KEY SHARE OF x
 				 * The type id's for the $ parameters are those of the
 				 * corresponding PK attributes.
 				 * ----------
@@ -1514,7 +1518,7 @@ RI_FKey_restrict_del(PG_FUNCTION_ARGS)
 					querysep = "AND";
 					queryoids[i] = pk_type;
 				}
-				appendStringInfo(&querybuf, " FOR SHARE OF x");
+				appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
 
 				/* Prepare and save the plan */
 				qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids,
@@ -1604,7 +1608,7 @@ RI_FKey_restrict_upd(PG_FUNCTION_ARGS)
 	 * old tuple.
 	 *
 	 * fk_rel is opened in RowShareLock mode since that's what our eventual
-	 * SELECT FOR SHARE will get on it.
+	 * SELECT FOR KEY SHARE will get on it.
 	 */
 	fk_rel = heap_open(riinfo.fk_relid, RowShareLock);
 	pk_rel = trigdata->tg_relation;
@@ -1672,7 +1676,8 @@ RI_FKey_restrict_upd(PG_FUNCTION_ARGS)
 
 				/* ----------
 				 * The query string built is
-				 *	SELECT 1 FROM ONLY <fktable> WHERE $1 = fkatt1 [AND ...]
+				 *	SELECT 1 FROM ONLY <fktable> x WHERE $1 = fkatt1 [AND ...]
+				 *	       FOR KEY SHARE OF x
 				 * The type id's for the $ parameters are those of the
 				 * corresponding PK attributes.
 				 * ----------
@@ -1697,7 +1702,7 @@ RI_FKey_restrict_upd(PG_FUNCTION_ARGS)
 					querysep = "AND";
 					queryoids[i] = pk_type;
 				}
-				appendStringInfo(&querybuf, " FOR SHARE OF x");
+				appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
 
 				/* Prepare and save the plan */
 				qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids,
