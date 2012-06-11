@@ -1473,9 +1473,13 @@ HeapTupleIsSurelyDead(HeapTupleHeader tuple, TransactionId OldestXmin)
 	 * If the inserting transaction committed, but any deleting transaction
 	 * aborted, the tuple is still alive.  Likewise, if XMAX is a lock rather
 	 * than a delete, the tuple is still alive.
+	 *
+	 * FIXME -- the XMAX_IS_MULTI test is a bit wrong .. it's possible to
+	 * have tuples with that bit set that are dead.  However, if that's
+	 * changed, the RawXmax() call below should probably be researched as well.
 	 */
 	if (tuple->t_infomask &
-		(HEAP_XMAX_INVALID | HEAP_IS_LOCKED | HEAP_XMAX_IS_MULTI))
+		(HEAP_XMAX_INVALID | HEAP_XMAX_LOCK_ONLY | HEAP_XMAX_IS_MULTI))
 		return false;
 
 	/* If deleter isn't known to have committed, assume it's still running. */
@@ -1483,7 +1487,7 @@ HeapTupleIsSurelyDead(HeapTupleHeader tuple, TransactionId OldestXmin)
 		return false;
 
 	/* Deleter committed, so tuple is dead if the XID is old enough. */
-	return TransactionIdPrecedes(HeapTupleHeaderGetXmax(tuple), OldestXmin);
+	return TransactionIdPrecedes(HeapTupleHeaderGetRawXmax(tuple), OldestXmin);
 }
 
 /*
