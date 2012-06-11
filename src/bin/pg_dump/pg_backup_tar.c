@@ -111,7 +111,7 @@ static void tarClose(ArchiveHandle *AH, TAR_MEMBER *TH);
 #ifdef __NOT_USED__
 static char *tarGets(char *buf, size_t len, TAR_MEMBER *th);
 #endif
-static int	tarPrintf(ArchiveHandle *AH, TAR_MEMBER *th, const char *fmt, ...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
+static int	tarPrintf(ArchiveHandle *AH, TAR_MEMBER *th, const char *fmt,...) __attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
 
 static void _tarAddFile(ArchiveHandle *AH, TAR_MEMBER *th);
 static int	_tarChecksum(char *th);
@@ -177,7 +177,7 @@ InitArchiveFmt_Tar(ArchiveHandle *AH)
 			ctx->tarFH = fopen(AH->fSpec, PG_BINARY_W);
 			if (ctx->tarFH == NULL)
 				exit_horribly(modulename,
-							  "could not open TOC file \"%s\" for output: %s\n",
+						   "could not open TOC file \"%s\" for output: %s\n",
 							  AH->fSpec, strerror(errno));
 		}
 		else
@@ -213,7 +213,7 @@ InitArchiveFmt_Tar(ArchiveHandle *AH)
 		 */
 		if (AH->compression != 0)
 			exit_horribly(modulename,
-						  "compression is not supported by tar archive format\n");
+					 "compression is not supported by tar archive format\n");
 	}
 	else
 	{							/* Read Mode */
@@ -585,7 +585,7 @@ tarWrite(const void *buf, size_t len, TAR_MEMBER *th)
 
 	if (res != len)
 		exit_horribly(modulename,
-					  "could not write to output file: %s\n", strerror(errno));
+					"could not write to output file: %s\n", strerror(errno));
 
 	th->pos += res;
 	return res;
@@ -817,6 +817,7 @@ _CloseArchive(ArchiveHandle *AH)
 	lclContext *ctx = (lclContext *) AH->formatData;
 	TAR_MEMBER *th;
 	RestoreOptions *ropt;
+	RestoreOptions *savRopt;
 	int			savVerbose,
 				i;
 
@@ -860,16 +861,21 @@ _CloseArchive(ArchiveHandle *AH)
 		ctx->scriptTH = th;
 
 		ropt = NewRestoreOptions();
+		memcpy(ropt, AH->ropt, sizeof(RestoreOptions));
 		ropt->dropSchema = 1;
 		ropt->compression = 0;
 		ropt->superuser = NULL;
 		ropt->suppressDumpWarnings = true;
 
+		savRopt = AH->ropt;
+		AH->ropt = ropt;
+
 		savVerbose = AH->public.verbose;
 		AH->public.verbose = 0;
 
-		RestoreArchive((Archive *) AH, ropt);
+		RestoreArchive((Archive *) AH);
 
+		AH->ropt = savRopt;
 		AH->public.verbose = savVerbose;
 
 		tarClose(AH, th);
@@ -1176,7 +1182,7 @@ _tarPositionTo(ArchiveHandle *AH, const char *filename)
 		ahlog(AH, 4, "skipping tar member %s\n", th->targetFile);
 
 		id = atoi(th->targetFile);
-		if ((TocIDRequired(AH, id, AH->ropt) & REQ_DATA) != 0)
+		if ((TocIDRequired(AH, id) & REQ_DATA) != 0)
 			exit_horribly(modulename, "restoring data out of order is not supported in this archive format: "
 						  "\"%s\" is required, but comes before \"%s\" in the archive file.\n",
 						  th->targetFile, filename);
@@ -1224,7 +1230,7 @@ _tarGetHeader(ArchiveHandle *AH, TAR_MEMBER *th)
 			snprintf(buf2, sizeof(buf2), INT64_FORMAT, (int64) ftello(ctx->tarFHpos));
 			exit_horribly(modulename,
 			  "mismatch in actual vs. predicted file position (%s vs. %s)\n",
-						 buf1, buf2);
+						  buf1, buf2);
 		}
 #endif
 
@@ -1239,7 +1245,7 @@ _tarGetHeader(ArchiveHandle *AH, TAR_MEMBER *th)
 		if (len != 512)
 			exit_horribly(modulename,
 						  ngettext("incomplete tar header found (%lu byte)\n",
-								   "incomplete tar header found (%lu bytes)\n",
+								 "incomplete tar header found (%lu bytes)\n",
 								   len),
 						  (unsigned long) len);
 

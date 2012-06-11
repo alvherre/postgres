@@ -129,7 +129,7 @@ PostgreSQL documentation
         <literal>stdout</literal>.
        </para>
        <para>
-        This parameter is required.
+        This option is required.
        </para>
       </listitem>
      </varlistentry>
@@ -186,8 +186,8 @@ PostgreSQL documentation
      </varlistentry>
 
      <varlistentry>
-      <term><option>-x <replaceable class="parameter">method</replaceable></option></term>
-      <term><option>--xlog=<replaceable class="parameter">method</replaceable></option></term>
+      <term><option>-X <replaceable class="parameter">method</replaceable></option></term>
+      <term><option>--xlog-method=<replaceable class="parameter">method</replaceable></option></term>
       <listitem>
        <para>
         Includes the required transaction log files (WAL files) in the
@@ -233,6 +233,17 @@ PostgreSQL documentation
           </listitem>
          </varlistentry>
         </variablelist>
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-x</option></term>
+      <term><option>--xlog</option></term>
+      <listitem>
+       <para>
+        Using this option is equivalent of using <literal>-X</literal> with
+        method <literal>fetch</literal>.
        </para>
       </listitem>
      </varlistentry>
@@ -338,8 +349,8 @@ PostgreSQL documentation
         Specifies the number of seconds between status packets sent back to the
         server. This is required when streaming the transaction log (using
         <literal>--xlog=stream</literal>) if replication timeout is configured
-        on the server, and allows for easier monitoring. The default value is
-        10 seconds.
+        on the server, and allows for easier monitoring. A value of zero disables
+        the status updates completely. The default value is 10 seconds.
        </para>
       </listitem>
      </varlistentry>
@@ -420,7 +431,7 @@ PostgreSQL documentation
    </para>
 
    <para>
-    Other, less commonly used, parameters are also available:
+    Other, less commonly used, options are also available:
 
     <variablelist>
      <varlistentry>

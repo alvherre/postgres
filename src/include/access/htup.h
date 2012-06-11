@@ -644,8 +644,8 @@ typedef HeapTupleData *HeapTuple;
 /* 0x20 is free, was XLOG_HEAP2_CLEAN_MOVE */
 #define XLOG_HEAP2_CLEANUP_INFO 0x30
 #define XLOG_HEAP2_VISIBLE		0x40
-#define XLOG_HEAP2_MULTI_INSERT	0x50
-#define XLOG_HEAP2_LOCK_UPDATED	0x60
+#define XLOG_HEAP2_MULTI_INSERT 0x50
+#define XLOG_HEAP2_LOCK_UPDATED 0x60
 
 /*
  * All what we need to find changed tuple
@@ -710,7 +710,7 @@ typedef struct xl_heap_insert
 typedef struct xl_heap_multi_insert
 {
 	RelFileNode node;
-	BlockNumber	blkno;
+	BlockNumber blkno;
 	bool		all_visible_cleared;
 	uint16		ntuples;
 	OffsetNumber offsets[1];
@@ -722,7 +722,7 @@ typedef struct xl_heap_multi_insert
 
 typedef struct xl_multi_insert_tuple
 {
-	uint16		datalen;				/* size of tuple data that follows */
+	uint16		datalen;		/* size of tuple data that follows */
 	uint16		t_infomask2;
 	uint16		t_infomask;
 	uint8		t_hoff;

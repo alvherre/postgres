@@ -72,6 +72,8 @@ pg_archivecleanup:  keep WAL file "archive/000000010000003700000010" and later
 pg_archivecleanup:  removing file "archive/00000001000000370000000F"
 pg_archivecleanup:  removing file "archive/00000001000000370000000E"
 </programlisting>
+  </para>
+  <para>
    <application>pg_archivecleanup</application> assumes that
    <replaceable>archivelocation</> is a directory readable and writable by the
    server-owning user.
@@ -112,7 +114,12 @@ pg_archivecleanup:  removing file "archive/00000001000000370000000E"
         that will be stripped from all file names before deciding if they
         should be deleted.  This is typically useful for cleaning up archives
         that have been compressed during storage, and therefore have had an
-        extension added by the compression program.  Note that the
+        extension added by the compression program.  For example: <literal>-x
+        .gz</literal>.
+       </para>
+
+       <para>
+        Note that the
         <filename>.backup</> file name passed to the program should not
         include the extension.
        </para>

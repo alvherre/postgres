@@ -384,7 +384,7 @@ DROP TABLE tmp2;
 -- NOT VALID with plan invalidation -- ensure we don't use a constraint for
 -- exclusion until validated
 set constraint_exclusion TO 'partition';
-create table nv_parent (d date); 
+create table nv_parent (d date);
 create table nv_child_2010 () inherits (nv_parent);
 create table nv_child_2011 () inherits (nv_parent);
 alter table nv_child_2010 add check (d between '2010-01-01'::date and '2010-12-31'::date) not valid;
@@ -1673,7 +1673,8 @@ select f3,max(f1) from foo group by f3;
 
 -- Simple tests for alter table column type
 alter table foo alter f1 TYPE integer; -- fails
-ERROR:  column "f1" cannot be cast to type integer
+ERROR:  column "f1" cannot be cast automatically to type integer
+HINT:  Specify a USING expression to perform the conversion.
 alter table foo alter f1 TYPE varchar(10);
 create table anothertab (atcol1 serial8, atcol2 boolean,
 	constraint anothertab_chk check (atcol1 <= 3));
@@ -1688,7 +1689,8 @@ select * from anothertab;
 (2 rows)
 
 alter table anothertab alter column atcol1 type boolean; -- fails
-ERROR:  column "atcol1" cannot be cast to type boolean
+ERROR:  column "atcol1" cannot be cast automatically to type boolean
+HINT:  Specify a USING expression to perform the conversion.
 alter table anothertab alter column atcol1 type integer;
 select * from anothertab;
  atcol1 | atcol2 
@@ -1723,7 +1725,7 @@ select * from anothertab;
 
 alter table anothertab alter column atcol1 type boolean
         using case when atcol1 % 2 = 0 then true else false end; -- fails
-ERROR:  default for column "atcol1" cannot be cast to type boolean
+ERROR:  default for column "atcol1" cannot be cast automatically to type boolean
 alter table anothertab alter column atcol1 drop default;
 alter table anothertab alter column atcol1 type boolean
         using case when atcol1 % 2 = 0 then true else false end; -- fails
@@ -1968,7 +1970,7 @@ create view alter1.v1 as select * from alter1.t1;
 create function alter1.plus1(int) returns int as 'select $1+1' language sql;
 create domain alter1.posint integer check (value > 0);
 create type alter1.ctype as (f1 int, f2 text);
-create function alter1.same(alter1.ctype, alter1.ctype) returns boolean language sql 
+create function alter1.same(alter1.ctype, alter1.ctype) returns boolean language sql
 as 'select $1.f1 is not distinct from $2.f1 and $1.f2 is not distinct from $2.f2';
 create operator alter1.=(procedure = alter1.same, leftarg  = alter1.ctype, rightarg = alter1.ctype);
 create operator class alter1.ctype_hash_ops default for type alter1.ctype using hash as

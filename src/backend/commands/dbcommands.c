@@ -698,8 +698,8 @@ check_encoding_locale_matches(int encoding, const char *collate, const char *cty
 				 errmsg("encoding \"%s\" does not match locale \"%s\"",
 						pg_encoding_to_char(encoding),
 						ctype),
-			   errdetail("The chosen LC_CTYPE setting requires encoding \"%s\".",
-						 pg_encoding_to_char(ctype_encoding))));
+		   errdetail("The chosen LC_CTYPE setting requires encoding \"%s\".",
+					 pg_encoding_to_char(ctype_encoding))));
 
 	if (!(collate_encoding == encoding ||
 		  collate_encoding == PG_SQL_ASCII ||
@@ -713,8 +713,8 @@ check_encoding_locale_matches(int encoding, const char *collate, const char *cty
 				 errmsg("encoding \"%s\" does not match locale \"%s\"",
 						pg_encoding_to_char(encoding),
 						collate),
-			 errdetail("The chosen LC_COLLATE setting requires encoding \"%s\".",
-					   pg_encoding_to_char(collate_encoding))));
+		 errdetail("The chosen LC_COLLATE setting requires encoding \"%s\".",
+				   pg_encoding_to_char(collate_encoding))));
 }
 
 /* Error cleanup callback for createdb */
@@ -787,7 +787,8 @@ dropdb(const char *dbname, bool missing_ok)
 	/* DROP hook for the database being removed */
 	if (object_access_hook)
 	{
-		ObjectAccessDrop    drop_arg;
+		ObjectAccessDrop drop_arg;
+
 		memset(&drop_arg, 0, sizeof(ObjectAccessDrop));
 		InvokeObjectAccessHook(OAT_DROP,
 							   DatabaseRelationId, db_id, 0, &drop_arg);
@@ -834,8 +835,7 @@ dropdb(const char *dbname, bool missing_ok)
 	ReleaseSysCache(tup);
 
 	/*
-	 * Delete any comments or security labels associated with
-	 * the database.
+	 * Delete any comments or security labels associated with the database.
 	 */
 	DeleteSharedComments(db_id, DatabaseRelationId);
 	DeleteSharedSecurityLabel(db_id, DatabaseRelationId);
@@ -863,18 +863,18 @@ dropdb(const char *dbname, bool missing_ok)
 	pgstat_drop_database(db_id);
 
 	/*
-	 * Tell checkpointer to forget any pending fsync and unlink requests for files
-	 * in the database; else the fsyncs will fail at next checkpoint, or
+	 * Tell checkpointer to forget any pending fsync and unlink requests for
+	 * files in the database; else the fsyncs will fail at next checkpoint, or
 	 * worse, it will delete files that belong to a newly created database
 	 * with the same OID.
 	 */
 	ForgetDatabaseFsyncRequests(db_id);
 
 	/*
-	 * Force a checkpoint to make sure the checkpointer has received the message
-	 * sent by ForgetDatabaseFsyncRequests. On Windows, this also ensures that
-	 * background procs don't hold any open files, which would cause rmdir() to
-	 * fail.
+	 * Force a checkpoint to make sure the checkpointer has received the
+	 * message sent by ForgetDatabaseFsyncRequests. On Windows, this also
+	 * ensures that background procs don't hold any open files, which would
+	 * cause rmdir() to fail.
 	 */
 	RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
 

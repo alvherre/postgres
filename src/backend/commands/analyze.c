@@ -97,11 +97,11 @@ static void compute_index_stats(Relation onerel, double totalrows,
 					MemoryContext col_context);
 static VacAttrStats *examine_attribute(Relation onerel, int attnum,
 				  Node *index_expr);
-static int	acquire_sample_rows(Relation onerel, int elevel,
+static int acquire_sample_rows(Relation onerel, int elevel,
 					HeapTuple *rows, int targrows,
 					double *totalrows, double *totaldeadrows);
 static int	compare_rows(const void *a, const void *b);
-static int	acquire_inherited_sample_rows(Relation onerel, int elevel,
+static int acquire_inherited_sample_rows(Relation onerel, int elevel,
 							  HeapTuple *rows, int targrows,
 							  double *totalrows, double *totaldeadrows);
 static void update_attstats(Oid relid, bool inh,
@@ -119,7 +119,7 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 	Relation	onerel;
 	int			elevel;
 	AcquireSampleRowsFunc acquirefunc = NULL;
-	BlockNumber	relpages = 0;
+	BlockNumber relpages = 0;
 
 	/* Select logging level */
 	if (vacstmt->options & VACOPT_VERBOSE)
@@ -206,8 +206,8 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 	}
 
 	/*
-	 * Check that it's a plain table or foreign table; we used to do this
-	 * in get_rel_oids() but seems safer to check after we've locked the
+	 * Check that it's a plain table or foreign table; we used to do this in
+	 * get_rel_oids() but seems safer to check after we've locked the
 	 * relation.
 	 */
 	if (onerel->rd_rel->relkind == RELKIND_RELATION)
@@ -236,8 +236,8 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 		if (!ok)
 		{
 			ereport(WARNING,
-					(errmsg("skipping \"%s\" --- cannot analyze this foreign table",
-							RelationGetRelationName(onerel))));
+			 (errmsg("skipping \"%s\" --- cannot analyze this foreign table",
+					 RelationGetRelationName(onerel))));
 			relation_close(onerel, ShareUpdateExclusiveLock);
 			return;
 		}
@@ -280,7 +280,7 @@ analyze_rel(Oid relid, VacuumStmt *vacstmt, BufferAccessStrategy bstrategy)
 	relation_close(onerel, NoLock);
 
 	/*
-	 * Reset my PGPROC flag.  Note: we need this here, and not in vacuum_rel,
+	 * Reset my PGXACT flag.  Note: we need this here, and not in vacuum_rel,
 	 * because the vacuum flag is cleared by the end-of-xact code.
 	 */
 	LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
@@ -465,8 +465,8 @@ do_analyze_rel(Relation onerel, VacuumStmt *vacstmt,
 	/*
 	 * Determine how many rows we need to sample, using the worst case from
 	 * all analyzable columns.	We use a lower bound of 100 rows to avoid
-	 * possible overflow in Vitter's algorithm.  (Note: that will also be
-	 * the target in the corner case where there are no analyzable columns.)
+	 * possible overflow in Vitter's algorithm.  (Note: that will also be the
+	 * target in the corner case where there are no analyzable columns.)
 	 */
 	targrows = 100;
 	for (i = 0; i < attr_cnt; i++)
@@ -1340,7 +1340,7 @@ anl_get_next_S(double t, int n, double *stateptr)
 		double		V,
 					quot;
 
-		V = anl_random_fract();		/* Generate V */
+		V = anl_random_fract(); /* Generate V */
 		S = 0;
 		t += 1;
 		/* Note: "num" in Vitter's code is always equal to t - n */
@@ -1401,7 +1401,7 @@ anl_get_next_S(double t, int n, double *stateptr)
 				y *= numer / denom;
 				denom -= 1;
 			}
-			W = exp(-log(anl_random_fract()) / n);	/* Generate W in advance */
+			W = exp(-log(anl_random_fract()) / n);		/* Generate W in advance */
 			if (exp(log(y) / n) <= (t + X) / t)
 				break;
 		}

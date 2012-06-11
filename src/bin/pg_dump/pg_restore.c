@@ -274,7 +274,7 @@ main(int argc, char **argv)
 				break;
 
 			case 3:				/* section */
-				set_section(optarg, &(opts->dumpSections));
+				set_dump_section(optarg, &(opts->dumpSections));
 				break;
 
 			default:
@@ -297,30 +297,6 @@ main(int argc, char **argv)
 		fprintf(stderr, _("Try \"%s --help\" for more information.\n"),
 				progname);
 		exit_nicely(1);
-	}
-
-	if (opts->dataOnly && opts->schemaOnly)
-	{
-		fprintf(stderr, _("%s: options -s/--schema-only and -a/--data-only cannot be used together\n"),
-			progname);
-		exit_nicely(1);
-	}
-
-	if ((opts->dataOnly || opts->schemaOnly) && (opts->dumpSections != DUMP_UNSECTIONED))
-	{
-		fprintf(stderr, _("%s: options -s/--schema-only and -a/--data-only cannot be used with --section\n"),
-			progname);
-		exit_nicely(1);
-	}
-
-	if (opts->dataOnly)
-		opts->dumpSections = DUMP_DATA;
-	else if (opts->schemaOnly)
-		opts->dumpSections = DUMP_PRE_DATA | DUMP_POST_DATA;
-	else if ( opts->dumpSections != DUMP_UNSECTIONED)
-	{
-		opts->dataOnly = opts->dumpSections == DUMP_DATA;
-		opts->schemaOnly = !(opts->dumpSections & DUMP_DATA);
 	}
 
 	/* Should get at most one of -d and -f, else user is confused */
@@ -396,19 +372,14 @@ main(int argc, char **argv)
 
 	if (opts->tocFile)
 		SortTocFromFile(AH, opts);
-	else if (opts->noDataForFailedTables)
-	{
-		/*
-		 * we implement this option by clearing idWanted entries, so must
-		 * create a dummy idWanted array if there wasn't a tocFile
-		 */
-		InitDummyWantedList(AH, opts);
-	}
 
 	if (opts->tocSummary)
 		PrintTOCSummary(AH, opts);
 	else
-		RestoreArchive(AH, opts);
+	{
+		SetArchiveRestoreOptions(AH, opts);
+		RestoreArchive(AH);
+	}
 
 	/* done, print a summary of ignored errors */
 	if (AH->n_errors)
@@ -440,35 +411,32 @@ usage(const char *progname)
 	printf(_("  --version                output version information, then exit\n"));
 
 	printf(_("\nOptions controlling the restore:\n"));
-	printf(_("  -a, --data-only          restore only the data, no schema\n"));
-	printf(_("  -c, --clean              clean (drop) database objects before recreating\n"));
-	printf(_("  -C, --create             create the target database\n"));
-	printf(_("  -e, --exit-on-error      exit on error, default is to continue\n"));
-	printf(_("  -I, --index=NAME         restore named index\n"));
-	printf(_("  -j, --jobs=NUM           use this many parallel jobs to restore\n"));
-	printf(_("  -L, --use-list=FILENAME  use table of contents from this file for\n"
-			 "                           selecting/ordering output\n"));
-	printf(_("  -n, --schema=NAME        restore only objects in this schema\n"));
-	printf(_("  -O, --no-owner           skip restoration of object ownership\n"));
-	printf(_("  -P, --function=NAME(args)\n"
-			 "                           restore named function\n"));
-	printf(_("  -s, --schema-only        restore only the schema, no data\n"));
-	printf(_("  -S, --superuser=NAME     superuser user name to use for disabling triggers\n"));
-	printf(_("  -t, --table=NAME         restore named table\n"));
-	printf(_("  -T, --trigger=NAME       restore named trigger\n"));
-	printf(_("  -x, --no-privileges      skip restoration of access privileges (grant/revoke)\n"));
-	printf(_("  -1, --single-transaction\n"
-			 "                           restore as a single transaction\n"));
-	printf(_("  --disable-triggers       disable triggers during data-only restore\n"));
-	printf(_("  --no-data-for-failed-tables\n"
-			 "                           do not restore data of tables that could not be\n"
-			 "                           created\n"));
-	printf(_("  --no-security-labels     do not restore security labels\n"));
-	printf(_("  --no-tablespaces         do not restore tablespace assignments\n"));
-	printf(_("  --section=SECTION        restore named section (pre-data, data, or post-data)\n"));
+	printf(_("  -a, --data-only              restore only the data, no schema\n"));
+	printf(_("  -c, --clean                  clean (drop) database objects before recreating\n"));
+	printf(_("  -C, --create                 create the target database\n"));
+	printf(_("  -e, --exit-on-error          exit on error, default is to continue\n"));
+	printf(_("  -I, --index=NAME             restore named index\n"));
+	printf(_("  -j, --jobs=NUM               use this many parallel jobs to restore\n"));
+	printf(_("  -L, --use-list=FILENAME      use table of contents from this file for\n"
+			 "                               selecting/ordering output\n"));
+	printf(_("  -n, --schema=NAME            restore only objects in this schema\n"));
+	printf(_("  -O, --no-owner               skip restoration of object ownership\n"));
+	printf(_("  -P, --function=NAME(args)    restore named function\n"));
+	printf(_("  -s, --schema-only            restore only the schema, no data\n"));
+	printf(_("  -S, --superuser=NAME         superuser user name to use for disabling triggers\n"));
+	printf(_("  -t, --table=NAME             restore named table\n"));
+	printf(_("  -T, --trigger=NAME           restore named trigger\n"));
+	printf(_("  -x, --no-privileges          skip restoration of access privileges (grant/revoke)\n"));
+	printf(_("  -1, --single-transaction     restore as a single transaction\n"));
+	printf(_("  --disable-triggers           disable triggers during data-only restore\n"));
+	printf(_("  --no-data-for-failed-tables  do not restore data of tables that could not be\n"
+			 "                               created\n"));
+	printf(_("  --no-security-labels         do not restore security labels\n"));
+	printf(_("  --no-tablespaces             do not restore tablespace assignments\n"));
+	printf(_("  --section=SECTION            restore named section (pre-data, data, or post-data)\n"));
 	printf(_("  --use-set-session-authorization\n"
-			 "                           use SET SESSION AUTHORIZATION commands instead of\n"
-	  "                           ALTER OWNER commands to set ownership\n"));
+			 "                               use SET SESSION AUTHORIZATION commands instead of\n"
+			 "                               ALTER OWNER commands to set ownership\n"));
 
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME      database server host or socket directory\n"));

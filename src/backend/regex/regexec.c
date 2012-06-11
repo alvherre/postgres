@@ -531,9 +531,14 @@ zaptreesubs(struct vars * v,
 {
 	if (t->op == '(')
 	{
-		assert(t->subno > 0);
-		v->pmatch[t->subno].rm_so = -1;
-		v->pmatch[t->subno].rm_eo = -1;
+		int			n = t->subno;
+
+		assert(n > 0);
+		if ((size_t) n < v->nmatch)
+		{
+			v->pmatch[n].rm_so = -1;
+			v->pmatch[n].rm_eo = -1;
+		}
 	}
 
 	if (t->left != NULL)
@@ -543,7 +548,7 @@ zaptreesubs(struct vars * v,
 }
 
 /*
- * subset - set any subexpression relevant to a successful subre
+ * subset - set subexpression match data for a successful subre
  */
 static void
 subset(struct vars * v,
@@ -943,7 +948,7 @@ citerdissect(struct vars * v,
 	}
 
 	/*
-	 * We need workspace to track the endpoints of each sub-match.  Normally
+	 * We need workspace to track the endpoints of each sub-match.	Normally
 	 * we consider only nonzero-length sub-matches, so there can be at most
 	 * end-begin of them.  However, if min is larger than that, we will also
 	 * consider zero-length sub-matches in order to find enough matches.
@@ -972,8 +977,8 @@ citerdissect(struct vars * v,
 	/*
 	 * Our strategy is to first find a set of sub-match endpoints that are
 	 * valid according to the child node's DFA, and then recursively dissect
-	 * each sub-match to confirm validity.  If any validity check fails,
-	 * backtrack the last sub-match and try again.  And, when we next try for
+	 * each sub-match to confirm validity.	If any validity check fails,
+	 * backtrack the last sub-match and try again.	And, when we next try for
 	 * a validity check, we need not recheck any successfully verified
 	 * sub-matches that we didn't move the endpoints of.  nverified remembers
 	 * how many sub-matches are currently known okay.
@@ -1023,10 +1028,10 @@ citerdissect(struct vars * v,
 		}
 
 		/*
-		 * We've identified a way to divide the string into k sub-matches
-		 * that works so far as the child DFA can tell.  If k is an allowed
-		 * number of matches, start the slow part: recurse to verify each
-		 * sub-match.  We always have k <= max_matches, needn't check that.
+		 * We've identified a way to divide the string into k sub-matches that
+		 * works so far as the child DFA can tell.	If k is an allowed number
+		 * of matches, start the slow part: recurse to verify each sub-match.
+		 * We always have k <= max_matches, needn't check that.
 		 */
 		if (k < min_matches)
 			goto backtrack;
@@ -1060,13 +1065,14 @@ citerdissect(struct vars * v,
 		/* match failed to verify, so backtrack */
 
 backtrack:
+
 		/*
 		 * Must consider shorter versions of the current sub-match.  However,
 		 * we'll only ask for a zero-length match if necessary.
 		 */
 		while (k > 0)
 		{
-			chr	   *prev_end = endpts[k - 1];
+			chr		   *prev_end = endpts[k - 1];
 
 			if (endpts[k] > prev_end)
 			{
@@ -1127,7 +1133,7 @@ creviterdissect(struct vars * v,
 	}
 
 	/*
-	 * We need workspace to track the endpoints of each sub-match.  Normally
+	 * We need workspace to track the endpoints of each sub-match.	Normally
 	 * we consider only nonzero-length sub-matches, so there can be at most
 	 * end-begin of them.  However, if min is larger than that, we will also
 	 * consider zero-length sub-matches in order to find enough matches.
@@ -1156,8 +1162,8 @@ creviterdissect(struct vars * v,
 	/*
 	 * Our strategy is to first find a set of sub-match endpoints that are
 	 * valid according to the child node's DFA, and then recursively dissect
-	 * each sub-match to confirm validity.  If any validity check fails,
-	 * backtrack the last sub-match and try again.  And, when we next try for
+	 * each sub-match to confirm validity.	If any validity check fails,
+	 * backtrack the last sub-match and try again.	And, when we next try for
 	 * a validity check, we need not recheck any successfully verified
 	 * sub-matches that we didn't move the endpoints of.  nverified remembers
 	 * how many sub-matches are currently known okay.
@@ -1209,10 +1215,10 @@ creviterdissect(struct vars * v,
 		}
 
 		/*
-		 * We've identified a way to divide the string into k sub-matches
-		 * that works so far as the child DFA can tell.  If k is an allowed
-		 * number of matches, start the slow part: recurse to verify each
-		 * sub-match.  We always have k <= max_matches, needn't check that.
+		 * We've identified a way to divide the string into k sub-matches that
+		 * works so far as the child DFA can tell.	If k is an allowed number
+		 * of matches, start the slow part: recurse to verify each sub-match.
+		 * We always have k <= max_matches, needn't check that.
 		 */
 		if (k < min_matches)
 			goto backtrack;
@@ -1246,6 +1252,7 @@ creviterdissect(struct vars * v,
 		/* match failed to verify, so backtrack */
 
 backtrack:
+
 		/*
 		 * Must consider longer versions of the current sub-match.
 		 */

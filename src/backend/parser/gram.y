@@ -12544,6 +12544,7 @@ col_name_keyword:
 type_func_name_keyword:
 			  AUTHORIZATION
 			| BINARY
+			| COLLATION
 			| CONCURRENTLY
 			| CROSS
 			| CURRENT_SCHEMA
@@ -12587,7 +12588,6 @@ reserved_keyword:
 			| CAST
 			| CHECK
 			| COLLATE
-			| COLLATION
 			| COLUMN
 			| CONSTRAINT
 			| CREATE

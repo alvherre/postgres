@@ -90,7 +90,7 @@ bool		g_verbose;			/* User wants verbose narration of our
 /* various user-settable parameters */
 bool		schemaOnly;
 bool		dataOnly;
-int         dumpSections; /* bitmask of chosen sections */
+int			dumpSections;		/* bitmask of chosen sections */
 bool		aclsSkip;
 const char *lockWaitTimeout;
 
@@ -128,10 +128,6 @@ char		g_comment_start[10];
 char		g_comment_end[10];
 
 static const CatalogId nilCatalogId = {0, 0};
-
-/* these are to avoid passing around info for findNamespace() */
-static NamespaceInfo *g_namespaces;
-static int	g_numNamespaces;
 
 /* flags for various command-line long options */
 static int	binary_upgrade = 0;
@@ -225,9 +221,9 @@ static char *format_function_arguments_old(Archive *fout,
 							  char **argmodes,
 							  char **argnames);
 static char *format_function_signature(Archive *fout,
-									   FuncInfo *finfo, bool honor_quotes);
+						  FuncInfo *finfo, bool honor_quotes);
 static const char *convertRegProcReference(Archive *fout,
-										   const char *proc);
+						const char *proc);
 static const char *convertOperatorReference(Archive *fout, const char *opr);
 static const char *convertTSFunction(Archive *fout, Oid funcOid);
 static Oid	findLastBuiltinOid_V71(Archive *fout, const char *);
@@ -236,7 +232,7 @@ static void selectSourceSchema(Archive *fout, const char *schemaName);
 static char *getFormattedTypeName(Archive *fout, Oid oid, OidOptions opts);
 static char *myFormatType(const char *typname, int32 typmod);
 static const char *fmtQualifiedId(Archive *fout,
-								  const char *schema, const char *id);
+			   const char *schema, const char *id);
 static void getBlobs(Archive *fout);
 static void dumpBlob(Archive *fout, BlobInfo *binfo);
 static int	dumpBlobs(Archive *fout, void *arg);
@@ -256,6 +252,7 @@ static void binary_upgrade_extension_member(PQExpBuffer upgrade_buffer,
 static const char *getAttrName(int attrnum, TableInfo *tblInfo);
 static const char *fmtCopyColumnList(const TableInfo *ti);
 static PGresult *ExecuteSqlQueryForSingleRow(Archive *fout, char *query);
+
 
 int
 main(int argc, char **argv)
@@ -288,7 +285,7 @@ main(int argc, char **argv)
 	RestoreOptions *ropt;
 	ArchiveFormat archiveFormat = archUnknown;
 	ArchiveMode archiveMode;
-	Archive    *fout;				/* the script file */
+	Archive    *fout;			/* the script file */
 
 	static int	disable_triggers = 0;
 	static int	outputNoTablespaces = 0;
@@ -498,12 +495,12 @@ main(int argc, char **argv)
 				use_role = optarg;
 				break;
 
-			case 4:			/* exclude table(s) data */
+			case 4:				/* exclude table(s) data */
 				simple_string_list_append(&tabledata_exclude_patterns, optarg);
 				break;
 
 			case 5:				/* section */
-				set_section(optarg, &dumpSections);
+				set_dump_section(optarg, &dumpSections);
 				break;
 
 			default:
@@ -532,19 +529,6 @@ main(int argc, char **argv)
 
 	if (dataOnly && schemaOnly)
 		exit_horribly(NULL, "options -s/--schema-only and -a/--data-only cannot be used together\n");
-
-	if ((dataOnly || schemaOnly) && dumpSections != DUMP_UNSECTIONED)
-		exit_horribly(NULL, "options -s/--schema-only and -a/--data-only cannot be used with --section\n");
-
-	if (dataOnly)
-		dumpSections = DUMP_DATA;
-	else if (schemaOnly)
-		dumpSections = DUMP_PRE_DATA | DUMP_POST_DATA;
-	else if ( dumpSections != DUMP_UNSECTIONED)
-	{
-		dataOnly = dumpSections == DUMP_DATA;
-		schemaOnly = !(dumpSections & DUMP_DATA);
-	}
 
 	if (dataOnly && outputClean)
 		exit_horribly(NULL, "options -c/--clean and -a/--data-only cannot be used together\n");
@@ -621,7 +605,7 @@ main(int argc, char **argv)
 								"SERIALIZABLE, READ ONLY, DEFERRABLE");
 		else
 			ExecuteSqlStatement(fout,
-						   		"SET TRANSACTION ISOLATION LEVEL "
+								"SET TRANSACTION ISOLATION LEVEL "
 								"REPEATABLE READ");
 	}
 	else
@@ -641,7 +625,7 @@ main(int argc, char **argv)
 	{
 		if (fout->remoteVersion >= 70100)
 			g_last_builtin_oid = findLastBuiltinOid_V71(fout,
-				PQdb(GetConnection(fout)));
+												  PQdb(GetConnection(fout)));
 		else
 			g_last_builtin_oid = findLastBuiltinOid_V70(fout);
 		if (g_verbose)
@@ -743,31 +727,40 @@ main(int argc, char **argv)
 		dumpDumpableObject(fout, dobjs[i]);
 
 	/*
+	 * Set up options info to ensure we dump what we want.
+	 */
+	ropt = NewRestoreOptions();
+	ropt->filename = filename;
+	ropt->dropSchema = outputClean;
+	ropt->dataOnly = dataOnly;
+	ropt->schemaOnly = schemaOnly;
+	ropt->dumpSections = dumpSections;
+	ropt->aclsSkip = aclsSkip;
+	ropt->superuser = outputSuperuser;
+	ropt->createDB = outputCreateDB;
+	ropt->noOwner = outputNoOwner;
+	ropt->noTablespace = outputNoTablespaces;
+	ropt->disable_triggers = disable_triggers;
+	ropt->use_setsessauth = use_setsessauth;
+
+	if (compressLevel == -1)
+		ropt->compression = 0;
+	else
+		ropt->compression = compressLevel;
+
+	ropt->suppressDumpWarnings = true;	/* We've already shown them */
+
+	SetArchiveRestoreOptions(fout, ropt);
+
+	/*
 	 * And finally we can do the actual output.
+	 *
+	 * Note: for non-plain-text output formats, the output file is written
+	 * inside CloseArchive().  This is, um, bizarre; but not worth changing
+	 * right now.
 	 */
 	if (plainText)
-	{
-		ropt = NewRestoreOptions();
-		ropt->filename = filename;
-		ropt->dropSchema = outputClean;
-		ropt->aclsSkip = aclsSkip;
-		ropt->superuser = outputSuperuser;
-		ropt->createDB = outputCreateDB;
-		ropt->noOwner = outputNoOwner;
-		ropt->noTablespace = outputNoTablespaces;
-		ropt->disable_triggers = disable_triggers;
-		ropt->use_setsessauth = use_setsessauth;
-		ropt->dataOnly = dataOnly;
-
-		if (compressLevel == -1)
-			ropt->compression = 0;
-		else
-			ropt->compression = compressLevel;
-
-		ropt->suppressDumpWarnings = true;		/* We've already shown them */
-
-		RestoreArchive(fout, ropt);
-	}
+		RestoreArchive(fout);
 
 	CloseArchive(fout);
 
@@ -783,46 +776,46 @@ help(const char *progname)
 	printf(_("  %s [OPTION]... [DBNAME]\n"), progname);
 
 	printf(_("\nGeneral options:\n"));
-	printf(_("  -f, --file=FILENAME         output file or directory name\n"));
-	printf(_("  -F, --format=c|d|t|p        output file format (custom, directory, tar,\n"
-			 "                              plain text (default))\n"));
-	printf(_("  -v, --verbose               verbose mode\n"));
-	printf(_("  -Z, --compress=0-9          compression level for compressed formats\n"));
-	printf(_("  --lock-wait-timeout=TIMEOUT fail after waiting TIMEOUT for a table lock\n"));
-	printf(_("  --help                      show this help, then exit\n"));
-	printf(_("  --version                   output version information, then exit\n"));
+	printf(_("  -f, --file=FILENAME          output file or directory name\n"));
+	printf(_("  -F, --format=c|d|t|p         output file format (custom, directory, tar,\n"
+			 "                               plain text (default))\n"));
+	printf(_("  -v, --verbose                verbose mode\n"));
+	printf(_("  -Z, --compress=0-9           compression level for compressed formats\n"));
+	printf(_("  --lock-wait-timeout=TIMEOUT  fail after waiting TIMEOUT for a table lock\n"));
+	printf(_("  --help                       show this help, then exit\n"));
+	printf(_("  --version                    output version information, then exit\n"));
 
 	printf(_("\nOptions controlling the output content:\n"));
-	printf(_("  -a, --data-only             dump only the data, not the schema\n"));
-	printf(_("  -b, --blobs                 include large objects in dump\n"));
-	printf(_("  -c, --clean                 clean (drop) database objects before recreating\n"));
-	printf(_("  -C, --create                include commands to create database in dump\n"));
-	printf(_("  -E, --encoding=ENCODING     dump the data in encoding ENCODING\n"));
-	printf(_("  -n, --schema=SCHEMA         dump the named schema(s) only\n"));
-	printf(_("  -N, --exclude-schema=SCHEMA do NOT dump the named schema(s)\n"));
-	printf(_("  -o, --oids                  include OIDs in dump\n"));
-	printf(_("  -O, --no-owner              skip restoration of object ownership in\n"
-			 "                              plain-text format\n"));
-	printf(_("  -s, --schema-only           dump only the schema, no data\n"));
-	printf(_("  -S, --superuser=NAME        superuser user name to use in plain-text format\n"));
-	printf(_("  -t, --table=TABLE           dump the named table(s) only\n"));
-	printf(_("  -T, --exclude-table=TABLE   do NOT dump the named table(s)\n"));
-	printf(_("  -x, --no-privileges         do not dump privileges (grant/revoke)\n"));
-	printf(_("  --binary-upgrade            for use by upgrade utilities only\n"));
-	printf(_("  --column-inserts            dump data as INSERT commands with column names\n"));
-	printf(_("  --disable-dollar-quoting    disable dollar quoting, use SQL standard quoting\n"));
-	printf(_("  --disable-triggers          disable triggers during data-only restore\n"));
-	printf(_("  --exclude-table-data=TABLE  do NOT dump data for the named table(s)\n"));
-	printf(_("  --inserts                   dump data as INSERT commands, rather than COPY\n"));
-	printf(_("  --no-security-labels        do not dump security label assignments\n"));
-	printf(_("  --no-tablespaces            do not dump tablespace assignments\n"));
-	printf(_("  --no-unlogged-table-data    do not dump unlogged table data\n"));
-	printf(_("  --quote-all-identifiers     quote all identifiers, even if not key words\n"));
-	printf(_("  --section=SECTION           dump named section (pre-data, data, or post-data)\n"));
-	printf(_("  --serializable-deferrable   wait until the dump can run without anomalies\n"));
+	printf(_("  -a, --data-only              dump only the data, not the schema\n"));
+	printf(_("  -b, --blobs                  include large objects in dump\n"));
+	printf(_("  -c, --clean                  clean (drop) database objects before recreating\n"));
+	printf(_("  -C, --create                 include commands to create database in dump\n"));
+	printf(_("  -E, --encoding=ENCODING      dump the data in encoding ENCODING\n"));
+	printf(_("  -n, --schema=SCHEMA          dump the named schema(s) only\n"));
+	printf(_("  -N, --exclude-schema=SCHEMA  do NOT dump the named schema(s)\n"));
+	printf(_("  -o, --oids                   include OIDs in dump\n"));
+	printf(_("  -O, --no-owner               skip restoration of object ownership in\n"
+			 "                               plain-text format\n"));
+	printf(_("  -s, --schema-only            dump only the schema, no data\n"));
+	printf(_("  -S, --superuser=NAME         superuser user name to use in plain-text format\n"));
+	printf(_("  -t, --table=TABLE            dump the named table(s) only\n"));
+	printf(_("  -T, --exclude-table=TABLE    do NOT dump the named table(s)\n"));
+	printf(_("  -x, --no-privileges          do not dump privileges (grant/revoke)\n"));
+	printf(_("  --binary-upgrade             for use by upgrade utilities only\n"));
+	printf(_("  --column-inserts             dump data as INSERT commands with column names\n"));
+	printf(_("  --disable-dollar-quoting     disable dollar quoting, use SQL standard quoting\n"));
+	printf(_("  --disable-triggers           disable triggers during data-only restore\n"));
+	printf(_("  --exclude-table-data=TABLE   do NOT dump data for the named table(s)\n"));
+	printf(_("  --inserts                    dump data as INSERT commands, rather than COPY\n"));
+	printf(_("  --no-security-labels         do not dump security label assignments\n"));
+	printf(_("  --no-tablespaces             do not dump tablespace assignments\n"));
+	printf(_("  --no-unlogged-table-data     do not dump unlogged table data\n"));
+	printf(_("  --quote-all-identifiers      quote all identifiers, even if not key words\n"));
+	printf(_("  --section=SECTION            dump named section (pre-data, data, or post-data)\n"));
+	printf(_("  --serializable-deferrable    wait until the dump can run without anomalies\n"));
 	printf(_("  --use-set-session-authorization\n"
-			 "                              use SET SESSION AUTHORIZATION commands instead of\n"
-	"                              ALTER OWNER commands to set ownership\n"));
+			 "                               use SET SESSION AUTHORIZATION commands instead of\n"
+			 "                               ALTER OWNER commands to set ownership\n"));
 
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME      database server host or socket directory\n"));
@@ -1130,6 +1123,7 @@ selectDumpableType(TypeInfo *tyinfo)
 	if (tyinfo->isArray)
 	{
 		tyinfo->dobj.objType = DO_DUMMY_TYPE;
+
 		/*
 		 * Fall through to set the dump flag; we assume that the subsequent
 		 * rules will do the same thing as they would for the array's base
@@ -2595,8 +2589,7 @@ getNamespaces(Archive *fout, int *numNamespaces)
 
 		selectDumpableNamespace(&nsinfo[1]);
 
-		g_namespaces = nsinfo;
-		g_numNamespaces = *numNamespaces = 2;
+		*numNamespaces = 2;
 
 		return nsinfo;
 	}
@@ -2648,8 +2641,7 @@ getNamespaces(Archive *fout, int *numNamespaces)
 	PQclear(res);
 	destroyPQExpBuffer(query);
 
-	g_namespaces = nsinfo;
-	g_numNamespaces = *numNamespaces = ntups;
+	*numNamespaces = ntups;
 
 	return nsinfo;
 }
@@ -2660,35 +2652,34 @@ getNamespaces(Archive *fout, int *numNamespaces)
  *		getNamespaces
  *
  * NB: for pre-7.3 source database, we use object OID to guess whether it's
- * a system object or not.	In 7.3 and later there is no guessing.
+ * a system object or not.	In 7.3 and later there is no guessing, and we
+ * don't use objoid at all.
  */
 static NamespaceInfo *
 findNamespace(Archive *fout, Oid nsoid, Oid objoid)
 {
-	int			i;
+	NamespaceInfo *nsinfo;
 
 	if (fout->remoteVersion >= 70300)
 	{
-		for (i = 0; i < g_numNamespaces; i++)
-		{
-			NamespaceInfo *nsinfo = &g_namespaces[i];
-
-			if (nsoid == nsinfo->dobj.catId.oid)
-				return nsinfo;
-		}
-		exit_horribly(NULL, "schema with OID %u does not exist\n", nsoid);
+		nsinfo = findNamespaceByOid(nsoid);
 	}
 	else
 	{
-		/* This code depends on the layout set up by getNamespaces. */
+		/* This code depends on the dummy objects set up by getNamespaces. */
+		Oid			i;
+
 		if (objoid > g_last_builtin_oid)
 			i = 0;				/* user object */
 		else
 			i = 1;				/* system object */
-		return &g_namespaces[i];
+		nsinfo = findNamespaceByOid(i);
 	}
 
-	return NULL;				/* keep compiler quiet */
+	if (nsinfo == NULL)
+		exit_horribly(NULL, "schema with OID %u does not exist\n", nsoid);
+
+	return nsinfo;
 }
 
 /*
@@ -2948,7 +2939,7 @@ getTypes(Archive *fout, int *numTypes)
 		/*
 		 * If it's a base type, make a DumpableObject representing a shell
 		 * definition of the type.	We will need to dump that ahead of the I/O
-		 * functions for the type.  Similarly, range types need a shell
+		 * functions for the type.	Similarly, range types need a shell
 		 * definition in case they have a canonicalize function.
 		 *
 		 * Note: the shell type doesn't have a catId.  You might think it
@@ -3982,7 +3973,7 @@ getTables(Archive *fout, int *numTables)
 						  "SELECT c.tableoid, c.oid, c.relname, "
 						  "c.relacl, c.relkind, c.relnamespace, "
 						  "(%s c.relowner) AS rolname, "
-						  "c.relchecks, (c.reltriggers <> 0) AS relhastriggers, "
+					  "c.relchecks, (c.reltriggers <> 0) AS relhastriggers, "
 						  "c.relhasindex, c.relhasrules, c.relhasoids, "
 						  "c.relfrozenxid, tc.oid AS toid, "
 						  "tc.relfrozenxid AS tfrozenxid, "
@@ -4288,9 +4279,9 @@ getTables(Archive *fout, int *numTables)
 			resetPQExpBuffer(query);
 			appendPQExpBuffer(query,
 							  "LOCK TABLE %s IN ACCESS SHARE MODE",
-						 fmtQualifiedId(fout,
+							  fmtQualifiedId(fout,
 										tblinfo[i].dobj.namespace->dobj.name,
-										tblinfo[i].dobj.name));
+											 tblinfo[i].dobj.name));
 			ExecuteSqlStatement(fout, query->data);
 		}
 
@@ -4889,7 +4880,7 @@ getDomainConstraints(Archive *fout, TypeInfo *tyinfo)
 
 	for (i = 0; i < ntups; i++)
 	{
-		bool	validated = PQgetvalue(res, i, 4)[0] == 't';
+		bool		validated = PQgetvalue(res, i, 4)[0] == 't';
 
 		constrinfo[i].dobj.objType = DO_CONSTRAINT;
 		constrinfo[i].dobj.catId.tableoid = atooid(PQgetvalue(res, i, i_tableoid));
@@ -4911,7 +4902,7 @@ getDomainConstraints(Archive *fout, TypeInfo *tyinfo)
 
 		/*
 		 * Make the domain depend on the constraint, ensuring it won't be
-		 * output till any constraint dependencies are OK.  If the constraint
+		 * output till any constraint dependencies are OK.	If the constraint
 		 * has not been validated, it's going to be dumped after the domain
 		 * anyway, so this doesn't matter.
 		 */
@@ -5635,11 +5626,11 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				  "pg_catalog.format_type(t.oid,a.atttypmod) AS atttypname, "
 						"array_to_string(a.attoptions, ', ') AS attoptions, "
 							  "CASE WHEN a.attcollation <> t.typcollation "
-							"THEN a.attcollation ELSE 0 END AS attcollation, "
+						   "THEN a.attcollation ELSE 0 END AS attcollation, "
 							  "pg_catalog.array_to_string(ARRAY("
 							  "SELECT pg_catalog.quote_ident(option_name) || "
 							  "' ' || pg_catalog.quote_literal(option_value) "
-							  "FROM pg_catalog.pg_options_to_table(attfdwoptions) "
+						"FROM pg_catalog.pg_options_to_table(attfdwoptions) "
 							  "ORDER BY option_name"
 							  "), E',\n    ') AS attfdwoptions "
 			 "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
@@ -5664,7 +5655,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				  "pg_catalog.format_type(t.oid,a.atttypmod) AS atttypname, "
 						"array_to_string(a.attoptions, ', ') AS attoptions, "
 							  "CASE WHEN a.attcollation <> t.typcollation "
-							"THEN a.attcollation ELSE 0 END AS attcollation, "
+						   "THEN a.attcollation ELSE 0 END AS attcollation, "
 							  "NULL AS attfdwoptions "
 			 "FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_type t "
 							  "ON a.atttypid = t.oid "
@@ -5908,8 +5899,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				/*
 				 * Defaults on a VIEW must always be dumped as separate ALTER
 				 * TABLE commands.	Defaults on regular tables are dumped as
-				 * part of the CREATE TABLE if possible, which it won't be
-				 * if the column is not going to be emitted explicitly.
+				 * part of the CREATE TABLE if possible, which it won't be if
+				 * the column is not going to be emitted explicitly.
 				 */
 				if (tbinfo->relkind == RELKIND_VIEW)
 				{
@@ -5929,6 +5920,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				else
 				{
 					attrdefs[j].separate = false;
+
 					/*
 					 * Mark the default as needing to appear before the table,
 					 * so that any dependencies it has must be emitted before
@@ -6061,7 +6053,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 			for (j = 0; j < numConstrs; j++)
 			{
-				bool	validated = PQgetvalue(res, j, 5)[0] == 't';
+				bool		validated = PQgetvalue(res, j, 5)[0] == 't';
 
 				constrs[j].dobj.objType = DO_CONSTRAINT;
 				constrs[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, 0));
@@ -6078,6 +6070,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				constrs[j].condeferrable = false;
 				constrs[j].condeferred = false;
 				constrs[j].conislocal = (PQgetvalue(res, j, 4)[0] == 't');
+
 				/*
 				 * An unvalidated constraint needs to be dumped separately, so
 				 * that potentially-violating existing data is loaded before
@@ -6091,10 +6084,10 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				 * Mark the constraint as needing to appear before the table
 				 * --- this is so that any other dependencies of the
 				 * constraint will be emitted before we try to create the
-				 * table.  If the constraint is to be dumped separately, it will be
-				 * dumped after data is loaded anyway, so don't do it.  (There's
-				 * an automatic dependency in the opposite direction anyway, so
-				 * don't need to add one manually here.)
+				 * table.  If the constraint is to be dumped separately, it
+				 * will be dumped after data is loaded anyway, so don't do it.
+				 * (There's an automatic dependency in the opposite direction
+				 * anyway, so don't need to add one manually here.)
 				 */
 				if (!constrs[j].separate)
 					addObjectDependency(&tbinfo->dobj,
@@ -6607,7 +6600,7 @@ getForeignServers(Archive *fout, int *numForeignServers)
 	}
 
 	/* Make sure we are in proper schema */
-	selectSourceSchema(fout,"pg_catalog");
+	selectSourceSchema(fout, "pg_catalog");
 
 	appendPQExpBuffer(query, "SELECT tableoid, oid, srvname, "
 					  "(%s srvowner) AS rolname, "
@@ -7091,28 +7084,6 @@ collectComments(Archive *fout, CommentItem **items)
 static void
 dumpDumpableObject(Archive *fout, DumpableObject *dobj)
 {
-
-	bool skip = false;
-
-	switch (dobj->objType)
-	{
-		case DO_INDEX:
-		case DO_TRIGGER:
-		case DO_CONSTRAINT:
-		case DO_FK_CONSTRAINT:
-		case DO_RULE:
-			skip = !(dumpSections & DUMP_POST_DATA);
-			break;
-		case DO_TABLE_DATA:
-			skip = !(dumpSections & DUMP_DATA);
-			break;
-		default:
-			skip = !(dumpSections & DUMP_PRE_DATA);
-	}
-
-	if (skip)
-		return;
-
 	switch (dobj->objType)
 	{
 		case DO_NAMESPACE:
@@ -7563,7 +7534,7 @@ dumpRangeType(Archive *fout, TypeInfo *tyinfo)
 	selectSourceSchema(fout, tyinfo->dobj.namespace->dobj.name);
 
 	appendPQExpBuffer(query,
-					  "SELECT pg_catalog.format_type(rngsubtype, NULL) AS rngsubtype, "
+			"SELECT pg_catalog.format_type(rngsubtype, NULL) AS rngsubtype, "
 					  "opc.opcname AS opcname, "
 					  "(SELECT nspname FROM pg_catalog.pg_namespace nsp "
 					  "  WHERE nsp.oid = opc.opcnamespace) AS opcnsp, "
@@ -7602,8 +7573,8 @@ dumpRangeType(Archive *fout, TypeInfo *tyinfo)
 	/* print subtype_opclass only if not default for subtype */
 	if (PQgetvalue(res, 0, PQfnumber(res, "opcdefault"))[0] != 't')
 	{
-		char *opcname = PQgetvalue(res, 0, PQfnumber(res, "opcname"));
-		char *nspname = PQgetvalue(res, 0, PQfnumber(res, "opcnsp"));
+		char	   *opcname = PQgetvalue(res, 0, PQfnumber(res, "opcname"));
+		char	   *nspname = PQgetvalue(res, 0, PQfnumber(res, "opcnsp"));
 
 		/* always schema-qualify, don't try to be smart */
 		appendPQExpBuffer(q, ",\n    subtype_opclass = %s.",
@@ -9441,12 +9412,12 @@ dumpCast(Archive *fout, CastInfo *cast)
 	labelq = createPQExpBuffer();
 
 	appendPQExpBuffer(delqry, "DROP CAST (%s AS %s);\n",
-				  getFormattedTypeName(fout, cast->castsource, zeroAsNone),
-				  getFormattedTypeName(fout, cast->casttarget, zeroAsNone));
+					getFormattedTypeName(fout, cast->castsource, zeroAsNone),
+				   getFormattedTypeName(fout, cast->casttarget, zeroAsNone));
 
 	appendPQExpBuffer(defqry, "CREATE CAST (%s AS %s) ",
-				  getFormattedTypeName(fout, cast->castsource, zeroAsNone),
-				  getFormattedTypeName(fout, cast->casttarget, zeroAsNone));
+					getFormattedTypeName(fout, cast->castsource, zeroAsNone),
+				   getFormattedTypeName(fout, cast->casttarget, zeroAsNone));
 
 	switch (cast->castmethod)
 	{
@@ -9459,14 +9430,15 @@ dumpCast(Archive *fout, CastInfo *cast)
 		case COERCION_METHOD_FUNCTION:
 			if (funcInfo)
 			{
-				char   *fsig = format_function_signature(fout, funcInfo, true);
+				char	   *fsig = format_function_signature(fout, funcInfo, true);
 
 				/*
 				 * Always qualify the function name, in case it is not in
-				 * pg_catalog schema (format_function_signature won't qualify it).
+				 * pg_catalog schema (format_function_signature won't qualify
+				 * it).
 				 */
 				appendPQExpBuffer(defqry, "WITH FUNCTION %s.%s",
-								  fmtId(funcInfo->dobj.namespace->dobj.name), fsig);
+						   fmtId(funcInfo->dobj.namespace->dobj.name), fsig);
 				free(fsig);
 			}
 			else
@@ -9483,8 +9455,8 @@ dumpCast(Archive *fout, CastInfo *cast)
 	appendPQExpBuffer(defqry, ";\n");
 
 	appendPQExpBuffer(labelq, "CAST (%s AS %s)",
-				  getFormattedTypeName(fout, cast->castsource, zeroAsNone),
-				  getFormattedTypeName(fout, cast->casttarget, zeroAsNone));
+					getFormattedTypeName(fout, cast->castsource, zeroAsNone),
+				   getFormattedTypeName(fout, cast->casttarget, zeroAsNone));
 
 	if (binary_upgrade)
 		binary_upgrade_extension_member(defqry, &cast->dobj, labelq->data);
@@ -11747,7 +11719,7 @@ dumpACL(Archive *fout, CatalogId objCatId, DumpId objDumpId,
 	if (!buildACLCommands(name, subname, type, acls, owner,
 						  "", fout->remoteVersion, sql))
 		exit_horribly(NULL,
-					  "could not parse ACL list (%s) for object \"%s\" (%s)\n",
+					"could not parse ACL list (%s) for object \"%s\" (%s)\n",
 					  acls, name, type);
 
 	if (sql->len > 0)
@@ -12189,10 +12161,10 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 		{
 			if (PQntuples(res) < 1)
 				exit_horribly(NULL, "query to obtain definition of view \"%s\" returned no data\n",
-						  tbinfo->dobj.name);
+							  tbinfo->dobj.name);
 			else
 				exit_horribly(NULL, "query to obtain definition of view \"%s\" returned more than one definition\n",
-						  tbinfo->dobj.name);
+							  tbinfo->dobj.name);
 		}
 
 		viewdef = PQgetvalue(res, 0, 0);
@@ -12239,7 +12211,7 @@ dumpTableSchema(Archive *fout, TableInfo *tbinfo)
 							  "pg_catalog.array_to_string(ARRAY("
 							  "SELECT pg_catalog.quote_ident(option_name) || "
 							  "' ' || pg_catalog.quote_literal(option_value) "
-							  "FROM pg_catalog.pg_options_to_table(ftoptions) "
+							"FROM pg_catalog.pg_options_to_table(ftoptions) "
 							  "ORDER BY option_name"
 							  "), E',\n    ') AS ftoptions "
 							  "FROM pg_catalog.pg_foreign_table ft "
@@ -13184,7 +13156,7 @@ findLastBuiltinOid_V70(Archive *fout)
 	int			last_oid;
 
 	res = ExecuteSqlQueryForSingleRow(fout,
-				 	"SELECT oid FROM pg_class WHERE relname = 'pg_indexes'");
+					"SELECT oid FROM pg_class WHERE relname = 'pg_indexes'");
 	last_oid = atooid(PQgetvalue(res, 0, PQfnumber(res, "oid")));
 	PQclear(res);
 	return last_oid;
@@ -13914,8 +13886,8 @@ getExtensionMembership(Archive *fout, ExtensionInfo extinfo[],
 					continue;
 
 				/*
-				 * Note: config tables are dumped without OIDs regardless
-				 * of the --oids setting.  This is because row filtering
+				 * Note: config tables are dumped without OIDs regardless of
+				 * the --oids setting.	This is because row filtering
 				 * conditions aren't compatible with dumping OIDs.
 				 */
 				makeTableDataInfo(configtbl, false);
@@ -14316,7 +14288,7 @@ ExecuteSqlQueryForSingleRow(Archive *fout, char *query)
 		exit_horribly(NULL,
 					  ngettext("query returned %d row instead of one: %s\n",
 							   "query returned %d rows instead of one: %s\n",
-								 ntups),
+							   ntups),
 					  ntups, query);
 
 	return res;

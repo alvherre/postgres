@@ -69,6 +69,7 @@ ProcedureCreate(const char *procedureName,
 				bool replace,
 				bool returnsSet,
 				Oid returnType,
+				Oid proowner,
 				Oid languageObjectId,
 				Oid languageValidator,
 				const char *prosrc,
@@ -100,7 +101,6 @@ ProcedureCreate(const char *procedureName,
 	bool		internalInParam = false;
 	bool		internalOutParam = false;
 	Oid			variadicType = InvalidOid;
-	Oid			proowner = GetUserId();
 	Acl		   *proacl = NULL;
 	Relation	rel;
 	HeapTuple	tup;
@@ -228,7 +228,7 @@ ProcedureCreate(const char *procedureName,
 
 	/*
 	 * Do not allow polymorphic return type unless at least one input argument
-	 * is polymorphic.  ANYRANGE return type is even stricter: must have an
+	 * is polymorphic.	ANYRANGE return type is even stricter: must have an
 	 * ANYRANGE input (since we can't deduce the specific range type from
 	 * ANYELEMENT).  Also, do not allow return type INTERNAL unless at least
 	 * one input argument is INTERNAL.

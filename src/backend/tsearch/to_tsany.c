@@ -33,8 +33,8 @@ compareWORD(const void *a, const void *b)
 	int			res;
 
 	res = tsCompareString(
-						  ((const ParsedWord *) a)->word, ((const ParsedWord *) a)->len,
-						  ((const ParsedWord *) b)->word, ((const ParsedWord *) b)->len,
+			   ((const ParsedWord *) a)->word, ((const ParsedWord *) a)->len,
+			   ((const ParsedWord *) b)->word, ((const ParsedWord *) b)->len,
 						  false);
 
 	if (res == 0)
@@ -340,6 +340,7 @@ to_tsquery_byid(PG_FUNCTION_ARGS)
 	if (query->size == 0)
 		PG_RETURN_TSQUERY(query);
 
+	/* clean out any stopword placeholders from the tree */
 	res = clean_fakeval(GETQUERY(query), &len);
 	if (!res)
 	{
@@ -349,6 +350,10 @@ to_tsquery_byid(PG_FUNCTION_ARGS)
 	}
 	memcpy((void *) GETQUERY(query), (void *) res, len * sizeof(QueryItem));
 
+	/*
+	 * Removing the stopword placeholders might've resulted in fewer
+	 * QueryItems. If so, move the operands up accordingly.
+	 */
 	if (len != query->size)
 	{
 		char	   *oldoperand = GETOPERAND(query);
@@ -357,7 +362,7 @@ to_tsquery_byid(PG_FUNCTION_ARGS)
 		Assert(len < query->size);
 
 		query->size = len;
-		memcpy((void *) GETOPERAND(query), oldoperand, VARSIZE(query) - (oldoperand - (char *) query));
+		memmove((void *) GETOPERAND(query), oldoperand, VARSIZE(query) - (oldoperand - (char *) query));
 		SET_VARSIZE(query, COMPUTESIZE(len, lenoperand));
 	}
 

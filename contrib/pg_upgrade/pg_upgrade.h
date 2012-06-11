@@ -40,7 +40,6 @@
 #define UTILITY_LOG_FILE	"pg_upgrade_utility.log"
 #define INTERNAL_LOG_FILE	"pg_upgrade_internal.log"
 
-#define NUM_LOG_FILES		4
 extern char *output_files[];
 
 /*
@@ -49,8 +48,10 @@ extern char *output_files[];
  * On Win32, we can't send both pg_upgrade output and command output to the
  * same file because we get the error: "The process cannot access the file
  * because it is being used by another process." so send the pg_ctl
- * command-line output to the utility log file on Windows, rather than
- * into the server log file.
+ * command-line output to a new file, rather than into the server log file.
+ * Ideally we could use UTILITY_LOG_FILE for this, but some Windows platforms
+ * keep the pg_ctl output file open by the running postmaster, even after
+ * pg_ctl exits.
  *
  * We could use the Windows pgwin32_open() flags to allow shared file
  * writes but is unclear how all other tools would use those flags, so
@@ -58,9 +59,12 @@ extern char *output_files[];
  * the error message appropriately.
  */
 #ifndef WIN32
-#define SERVER_LOG_FILE2	SERVER_LOG_FILE
+#define SERVER_START_LOG_FILE	SERVER_LOG_FILE
+#define SERVER_STOP_LOG_FILE	SERVER_LOG_FILE
 #else
-#define SERVER_LOG_FILE2	UTILITY_LOG_FILE
+#define SERVER_START_LOG_FILE	"pg_upgrade_server_start.log"
+/* pg_ctl stop doesn't keep the log file open, so reuse UTILITY_LOG_FILE */
+#define SERVER_STOP_LOG_FILE	UTILITY_LOG_FILE
 #endif
 
 
@@ -71,7 +75,7 @@ extern char *output_files[];
 #define RM_CMD				"rm -f"
 #define RMDIR_CMD			"rm -rf"
 #define SCRIPT_EXT			"sh"
-#define	ECHO_QUOTE	"'"
+#define ECHO_QUOTE	"'"
 #else
 #define pg_copy_file		CopyFile
 #define pg_mv_file			pgrename
@@ -81,7 +85,7 @@ extern char *output_files[];
 #define RMDIR_CMD			"RMDIR /s/q"
 #define SCRIPT_EXT			"bat"
 #define EXE_EXT				".exe"
-#define	ECHO_QUOTE	""
+#define ECHO_QUOTE	""
 #endif
 
 #define CLUSTER_NAME(cluster)	((cluster) == &old_cluster ? "old" : \
@@ -94,7 +98,7 @@ extern char *output_files[];
 /* postmaster/postgres -b (binary_upgrade) flag added during PG 9.1 development */
 #define BINARY_UPGRADE_SERVER_FLAG_CAT_VER 201104251
 /*
- * 	Visibility map changed with this 9.2 commit,
+ *	Visibility map changed with this 9.2 commit,
  *	8f9fe6edce358f7904e0db119416b4d1080a83aa; pick later catalog version.
  */
 #define VISIBILITY_MAP_CRASHSAFE_CAT_VER 201107031
@@ -114,7 +118,7 @@ typedef struct
 	Oid			reloid;			/* relation oid */
 	Oid			relfilenode;	/* relation relfile node */
 	/* relation tablespace path, or "" for the cluster default */
-	char		tablespace[MAXPGPATH];	
+	char		tablespace[MAXPGPATH];
 } RelInfo;
 
 typedef struct
@@ -224,9 +228,11 @@ typedef struct
 	ControlData controldata;	/* pg_control information */
 	DbInfoArr	dbarr;			/* dbinfos array */
 	char	   *pgdata;			/* pathname for cluster's $PGDATA directory */
-	char	   *pgconfig;		/* pathname for cluster's config file directory */
+	char	   *pgconfig;		/* pathname for cluster's config file
+								 * directory */
 	char	   *bindir;			/* pathname for cluster's executable directory */
-	char	   *pgopts;			/* options to pass to the server, like pg_ctl -o */
+	char	   *pgopts;			/* options to pass to the server, like pg_ctl
+								 * -o */
 	unsigned short port;		/* port number where postmaster is waiting */
 	uint32		major_version;	/* PG_VERSION of cluster */
 	char		major_version_str[64];	/* string PG_VERSION of cluster */
@@ -293,8 +299,8 @@ void check_old_cluster(bool live_check,
 void		check_new_cluster(void);
 void		report_clusters_compatible(void);
 void		issue_warnings(char *sequence_script_file_name);
-void		output_completion_banner(char *analyze_script_file_name,
-									 char *deletion_script_file_name);
+void output_completion_banner(char *analyze_script_file_name,
+						 char *deletion_script_file_name);
 void		check_cluster_versions(void);
 void		check_cluster_compatibility(bool live_check);
 void		create_script_for_old_cluster_deletion(char **deletion_script_file_name);
@@ -316,9 +322,10 @@ void		split_old_dump(void);
 
 /* exec.c */
 
-int exec_prog(bool throw_error, bool is_priv,
-	const char *log_file, const char *cmd, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 4, 5)));
+int
+exec_prog(bool throw_error, bool is_priv,
+		  const char *log_file, const char *cmd,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 4, 5)));
 void		verify_directories(void);
 bool		is_server_running(const char *datadir);
 
@@ -355,14 +362,14 @@ const char *setupPageConverter(pageCnvCtx **result);
 typedef void *pageCnvCtx;
 #endif
 
-int load_directory(const char *dirname, struct dirent ***namelist);
+int			load_directory(const char *dirname, struct dirent *** namelist);
 const char *copyAndUpdateFile(pageCnvCtx *pageConverter, const char *src,
 				  const char *dst, bool force);
 const char *linkAndUpdateFile(pageCnvCtx *pageConverter, const char *src,
 				  const char *dst);
 
 void		check_hard_link(void);
-FILE 	   *fopen_priv(const char *path, const char *mode);
+FILE	   *fopen_priv(const char *path, const char *mode);
 
 /* function.c */
 
@@ -401,8 +408,9 @@ void		init_tablespaces(void);
 /* server.c */
 
 PGconn	   *connectToServer(ClusterInfo *cluster, const char *db_name);
-PGresult   *executeQueryOrDie(PGconn *conn, const char *fmt, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
+PGresult *
+executeQueryOrDie(PGconn *conn, const char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
 
 void		start_postmaster(ClusterInfo *cluster);
 void		stop_postmaster(bool fast);
@@ -415,12 +423,15 @@ void		check_pghost_envvar(void);
 char	   *quote_identifier(const char *s);
 int			get_user_info(char **user_name);
 void		check_ok(void);
-void		report_status(eLogType type, const char *fmt, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
-void		pg_log(eLogType type, char *fmt, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
-void		prep_status(const char *fmt, ...)
-	__attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
+void
+report_status(eLogType type, const char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
+void
+pg_log(eLogType type, char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 2, 3)));
+void
+prep_status(const char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 void		check_ok(void);
 char	   *pg_strdup(const char *s);
 void	   *pg_malloc(int size);

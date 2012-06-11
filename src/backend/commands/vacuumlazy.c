@@ -157,9 +157,9 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	BlockNumber possibly_freeable;
 	PGRUsage	ru0;
 	TimestampTz starttime = 0;
- 	long		secs;
- 	int			usecs;
- 	double		read_rate,
+	long		secs;
+	int			usecs;
+	double		read_rate,
 				write_rate;
 	bool		scan_all;
 	TransactionId freezeTableLimit;
@@ -226,17 +226,17 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	 *
 	 * A corner case here is that if we scanned no pages at all because every
 	 * page is all-visible, we should not update relpages/reltuples, because
-	 * we have no new information to contribute.  In particular this keeps
-	 * us from replacing relpages=reltuples=0 (which means "unknown tuple
+	 * we have no new information to contribute.  In particular this keeps us
+	 * from replacing relpages=reltuples=0 (which means "unknown tuple
 	 * density") with nonzero relpages and reltuples=0 (which means "zero
 	 * tuple density") unless there's some actual evidence for the latter.
 	 *
-	 * We do update relallvisible even in the corner case, since if the
-	 * table is all-visible we'd definitely like to know that.  But clamp
-	 * the value to be not more than what we're setting relpages to.
+	 * We do update relallvisible even in the corner case, since if the table
+	 * is all-visible we'd definitely like to know that.  But clamp the value
+	 * to be not more than what we're setting relpages to.
 	 *
-	 * Also, don't change relfrozenxid if we skipped any pages, since then
-	 * we don't know for certain that all tuples have a newer xmin.
+	 * Also, don't change relfrozenxid if we skipped any pages, since then we
+	 * don't know for certain that all tuples have a newer xmin.
 	 */
 	new_rel_pages = vacrelstats->rel_pages;
 	new_rel_tuples = vacrelstats->new_rel_tuples;
@@ -274,7 +274,7 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	/* and log the action if appropriate */
 	if (IsAutoVacuumWorkerProcess() && Log_autovacuum_min_duration >= 0)
 	{
-		TimestampTz	endtime = GetCurrentTimestamp();
+		TimestampTz endtime = GetCurrentTimestamp();
 
 		if (Log_autovacuum_min_duration == 0 ||
 			TimestampDifferenceExceeds(starttime, endtime,
@@ -286,17 +286,17 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 			write_rate = 0;
 			if ((secs > 0) || (usecs > 0))
 			{
-				read_rate = (double) BLCKSZ * VacuumPageMiss / (1024 * 1024) /
-					(secs + usecs / 1000000.0);
-				write_rate = (double) BLCKSZ * VacuumPageDirty / (1024 * 1024) /
- 					(secs + usecs / 1000000.0);
+				read_rate = (double) BLCKSZ *VacuumPageMiss / (1024 * 1024) /
+							(secs + usecs / 1000000.0);
+				write_rate = (double) BLCKSZ *VacuumPageDirty / (1024 * 1024) /
+							(secs + usecs / 1000000.0);
 			}
 			ereport(LOG,
 					(errmsg("automatic vacuum of table \"%s.%s.%s\": index scans: %d\n"
 							"pages: %d removed, %d remain\n"
 							"tuples: %.0f removed, %.0f remain\n"
 							"buffer usage: %d hits, %d misses, %d dirtied\n"
-							"avg read rate: %.3f MiB/s, avg write rate: %.3f MiB/s\n"
+					"avg read rate: %.3f MiB/s, avg write rate: %.3f MiB/s\n"
 							"system usage: %s",
 							get_database_name(MyDatabaseId),
 							get_namespace_name(RelationGetNamespace(onerel)),
@@ -309,7 +309,7 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 							VacuumPageHit,
 							VacuumPageMiss,
 							VacuumPageDirty,
-							read_rate,write_rate,
+							read_rate, write_rate,
 							pg_rusage_show(&ru0))));
 		}
 	}
@@ -428,6 +428,15 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 	 * Note: if scan_all is true, we won't actually skip any pages; but we
 	 * maintain next_not_all_visible_block anyway, so as to set up the
 	 * all_visible_according_to_vm flag correctly for each page.
+	 *
+	 * Note: The value returned by visibilitymap_test could be slightly
+	 * out-of-date, since we make this test before reading the corresponding
+	 * heap page or locking the buffer.  This is OK.  If we mistakenly think
+	 * that the page is all-visible when in fact the flag's just been cleared,
+	 * we might fail to vacuum the page.  But it's OK to skip pages when
+	 * scan_all is not set, so no great harm done; the next vacuum will find
+	 * them.  If we make the reverse mistake and vacuum a page unnecessarily,
+	 * it'll just be a no-op.
 	 */
 	for (next_not_all_visible_block = 0;
 		 next_not_all_visible_block < nblocks;
@@ -501,10 +510,10 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 			vacrelstats->num_dead_tuples > 0)
 		{
 			/*
-			 * Before beginning index vacuuming, we release any pin we may hold
-			 * on the visibility map page.  This isn't necessary for correctness,
-			 * but we do it anyway to avoid holding the pin across a lengthy,
-			 * unrelated operation.
+			 * Before beginning index vacuuming, we release any pin we may
+			 * hold on the visibility map page.  This isn't necessary for
+			 * correctness, but we do it anyway to avoid holding the pin
+			 * across a lengthy, unrelated operation.
 			 */
 			if (BufferIsValid(vmbuffer))
 			{
@@ -535,10 +544,10 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 		/*
 		 * Pin the visibility map page in case we need to mark the page
 		 * all-visible.  In most cases this will be very cheap, because we'll
-		 * already have the correct page pinned anyway.  However, it's possible
-		 * that (a) next_not_all_visible_block is covered by a different VM page
-		 * than the current block or (b) we released our pin and did a cycle of
-		 * index vacuuming.
+		 * already have the correct page pinned anyway.  However, it's
+		 * possible that (a) next_not_all_visible_block is covered by a
+		 * different VM page than the current block or (b) we released our pin
+		 * and did a cycle of index vacuuming.
 		 */
 		visibilitymap_pin(onerel, blkno, &vmbuffer);
 
@@ -862,22 +871,37 @@ lazy_scan_heap(Relation onerel, LVRelStats *vacrelstats,
 		freespace = PageGetHeapFreeSpace(page);
 
 		/* mark page all-visible, if appropriate */
-		if (all_visible && !all_visible_according_to_vm)
+		if (all_visible)
 		{
 			if (!PageIsAllVisible(page))
 			{
 				PageSetAllVisible(page);
 				MarkBufferDirty(buf);
+				visibilitymap_set(onerel, blkno, InvalidXLogRecPtr, vmbuffer,
+								  visibility_cutoff_xid);
 			}
-			visibilitymap_set(onerel, blkno, InvalidXLogRecPtr, vmbuffer,
-							  visibility_cutoff_xid);
+			else if (!all_visible_according_to_vm)
+			{
+				/*
+				 * It should never be the case that the visibility map page is
+				 * set while the page-level bit is clear, but the reverse is
+				 * allowed.  Set the visibility map bit as well so that we get
+				 * back in sync.
+				 */
+				visibilitymap_set(onerel, blkno, InvalidXLogRecPtr, vmbuffer,
+								  visibility_cutoff_xid);
+			}
 		}
 
 		/*
 		 * As of PostgreSQL 9.2, the visibility map bit should never be set if
-		 * the page-level bit is clear.
+		 * the page-level bit is clear.  However, it's possible that the bit
+		 * got cleared after we checked it and before we took the buffer
+		 * content lock, so we must recheck before jumping to the conclusion
+		 * that something bad has happened.
 		 */
-		else if (all_visible_according_to_vm && !PageIsAllVisible(page))
+		else if (all_visible_according_to_vm && !PageIsAllVisible(page)
+				 && visibilitymap_test(onerel, blkno, &vmbuffer))
 		{
 			elog(WARNING, "page is not marked all-visible but visibility map bit is set in relation \"%s\" page %u",
 				 relname, blkno);
@@ -1139,7 +1163,7 @@ lazy_check_needs_freeze(Buffer buf)
 		if (heap_tuple_needs_freeze(tupleheader, FreezeLimit,
 									MultiXactFrzLimit, buf))
 			return true;
-	}						/* scan along page */
+	}							/* scan along page */
 
 	return false;
 }

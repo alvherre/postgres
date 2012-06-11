@@ -1325,7 +1325,7 @@ BufferSync(int flags)
  * This is called periodically by the background writer process.
  *
  * Returns true if it's appropriate for the bgwriter process to go into
- * low-power hibernation mode.  (This happens if the strategy clock sweep
+ * low-power hibernation mode.	(This happens if the strategy clock sweep
  * has been "lapped" and no buffer allocations have occurred recently,
  * or if the bgwriter has been effectively disabled by setting
  * bgwriter_lru_maxpages to 0.)
@@ -1510,8 +1510,8 @@ BgBufferSync(void)
 	/*
 	 * If recent_alloc remains at zero for many cycles, smoothed_alloc will
 	 * eventually underflow to zero, and the underflows produce annoying
-	 * kernel warnings on some platforms.  Once upcoming_alloc_est has gone
-	 * to zero, there's no point in tracking smaller and smaller values of
+	 * kernel warnings on some platforms.  Once upcoming_alloc_est has gone to
+	 * zero, there's no point in tracking smaller and smaller values of
 	 * smoothed_alloc, so just reset it to exactly zero to avoid this
 	 * syndrome.  It will pop back up as soon as recent_alloc increases.
 	 */
@@ -2006,11 +2006,11 @@ BufferIsPermanent(Buffer buffer)
 	Assert(BufferIsPinned(buffer));
 
 	/*
-	 * BM_PERMANENT can't be changed while we hold a pin on the buffer, so
-	 * we need not bother with the buffer header spinlock.  Even if someone
-	 * else changes the buffer header flags while we're doing this, we assume
-	 * that changing an aligned 2-byte BufFlags value is atomic, so we'll read
-	 * the old value or the new value, but not random garbage.
+	 * BM_PERMANENT can't be changed while we hold a pin on the buffer, so we
+	 * need not bother with the buffer header spinlock.  Even if someone else
+	 * changes the buffer header flags while we're doing this, we assume that
+	 * changing an aligned 2-byte BufFlags value is atomic, so we'll read the
+	 * old value or the new value, but not random garbage.
 	 */
 	bufHdr = &BufferDescriptors[buffer - 1];
 	return (bufHdr->flags & BM_PERMANENT) != 0;
@@ -2020,7 +2020,7 @@ BufferIsPermanent(Buffer buffer)
  *		DropRelFileNodeBuffers
  *
  *		This function removes from the buffer pool all the pages of the
- *		specified relation that have block numbers >= firstDelBlock.
+ *		specified relation fork that have block numbers >= firstDelBlock.
  *		(In particular, with firstDelBlock = 0, all pages are removed.)
  *		Dirty pages are simply dropped, without bothering to write them
  *		out first.	Therefore, this is NOT rollback-able, and so should be
@@ -2048,6 +2048,7 @@ DropRelFileNodeBuffers(RelFileNodeBackend rnode, ForkNumber forkNum,
 {
 	int			i;
 
+	/* If it's a local relation, it's localbuf.c's problem. */
 	if (rnode.backend != InvalidBackendId)
 	{
 		if (rnode.backend == MyBackendId)
@@ -2059,10 +2060,69 @@ DropRelFileNodeBuffers(RelFileNodeBackend rnode, ForkNumber forkNum,
 	{
 		volatile BufferDesc *bufHdr = &BufferDescriptors[i];
 
+		/*
+		 * We can make this a tad faster by prechecking the buffer tag before
+		 * we attempt to lock the buffer; this saves a lot of lock
+		 * acquisitions in typical cases.  It should be safe because the
+		 * caller must have AccessExclusiveLock on the relation, or some other
+		 * reason to be certain that no one is loading new pages of the rel
+		 * into the buffer pool.  (Otherwise we might well miss such pages
+		 * entirely.)  Therefore, while the tag might be changing while we
+		 * look at it, it can't be changing *to* a value we care about, only
+		 * *away* from such a value.  So false negatives are impossible, and
+		 * false positives are safe because we'll recheck after getting the
+		 * buffer lock.
+		 *
+		 * We could check forkNum and blockNum as well as the rnode, but the
+		 * incremental win from doing so seems small.
+		 */
+		if (!RelFileNodeEquals(bufHdr->tag.rnode, rnode.node))
+			continue;
+
 		LockBufHdr(bufHdr);
 		if (RelFileNodeEquals(bufHdr->tag.rnode, rnode.node) &&
 			bufHdr->tag.forkNum == forkNum &&
 			bufHdr->tag.blockNum >= firstDelBlock)
+			InvalidateBuffer(bufHdr);	/* releases spinlock */
+		else
+			UnlockBufHdr(bufHdr);
+	}
+}
+
+/* ---------------------------------------------------------------------
+ *		DropRelFileNodeAllBuffers
+ *
+ *		This function removes from the buffer pool all the pages of all
+ *		forks of the specified relation.  It's equivalent to calling
+ *		DropRelFileNodeBuffers once per fork with firstDelBlock = 0.
+ * --------------------------------------------------------------------
+ */
+void
+DropRelFileNodeAllBuffers(RelFileNodeBackend rnode)
+{
+	int			i;
+
+	/* If it's a local relation, it's localbuf.c's problem. */
+	if (rnode.backend != InvalidBackendId)
+	{
+		if (rnode.backend == MyBackendId)
+			DropRelFileNodeAllLocalBuffers(rnode.node);
+		return;
+	}
+
+	for (i = 0; i < NBuffers; i++)
+	{
+		volatile BufferDesc *bufHdr = &BufferDescriptors[i];
+
+		/*
+		 * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
+		 * and saves some cycles.
+		 */
+		if (!RelFileNodeEquals(bufHdr->tag.rnode, rnode.node))
+			continue;
+
+		LockBufHdr(bufHdr);
+		if (RelFileNodeEquals(bufHdr->tag.rnode, rnode.node))
 			InvalidateBuffer(bufHdr);	/* releases spinlock */
 		else
 			UnlockBufHdr(bufHdr);
@@ -2084,7 +2144,6 @@ void
 DropDatabaseBuffers(Oid dbid)
 {
 	int			i;
-	volatile BufferDesc *bufHdr;
 
 	/*
 	 * We needn't consider local buffers, since by assumption the target
@@ -2093,7 +2152,15 @@ DropDatabaseBuffers(Oid dbid)
 
 	for (i = 0; i < NBuffers; i++)
 	{
-		bufHdr = &BufferDescriptors[i];
+		volatile BufferDesc *bufHdr = &BufferDescriptors[i];
+
+		/*
+		 * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
+		 * and saves some cycles.
+		 */
+		if (bufHdr->tag.rnode.dbNode != dbid)
+			continue;
+
 		LockBufHdr(bufHdr);
 		if (bufHdr->tag.rnode.dbNode == dbid)
 			InvalidateBuffer(bufHdr);	/* releases spinlock */
@@ -2220,6 +2287,14 @@ FlushRelationBuffers(Relation rel)
 	for (i = 0; i < NBuffers; i++)
 	{
 		bufHdr = &BufferDescriptors[i];
+
+		/*
+		 * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
+		 * and saves some cycles.
+		 */
+		if (!RelFileNodeEquals(bufHdr->tag.rnode, rel->rd_node))
+			continue;
+
 		LockBufHdr(bufHdr);
 		if (RelFileNodeEquals(bufHdr->tag.rnode, rel->rd_node) &&
 			(bufHdr->flags & BM_VALID) && (bufHdr->flags & BM_DIRTY))
@@ -2262,6 +2337,14 @@ FlushDatabaseBuffers(Oid dbid)
 	for (i = 0; i < NBuffers; i++)
 	{
 		bufHdr = &BufferDescriptors[i];
+
+		/*
+		 * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
+		 * and saves some cycles.
+		 */
+		if (bufHdr->tag.rnode.dbNode != dbid)
+			continue;
+
 		LockBufHdr(bufHdr);
 		if (bufHdr->tag.rnode.dbNode == dbid &&
 			(bufHdr->flags & BM_VALID) && (bufHdr->flags & BM_DIRTY))
@@ -2378,10 +2461,10 @@ SetBufferCommitInfoNeedsSave(Buffer buffer)
 	 * tuples.	So, be as quick as we can if the buffer is already dirty.  We
 	 * do this by not acquiring spinlock if it looks like the status bits are
 	 * already.  Since we make this test unlocked, there's a chance we might
-	 * fail to notice that the flags have just been cleared, and failed to reset
-	 * them, due to memory-ordering issues.  But since this function is only
-	 * intended to be used in cases where failing to write out the data would
-	 * be harmless anyway, it doesn't really matter.
+	 * fail to notice that the flags have just been cleared, and failed to
+	 * reset them, due to memory-ordering issues.  But since this function is
+	 * only intended to be used in cases where failing to write out the data
+	 * would be harmless anyway, it doesn't really matter.
 	 */
 	if ((bufHdr->flags & (BM_DIRTY | BM_JUST_DIRTIED)) !=
 		(BM_DIRTY | BM_JUST_DIRTIED))

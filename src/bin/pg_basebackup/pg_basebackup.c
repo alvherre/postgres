@@ -46,7 +46,7 @@ int			compresslevel = 0;
 bool		includewal = false;
 bool		streamwal = false;
 bool		fastcheckpoint = false;
-int			standby_message_timeout = 10;		/* 10 sec = default */
+int			standby_message_timeout = 10 * 1000;		/* 10 sec = default */
 
 /* Progress counters */
 static uint64 totalsize;
@@ -63,6 +63,7 @@ static pid_t bgchild = -1;
 
 /* End position for xlog streaming, empty string if unknown yet */
 static XLogRecPtr xlogendptr;
+
 #ifndef WIN32
 static int	has_xlogendptr = 0;
 #else
@@ -78,7 +79,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum);
 static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum);
 static void BaseBackup(void);
 
-static bool segment_callback(XLogRecPtr segendpos, uint32 timeline);
+static bool reached_end_position(XLogRecPtr segendpos, uint32 timeline, bool segment_finished);
 
 #ifdef HAVE_LIBZ
 static const char *
@@ -106,7 +107,9 @@ usage(void)
 	printf(_("\nOptions controlling the output:\n"));
 	printf(_("  -D, --pgdata=DIRECTORY   receive base backup into directory\n"));
 	printf(_("  -F, --format=p|t         output format (plain (default), tar)\n"));
-	printf(_("  -x, --xlog=fetch|stream  include required WAL files in backup\n"));
+	printf(_("  -x, --xlog               include required WAL files in backup (fetch mode)\n"));
+	printf(_("  -X, --xlog-method=fetch|stream\n"
+		   "                           include required WAL files with specified method\n"));
 	printf(_("  -z, --gzip               compress tar output\n"));
 	printf(_("  -Z, --compress=0-9       compress tar output with given compression level\n"));
 	printf(_("\nGeneral options:\n"));
@@ -129,8 +132,7 @@ usage(void)
 
 
 /*
- * Called in the background process whenever a complete segment of WAL
- * has been received.
+ * Called in the background process every time data is received.
  * On Unix, we check to see if there is any data on our pipe
  * (which would mean we have a stop position), and if it is, check if
  * it is time to stop.
@@ -138,7 +140,7 @@ usage(void)
  * time to stop.
  */
 static bool
-segment_callback(XLogRecPtr segendpos, uint32 timeline)
+reached_end_position(XLogRecPtr segendpos, uint32 timeline, bool segment_finished)
 {
 	if (!has_xlogendptr)
 	{
@@ -224,14 +226,14 @@ typedef struct
 	char		xlogdir[MAXPGPATH];
 	char	   *sysidentifier;
 	int			timeline;
-}	logstreamer_param;
+} logstreamer_param;
 
 static int
-LogStreamerMain(logstreamer_param * param)
+LogStreamerMain(logstreamer_param *param)
 {
 	if (!ReceiveXlogStream(param->bgconn, param->startptr, param->timeline,
 						   param->sysidentifier, param->xlogdir,
-						   segment_callback, NULL, standby_message_timeout))
+						reached_end_position, standby_message_timeout, true))
 
 		/*
 		 * Any errors will already have been reported in the function process,
@@ -280,6 +282,9 @@ StartLogStreamer(char *startpos, uint32 timeline, char *sysidentifier)
 
 	/* Get a second connection */
 	param->bgconn = GetConnection();
+	if (!param->bgconn)
+		/* Error message already written in GetConnection() */
+		exit(1);
 
 	/*
 	 * Always in plain format, so we can write to basedir/pg_xlog. But the
@@ -916,6 +921,9 @@ BaseBackup(void)
 	 * Connect in replication mode to the server
 	 */
 	conn = GetConnection();
+	if (!conn)
+		/* Error message already written in GetConnection() */
+		exit(1);
 
 	/*
 	 * Run IDENTIFY_SYSTEM so we can get the timeline
@@ -1087,7 +1095,7 @@ BaseBackup(void)
 		int			status;
 		int			r;
 #else
-		DWORD       status;
+		DWORD		status;
 #endif
 
 		if (verbose)
@@ -1188,7 +1196,8 @@ main(int argc, char **argv)
 		{"pgdata", required_argument, NULL, 'D'},
 		{"format", required_argument, NULL, 'F'},
 		{"checkpoint", required_argument, NULL, 'c'},
-		{"xlog", required_argument, NULL, 'x'},
+		{"xlog", no_argument, NULL, 'x'},
+		{"xlog-method", required_argument, NULL, 'X'},
 		{"gzip", no_argument, NULL, 'z'},
 		{"compress", required_argument, NULL, 'Z'},
 		{"label", required_argument, NULL, 'l'},
@@ -1224,7 +1233,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	while ((c = getopt_long(argc, argv, "D:F:x:l:zZ:c:h:p:U:s:wWvP",
+	while ((c = getopt_long(argc, argv, "D:F:xX:l:zZ:c:h:p:U:s:wWvP",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1245,6 +1254,24 @@ main(int argc, char **argv)
 				}
 				break;
 			case 'x':
+				if (includewal)
+				{
+					fprintf(stderr, _("%s: cannot specify both --xlog and --xlog-method\n"),
+							progname);
+					exit(1);
+				}
+
+				includewal = true;
+				streamwal = false;
+				break;
+			case 'X':
+				if (includewal)
+				{
+					fprintf(stderr, _("%s: cannot specify both --xlog and --xlog-method\n"),
+							progname);
+					exit(1);
+				}
+
 				includewal = true;
 				if (strcmp(optarg, "f") == 0 ||
 					strcmp(optarg, "fetch") == 0)
@@ -1254,7 +1281,7 @@ main(int argc, char **argv)
 					streamwal = true;
 				else
 				{
-					fprintf(stderr, _("%s: invalid xlog option \"%s\", must be empty, \"fetch\", or \"stream\"\n"),
+					fprintf(stderr, _("%s: invalid xlog-method option \"%s\", must be empty, \"fetch\", or \"stream\"\n"),
 							progname, optarg);
 					exit(1);
 				}
@@ -1306,7 +1333,7 @@ main(int argc, char **argv)
 				dbgetpassword = 1;
 				break;
 			case 's':
-				standby_message_timeout = atoi(optarg);
+				standby_message_timeout = atoi(optarg) * 1000;
 				if (standby_message_timeout < 0)
 				{
 					fprintf(stderr, _("%s: invalid status interval \"%s\"\n"),

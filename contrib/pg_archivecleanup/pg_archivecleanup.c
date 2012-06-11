@@ -37,7 +37,7 @@ const char *progname;
 /* Options and defaults */
 bool		debug = false;		/* are we debugging? */
 bool		dryrun = false;		/* are we performing a dry-run operation? */
-char	   *additional_ext = NULL;	/* Extension to remove from filenames */
+char	   *additional_ext = NULL;		/* Extension to remove from filenames */
 
 char	   *archiveLocation;	/* where to find the archive? */
 char	   *restartWALFileName; /* the file from which we can restart restore */
@@ -136,12 +136,13 @@ CleanupPriorWALFiles(void)
 			 * they were originally written, in case this worries you.
 			 */
 			if (strlen(walfile) == XLOG_DATA_FNAME_LEN &&
-			strspn(walfile, "0123456789ABCDEF") == XLOG_DATA_FNAME_LEN &&
+				strspn(walfile, "0123456789ABCDEF") == XLOG_DATA_FNAME_LEN &&
 				strcmp(walfile + 8, exclusiveCleanupFileName + 8) < 0)
 			{
-				/* 
-				 * Use the original file name again now, including any extension
-				 * that might have been chopped off before testing the sequence.
+				/*
+				 * Use the original file name again now, including any
+				 * extension that might have been chopped off before testing
+				 * the sequence.
 				 */
 				snprintf(WALFilePath, MAXPGPATH, "%s/%s",
 						 archiveLocation, xlde->d_name);
@@ -150,7 +151,7 @@ CleanupPriorWALFiles(void)
 				{
 					/*
 					 * Prints the name of the file to be removed and skips the
-					 * actual removal.  The regular printout is so that the
+					 * actual removal.	The regular printout is so that the
 					 * user can pipe the output into some other program.
 					 */
 					printf("%s\n", WALFilePath);
@@ -248,11 +249,11 @@ usage(void)
 	printf("Usage:\n");
 	printf("  %s [OPTION]... ARCHIVELOCATION OLDESTKEPTWALFILE\n", progname);
 	printf("\nOptions:\n");
-	printf("  -d                 generates debug output (verbose mode)\n");
-	printf("  -n                 shows the names of the files that would have been removed (dry-run)\n");
- 	printf("  -x EXT             cleanup files if they have this same extension\n");
-	printf("  --help             show this help, then exit\n");
-	printf("  --version          output version information, then exit\n");
+	printf("  -d         generate debug output (verbose mode)\n");
+	printf("  -n         dry run, show the names of the files that would be removed\n");
+	printf("  -x EXT     clean up files if they have this extension\n");
+	printf("  --help     show this help, then exit\n");
+	printf("  --version  output version information, then exit\n");
 	printf("\n"
 		   "For use as archive_cleanup_command in recovery.conf when standby_mode = on:\n"
 		   "  archive_cleanup_command = 'pg_archivecleanup [OPTION]... ARCHIVELOCATION %%r'\n"
@@ -298,7 +299,8 @@ main(int argc, char **argv)
 				dryrun = true;
 				break;
 			case 'x':
-				additional_ext = optarg; /* Extension to remove from xlogfile names */
+				additional_ext = optarg;		/* Extension to remove from
+												 * xlogfile names */
 				break;
 			default:
 				fprintf(stderr, "Try \"%s --help\" for more information.\n", progname);

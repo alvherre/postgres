@@ -546,9 +546,9 @@ AutoVacLauncherMain(int argc, char *argv[])
 	SetConfigOption("statement_timeout", "0", PGC_SUSET, PGC_S_OVERRIDE);
 
 	/*
-	 * Force default_transaction_isolation to READ COMMITTED.  We don't
-	 * want to pay the overhead of serializable mode, nor add any risk
-	 * of causing deadlocks or delaying other transactions.
+	 * Force default_transaction_isolation to READ COMMITTED.  We don't want
+	 * to pay the overhead of serializable mode, nor add any risk of causing
+	 * deadlocks or delaying other transactions.
 	 */
 	SetConfigOption("default_transaction_isolation", "read committed",
 					PGC_SUSET, PGC_S_OVERRIDE);
@@ -1579,9 +1579,9 @@ AutoVacWorkerMain(int argc, char *argv[])
 	SetConfigOption("statement_timeout", "0", PGC_SUSET, PGC_S_OVERRIDE);
 
 	/*
-	 * Force default_transaction_isolation to READ COMMITTED.  We don't
-	 * want to pay the overhead of serializable mode, nor add any risk
-	 * of causing deadlocks or delaying other transactions.
+	 * Force default_transaction_isolation to READ COMMITTED.  We don't want
+	 * to pay the overhead of serializable mode, nor add any risk of causing
+	 * deadlocks or delaying other transactions.
 	 */
 	SetConfigOption("default_transaction_isolation", "read committed",
 					PGC_SUSET, PGC_S_OVERRIDE);
@@ -2355,7 +2355,7 @@ do_autovacuum(void)
 						   tab->at_datname, tab->at_nspname, tab->at_relname);
 			EmitErrorReport();
 
-			/* this resets the PGPROC flags too */
+			/* this resets the PGXACT flags too */
 			AbortOutOfAnyTransaction();
 			FlushErrorState();
 			MemoryContextResetAndDeleteChildren(PortalContext);
@@ -2366,7 +2366,7 @@ do_autovacuum(void)
 		}
 		PG_END_TRY();
 
-		/* the PGPROC flags are reset at the next end of transaction */
+		/* the PGXACT flags are reset at the next end of transaction */
 
 		/* be tidy */
 deleted:

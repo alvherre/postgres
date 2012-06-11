@@ -15,6 +15,7 @@
 #define JSON_H
 
 #include "fmgr.h"
+#include "lib/stringinfo.h"
 
 extern Datum json_in(PG_FUNCTION_ARGS);
 extern Datum json_out(PG_FUNCTION_ARGS);
@@ -24,6 +25,6 @@ extern Datum array_to_json(PG_FUNCTION_ARGS);
 extern Datum array_to_json_pretty(PG_FUNCTION_ARGS);
 extern Datum row_to_json(PG_FUNCTION_ARGS);
 extern Datum row_to_json_pretty(PG_FUNCTION_ARGS);
-extern void  escape_json(StringInfo buf, const char *str);
+extern void escape_json(StringInfo buf, const char *str);
 
 #endif   /* JSON_H */

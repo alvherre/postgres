@@ -21,10 +21,9 @@
  *		GIDs and aborts the transaction if there already is a global
  *		transaction in prepared state with the same GID.
  *
- *		A global transaction (gxact) also has a dummy PGPROC that is entered
- *		into the ProcArray array; this is what keeps the XID considered
- *		running by TransactionIdIsInProgress.  It is also convenient as a
- *		PGPROC to hook the gxact's locks to.
+ *		A global transaction (gxact) also has dummy PGXACT and PGPROC; this is
+ *		what keeps the XID considered running by TransactionIdIsInProgress.
+ *		It is also convenient as a PGPROC to hook the gxact's locks to.
  *
  *		In order to survive crashes and shutdowns, all prepared
  *		transactions must be stored in permanent storage. This includes
@@ -79,11 +78,6 @@ int			max_prepared_xacts = 0;
  * This struct describes one global transaction that is in prepared state
  * or attempting to become prepared.
  *
- * The first component of the struct is a dummy PGPROC that is inserted
- * into the global ProcArray so that the transaction appears to still be
- * running and holding locks.  It must be first because we cast pointers
- * to PGPROC and pointers to GlobalTransactionData back and forth.
- *
  * The lifecycle of a global transaction is:
  *
  * 1. After checking that the requested GID is not in use, set up an
@@ -91,7 +85,7 @@ int			max_prepared_xacts = 0;
  * with locking_xid = my own XID and valid = false.
  *
  * 2. After successfully completing prepare, set valid = true and enter the
- * contained PGPROC into the global ProcArray.
+ * referenced PGPROC into the global ProcArray.
  *
  * 3. To begin COMMIT PREPARED or ROLLBACK PREPARED, check that the entry
  * is valid and its locking_xid is no longer active, then store my current
@@ -366,8 +360,9 @@ static void
 GXactLoadSubxactData(GlobalTransaction gxact, int nsubxacts,
 					 TransactionId *children)
 {
-	PGPROC *proc = &ProcGlobal->allProcs[gxact->pgprocno];
-	PGXACT *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+	PGPROC	   *proc = &ProcGlobal->allProcs[gxact->pgprocno];
+	PGXACT	   *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+
 	/* We need no extra lock since the GXACT isn't valid yet */
 	if (nsubxacts > PGPROC_MAX_CACHED_SUBXIDS)
 	{
@@ -416,7 +411,7 @@ LockGXact(const char *gid, Oid user)
 	for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
 	{
 		GlobalTransaction gxact = TwoPhaseState->prepXacts[i];
-		PGPROC *proc = &ProcGlobal->allProcs[gxact->pgprocno];
+		PGPROC	   *proc = &ProcGlobal->allProcs[gxact->pgprocno];
 
 		/* Ignore not-yet-valid GIDs */
 		if (!gxact->valid)
@@ -529,7 +524,7 @@ TransactionIdIsPrepared(TransactionId xid)
 	for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
 	{
 		GlobalTransaction gxact = TwoPhaseState->prepXacts[i];
-		PGXACT *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+		PGXACT	   *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
 
 		if (gxact->valid && pgxact->xid == xid)
 		{
@@ -654,8 +649,8 @@ pg_prepared_xact(PG_FUNCTION_ARGS)
 	while (status->array != NULL && status->currIdx < status->ngxacts)
 	{
 		GlobalTransaction gxact = &status->array[status->currIdx++];
-		PGPROC *proc = &ProcGlobal->allProcs[gxact->pgprocno];
-		PGXACT *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+		PGPROC	   *proc = &ProcGlobal->allProcs[gxact->pgprocno];
+		PGXACT	   *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
 		Datum		values[5];
 		bool		nulls[5];
 		HeapTuple	tuple;
@@ -725,7 +720,7 @@ TwoPhaseGetDummyProc(TransactionId xid)
 	for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
 	{
 		GlobalTransaction gxact = TwoPhaseState->prepXacts[i];
-		PGXACT *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+		PGXACT	   *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
 
 		if (pgxact->xid == xid)
 		{
@@ -856,8 +851,8 @@ save_state_data(const void *data, uint32 len)
 void
 StartPrepare(GlobalTransaction gxact)
 {
-	PGPROC *proc = &ProcGlobal->allProcs[gxact->pgprocno];
-	PGXACT *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+	PGPROC	   *proc = &ProcGlobal->allProcs[gxact->pgprocno];
+	PGXACT	   *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
 	TransactionId xid = pgxact->xid;
 	TwoPhaseFileHeader hdr;
 	TransactionId *children;
@@ -1069,12 +1064,12 @@ EndPrepare(GlobalTransaction gxact)
 				 errmsg("could not close two-phase state file: %m")));
 
 	/*
-	 * Mark the prepared transaction as valid.	As soon as xact.c marks MyProc
-	 * as not running our XID (which it will do immediately after this
-	 * function returns), others can commit/rollback the xact.
+	 * Mark the prepared transaction as valid.	As soon as xact.c marks
+	 * MyPgXact as not running our XID (which it will do immediately after
+	 * this function returns), others can commit/rollback the xact.
 	 *
 	 * NB: a side effect of this is to make a dummy ProcArray entry for the
-	 * prepared XID.  This must happen before we clear the XID from MyProc,
+	 * prepared XID.  This must happen before we clear the XID from MyPgXact,
 	 * else there is a window where the XID is not running according to
 	 * TransactionIdIsInProgress, and onlookers would be entitled to assume
 	 * the xact crashed.  Instead we have a window where the same XID appears
@@ -1362,12 +1357,8 @@ FinishPreparedTransaction(const char *gid, bool isCommit)
 	for (i = 0; i < ndelrels; i++)
 	{
 		SMgrRelation srel = smgropen(delrels[i], InvalidBackendId);
-		ForkNumber	fork;
 
-		for (fork = 0; fork <= MAX_FORKNUM; fork++)
-		{
-			smgrdounlink(srel, fork, false);
-		}
+		smgrdounlink(srel, false);
 		smgrclose(srel);
 	}
 
@@ -1561,7 +1552,7 @@ CheckPointTwoPhase(XLogRecPtr redo_horizon)
 	for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
 	{
 		GlobalTransaction gxact = TwoPhaseState->prepXacts[i];
-		PGXACT *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
+		PGXACT	   *pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
 
 		if (gxact->valid &&
 			XLByteLE(gxact->prepare_lsn, redo_horizon))
@@ -1717,7 +1708,7 @@ PrescanPreparedTransactions(TransactionId **xids_p, int *nxids_p)
 			 * XID, and they may force us to advance nextXid.
 			 *
 			 * We don't expect anyone else to modify nextXid, hence we don't
-			 * need to hold a lock while examining it.  We still acquire the
+			 * need to hold a lock while examining it.	We still acquire the
 			 * lock to modify it, though.
 			 */
 			subxids = (TransactionId *)

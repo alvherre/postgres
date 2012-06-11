@@ -298,7 +298,7 @@ static void closePGconn(PGconn *conn);
 static PQconninfoOption *conninfo_init(PQExpBuffer errorMessage);
 static PQconninfoOption *parse_connection_string(const char *conninfo,
 						PQExpBuffer errorMessage, bool use_defaults);
-static int uri_prefix_length(const char *connstr);
+static int	uri_prefix_length(const char *connstr);
 static bool recognized_connection_string(const char *connstr);
 static PQconninfoOption *conninfo_parse(const char *conninfo,
 			   PQExpBuffer errorMessage, bool use_defaults);
@@ -308,7 +308,7 @@ static PQconninfoOption *conninfo_array_parse(const char *const * keywords,
 static bool conninfo_add_defaults(PQconninfoOption *options,
 					  PQExpBuffer errorMessage);
 static PQconninfoOption *conninfo_uri_parse(const char *uri,
-					  PQExpBuffer errorMessage, bool use_defaults);
+				   PQExpBuffer errorMessage, bool use_defaults);
 static bool conninfo_uri_parse_options(PQconninfoOption *options,
 						   const char *uri, PQExpBuffer errorMessage);
 static bool conninfo_uri_parse_params(char *params,
@@ -319,8 +319,8 @@ static bool get_hexdigit(char digit, int *value);
 static const char *conninfo_getval(PQconninfoOption *connOptions,
 				const char *keyword);
 static PQconninfoOption *conninfo_storeval(PQconninfoOption *connOptions,
-				const char *keyword, const char *value,
-				PQExpBuffer errorMessage, bool ignoreMissing, bool uri_decode);
+				  const char *keyword, const char *value,
+			  PQExpBuffer errorMessage, bool ignoreMissing, bool uri_decode);
 static PQconninfoOption *conninfo_find(PQconninfoOption *connOptions,
 			  const char *keyword);
 static void defaultNoticeReceiver(void *arg, const PGresult *res);
@@ -605,7 +605,7 @@ PQconnectStart(const char *conninfo)
 static void
 fillPGconn(PGconn *conn, PQconninfoOption *connOptions)
 {
-	const char	   *tmp;
+	const char *tmp;
 
 	/*
 	 * Move option values into conn structure
@@ -903,8 +903,8 @@ PQsetdbLogin(const char *pghost, const char *pgport, const char *pgoptions,
 		return NULL;
 
 	/*
-	 * If the dbName parameter contains what looks like a connection
-	 * string, parse it into conn struct using connectOptions1.
+	 * If the dbName parameter contains what looks like a connection string,
+	 * parse it into conn struct using connectOptions1.
 	 */
 	if (dbName && recognized_connection_string(dbName))
 	{
@@ -2094,7 +2094,7 @@ keep_going:						/* We will come back to here until there is
 					{
 						/*
 						 * Server failure of some sort, such as failure to
-						 * fork a backend process.  We need to process and
+						 * fork a backend process.	We need to process and
 						 * report the error message, which might be formatted
 						 * according to either protocol 2 or protocol 3.
 						 * Rather than duplicate the code for that, we flip
@@ -4305,9 +4305,9 @@ conninfo_array_parse(const char *const * keywords, const char *const * values,
 		if (strcmp(pname, "dbname") == 0 && pvalue)
 		{
 			/*
-			 * If value is a connection string, parse it, but do not use defaults
-			 * here -- those get picked up later. We only want to override for
-			 * those parameters actually passed.
+			 * If value is a connection string, parse it, but do not use
+			 * defaults here -- those get picked up later. We only want to
+			 * override for those parameters actually passed.
 			 */
 			if (recognized_connection_string(pvalue))
 			{
@@ -4544,29 +4544,29 @@ conninfo_uri_parse(const char *uri, PQExpBuffer errorMessage,
  * options from the URI.
  * If not successful, returns false and fills errorMessage accordingly.
  *
- * Parses the connection URI string in 'uri' according to the URI syntax:
+ * Parses the connection URI string in 'uri' according to the URI syntax (RFC
+ * 3986):
  *
- * postgresql://[user[:pwd]@][unix-socket][:port[/dbname]][?param1=value1&...]
- * postgresql://[user[:pwd]@][net-location][:port][/dbname][?param1=value1&...]
+ * postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]
  *
- * "net-location" is a hostname, an IPv4 address, or an IPv6 address surrounded
- * by literal square brackets.  To be recognized as a unix-domain socket, the
- * value must start with a slash '/'.  Note slight inconsistency in that dbname
- * can always be specified after net-location, but after unix-socket it can only
- * be specified if there is a port specification.
+ * where "netloc" is a hostname, an IPv4 address, or an IPv6 address surrounded
+ * by literal square brackets.
  *
- * Any of those elements might be percent-encoded (%xy).
+ * Any of the URI parts might use percent-encoding (%xy).
  */
 static bool
 conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 						   PQExpBuffer errorMessage)
 {
-	int		prefix_len;
-	char   *p;
-	char   *buf = strdup(uri);	/* need a modifiable copy of the input URI */
-	char   *start = buf;
-	char	prevchar = '\0';
-	bool	retval = false;
+	int			prefix_len;
+	char	   *p;
+	char	   *buf = strdup(uri);		/* need a modifiable copy of the input
+										 * URI */
+	char	   *start = buf;
+	char		prevchar = '\0';
+	char	   *user = NULL;
+	char	   *host = NULL;
+	bool		retval = false;
 
 	if (buf == NULL)
 	{
@@ -4593,8 +4593,6 @@ conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 		++p;
 	if (*p == '@')
 	{
-		char   *user;
-
 		/*
 		 * Found username/password designator, so URI should be of the form
 		 * "scheme://user[:password]@[netloc]".
@@ -4609,14 +4607,8 @@ conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 		prevchar = *p;
 		*p = '\0';
 
-		if (!*user)
-		{
-			printfPQExpBuffer(errorMessage,
-							  libpq_gettext("invalid empty username specifier in URI: %s\n"),
-							  uri);
-			goto cleanup;
-		}
-		if (!conninfo_storeval(options, "user", user,
+		if (*user &&
+			!conninfo_storeval(options, "user", user,
 							   errorMessage, false, true))
 			goto cleanup;
 
@@ -4628,15 +4620,8 @@ conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 				++p;
 			*p = '\0';
 
-			if (!*password)
-			{
-				printfPQExpBuffer(errorMessage,
-								  libpq_gettext("invalid empty password specifier in URI: %s\n"),
-								  uri);
-				goto cleanup;
-			}
-
-			if (!conninfo_storeval(options, "password", password,
+			if (*password &&
+				!conninfo_storeval(options, "password", password,
 								   errorMessage, false, true))
 				goto cleanup;
 		}
@@ -4656,87 +4641,65 @@ conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 	 * "p" has been incremented past optional URI credential information at
 	 * this point and now points at the "netloc" part of the URI.
 	 *
-	 * Check for local unix socket dir.
+	 * Look for IPv6 address.
 	 */
-	if (*p == '/')
+	if (*p == '[')
 	{
-		const char *socket = p;
-
-		/* Look for possible port specifier or query parameters */
-		while (*p && *p != ':' && *p != '?')
+		host = ++p;
+		while (*p && *p != ']')
 			++p;
-		prevchar = *p;
-		*p = '\0';
-
-		if (!conninfo_storeval(options, "host", socket,
-							   errorMessage, false, true))
+		if (!*p)
+		{
+			printfPQExpBuffer(errorMessage,
+							  libpq_gettext("end of string reached when looking for matching ']' in IPv6 host address in URI: %s\n"),
+							  uri);
 			goto cleanup;
+		}
+		if (p == host)
+		{
+			printfPQExpBuffer(errorMessage,
+			libpq_gettext("IPv6 host address may not be empty in URI: %s\n"),
+							  uri);
+			goto cleanup;
+		}
+
+		/* Cut off the bracket and advance */
+		*(p++) = '\0';
+
+		/*
+		 * The address may be followed by a port specifier or a slash or a
+		 * query.
+		 */
+		if (*p && *p != ':' && *p != '/' && *p != '?')
+		{
+			printfPQExpBuffer(errorMessage,
+							  libpq_gettext("unexpected '%c' at position %d in URI (expecting ':' or '/'): %s\n"),
+							  *p, (int) (p - buf + 1), uri);
+			goto cleanup;
+		}
 	}
 	else
 	{
-		/* Not a unix socket dir: parse as host name or address */
-		const char *host;
+		/* not an IPv6 address: DNS-named or IPv4 netloc */
+		host = p;
 
 		/*
-		 *
-		 * Look for IPv6 address
+		 * Look for port specifier (colon) or end of host specifier (slash),
+		 * or query (question mark).
 		 */
-		if (*p == '[')
-		{
-			host = ++p;
-			while (*p && *p != ']')
-				++p;
-			if (!*p)
-			{
-				printfPQExpBuffer(errorMessage,
-								  libpq_gettext("end of string reached when looking for matching ']' in IPv6 host address in URI: %s\n"),
-								  uri);
-				goto cleanup;
-			}
-			if (p == host)
-			{
-				printfPQExpBuffer(errorMessage,
-								  libpq_gettext("IPv6 host address may not be empty in URI: %s\n"),
-								  uri);
-				goto cleanup;
-			}
-
-			/* Cut off the bracket and advance */
-			*(p++) = '\0';
-
-			/*
-			 * The address may be followed by a port specifier or a slash or a
-			 * query.
-			 */
-			if (*p && *p != ':' && *p != '/' && *p != '?')
-			{
-				printfPQExpBuffer(errorMessage,
-								  libpq_gettext("unexpected '%c' at position %d in URI (expecting ':' or '/'): %s\n"),
-								  *p, (int) (p - buf + 1), uri);
-				goto cleanup;
-			}
-		}
-		else
-		{
-			/* not an IPv6 address: DNS-named or IPv4 netloc */
-			host = p;
-
-			/*
-			 * Look for port specifier (colon) or end of host specifier
-			 * (slash), or query (question mark).
-			 */
-			while (*p && *p != ':' && *p != '/' && *p != '?')
-				++p;
-		}
-
-		/* Save the hostname terminator before we null it */
-		prevchar = *p;
-		*p = '\0';
-
-		if (!conninfo_storeval(options, "host", host,
-							   errorMessage, false, true))
-			goto cleanup;
+		while (*p && *p != ':' && *p != '/' && *p != '?')
+			++p;
 	}
+
+	/* Save the hostname terminator before we null it */
+	prevchar = *p;
+	*p = '\0';
+
+	if (*host &&
+		!conninfo_storeval(options, "host", host,
+						   errorMessage, false, true))
+		goto cleanup;
+
 
 	if (prevchar == ':')
 	{
@@ -4748,21 +4711,15 @@ conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 		prevchar = *p;
 		*p = '\0';
 
-		if (!*port)
-		{
-			printfPQExpBuffer(errorMessage,
-							  libpq_gettext("missing port specifier in URI: %s\n"),
-							  uri);
-			goto cleanup;
-		}
-		if (!conninfo_storeval(options, "port", port,
+		if (*port &&
+			!conninfo_storeval(options, "port", port,
 							   errorMessage, false, true))
 			goto cleanup;
 	}
 
 	if (prevchar && prevchar != '?')
 	{
-		const char *dbname = ++p; /* advance past host terminator */
+		const char *dbname = ++p;		/* advance past host terminator */
 
 		/* Look for query parameters */
 		while (*p && *p != '?')
@@ -4784,7 +4741,7 @@ conninfo_uri_parse_options(PQconninfoOption *options, const char *uri,
 
 	if (prevchar)
 	{
-		++p; /* advance past terminator */
+		++p;					/* advance past terminator */
 
 		if (!conninfo_uri_parse_params(p, options, errorMessage))
 			goto cleanup;
@@ -4802,7 +4759,7 @@ cleanup:
  * Connection URI parameters parser routine
  *
  * If successful, returns true while connOptions is filled with parsed
- * parameters.  Otherwise, returns false and fills errorMessage appropriately.
+ * parameters.	Otherwise, returns false and fills errorMessage appropriately.
  *
  * Destructively modifies 'params' buffer.
  */
@@ -4813,9 +4770,10 @@ conninfo_uri_parse_params(char *params,
 {
 	while (*params)
 	{
-		const char *keyword = params;
-		const char *value = NULL;
-		char *p = params;
+		char	   *keyword = params;
+		char	   *value = NULL;
+		char	   *p = params;
+		bool		malloced = false;
 
 		/*
 		 * Scan the params string for '=' and '&', marking the end of keyword
@@ -4839,7 +4797,7 @@ conninfo_uri_parse_params(char *params,
 			}
 			else if (*p == '&' || *p == '\0')
 			{
-				char	prevchar;
+				char		prevchar;
 
 				/* Cut off value, remember old value */
 				prevchar = *p;
@@ -4853,6 +4811,7 @@ conninfo_uri_parse_params(char *params,
 									  params);
 					return false;
 				}
+
 				/*
 				 * If not at the end, advance; now pointing to start of the
 				 * next parameter, if any.
@@ -4866,34 +4825,67 @@ conninfo_uri_parse_params(char *params,
 			++p;
 		}
 
+		keyword = conninfo_uri_decode(keyword, errorMessage);
+		if (keyword == NULL)
+		{
+			/* conninfo_uri_decode already set an error message */
+			return false;
+		}
+		value = conninfo_uri_decode(value, errorMessage);
+		if (value == NULL)
+		{
+			/* conninfo_uri_decode already set an error message */
+			free(keyword);
+			return false;
+		}
+		malloced = true;
+
 		/*
-		 * Special keyword handling for improved JDBC compatibility.  Note
-		 * we fail to detect URI-encoded values here, but we don't care.
+		 * Special keyword handling for improved JDBC compatibility.
 		 */
 		if (strcmp(keyword, "ssl") == 0 &&
 			strcmp(value, "true") == 0)
 		{
+			free(keyword);
+			free(value);
+			malloced = false;
+
 			keyword = "sslmode";
 			value = "require";
 		}
 
 		/*
 		 * Store the value if the corresponding option exists; ignore
-		 * otherwise.
+		 * otherwise.  At this point both keyword and value are not
+		 * URI-encoded.
 		 */
 		if (!conninfo_storeval(connOptions, keyword, value,
-							   errorMessage, true, true))
+							   errorMessage, true, false))
 		{
 			/*
 			 * Check if there was a hard error when decoding or storing the
 			 * option.
 			 */
 			if (errorMessage->len != 0)
+			{
+				if (malloced)
+				{
+					free(keyword);
+					free(value);
+				}
 				return false;
+			}
 
-			fprintf(stderr,
-					libpq_gettext("WARNING: ignoring unrecognized URI query parameter: %s\n"),
-					keyword);
+			printfPQExpBuffer(errorMessage,
+							  libpq_gettext(
+									 "invalid URI query parameter \"%s\"\n"),
+							  keyword);
+			return false;
+		}
+		if (malloced)
+		{
+			free(keyword);
+			free(value);
 		}
 
 		/* Proceed to next key=value pair */
@@ -4918,8 +4910,8 @@ conninfo_uri_parse_params(char *params,
 static char *
 conninfo_uri_decode(const char *str, PQExpBuffer errorMessage)
 {
-	char *buf = malloc(strlen(str) + 1);
-	char *p = buf;
+	char	   *buf = malloc(strlen(str) + 1);
+	char	   *p = buf;
 	const char *q = str;
 
 	if (buf == NULL)
@@ -4938,20 +4930,20 @@ conninfo_uri_decode(const char *str, PQExpBuffer errorMessage)
 		}
 		else
 		{
-			int hi;
-			int lo;
-			int c;
+			int			hi;
+			int			lo;
+			int			c;
 
-			++q; /* skip the percent sign itself */
+			++q;				/* skip the percent sign itself */
 
 			/*
-			 * Possible EOL will be caught by the first call to get_hexdigit(),
-			 * so we never dereference an invalid q pointer.
+			 * Possible EOL will be caught by the first call to
+			 * get_hexdigit(), so we never dereference an invalid q pointer.
 			 */
 			if (!(get_hexdigit(*q++, &hi) && get_hexdigit(*q++, &lo)))
 			{
 				printfPQExpBuffer(errorMessage,
-								  libpq_gettext("invalid percent-encoded token: %s\n"),
+						libpq_gettext("invalid percent-encoded token: %s\n"),
 								  str);
 				free(buf);
 				return NULL;
@@ -5017,7 +5009,8 @@ conninfo_getval(PQconninfoOption *connOptions,
  * Store a (new) value for an option corresponding to the keyword in
  * connOptions array.
  *
- * If uri_decode is true, keyword and value are URI-decoded.
+ * If uri_decode is true, the value is URI-decoded.  The keyword is always
+ * assumed to be non URI-encoded.
  *
  * If successful, returns a pointer to the corresponding PQconninfoOption,
  * which value is replaced with a strdup'd copy of the passed value string.
@@ -5034,32 +5027,16 @@ conninfo_storeval(PQconninfoOption *connOptions,
 				  bool uri_decode)
 {
 	PQconninfoOption *option;
-	char		   *value_copy;
-	char		   *keyword_copy = NULL;
+	char	   *value_copy;
 
-	/*
-	 * Decode the keyword.  XXX this is seldom necessary as keywords do not
-	 * normally need URI-escaping.  It'd be good to do away with the
-	 * malloc/free overhead and the general ugliness, but I don't see a
-	 * better way to handle it.
-	 */
-	if (uri_decode)
-	{
-		keyword_copy = conninfo_uri_decode(keyword, errorMessage);
-		if (keyword_copy == NULL)
-			/* conninfo_uri_decode already set an error message */
-			goto failed;
-	}
-
-	option = conninfo_find(connOptions,
-						   keyword_copy != NULL ? keyword_copy : keyword);
+	option = conninfo_find(connOptions, keyword);
 	if (option == NULL)
 	{
 		if (!ignoreMissing)
 			printfPQExpBuffer(errorMessage,
-							  libpq_gettext("invalid connection option \"%s\"\n"),
+						 libpq_gettext("invalid connection option \"%s\"\n"),
 							  keyword);
-		goto failed;
+		return NULL;
 	}
 
 	if (uri_decode)
@@ -5067,7 +5044,7 @@ conninfo_storeval(PQconninfoOption *connOptions,
 		value_copy = conninfo_uri_decode(value, errorMessage);
 		if (value_copy == NULL)
 			/* conninfo_uri_decode already set an error message */
-			goto failed;
+			return NULL;
 	}
 	else
 	{
@@ -5076,7 +5053,7 @@ conninfo_storeval(PQconninfoOption *connOptions,
 		if (value_copy == NULL)
 		{
 			printfPQExpBuffer(errorMessage, libpq_gettext("out of memory\n"));
-			goto failed;
+			return NULL;
 		}
 	}
 
@@ -5084,14 +5061,7 @@ conninfo_storeval(PQconninfoOption *connOptions,
 		free(option->val);
 	option->val = value_copy;
 
-	if (keyword_copy != NULL)
-		free(keyword_copy);
 	return option;
-
-failed:
-	if (keyword_copy != NULL)
-		free(keyword_copy);
-	return NULL;
 }
 
 /*

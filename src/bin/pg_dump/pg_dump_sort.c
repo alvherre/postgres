@@ -111,7 +111,7 @@ static bool TopoSort(DumpableObject **objs,
 static void addHeapElement(int val, int *heap, int heapLength);
 static int	removeHeapElement(int *heap, int heapLength);
 static void findDependencyLoops(DumpableObject **objs, int nObjs, int totObjs);
-static int	findLoop(DumpableObject *obj,
+static int findLoop(DumpableObject *obj,
 		 DumpId startPoint,
 		 bool *processed,
 		 DumpableObject **workspace,
@@ -139,8 +139,8 @@ sortDumpableObjectsByTypeName(DumpableObject **objs, int numObjs)
 static int
 DOTypeNameCompare(const void *p1, const void *p2)
 {
-	DumpableObject *obj1 = *(DumpableObject * const *) p1;
-	DumpableObject *obj2 = *(DumpableObject * const *) p2;
+	DumpableObject *obj1 = *(DumpableObject *const *) p1;
+	DumpableObject *obj2 = *(DumpableObject *const *) p2;
 	int			cmpval;
 
 	/* Sort by type */
@@ -171,8 +171,8 @@ DOTypeNameCompare(const void *p1, const void *p2)
 	/* To have a stable sort order, break ties for some object types */
 	if (obj1->objType == DO_FUNC || obj1->objType == DO_AGG)
 	{
-		FuncInfo   *fobj1 = *(FuncInfo * const *) p1;
-		FuncInfo   *fobj2 = *(FuncInfo * const *) p2;
+		FuncInfo   *fobj1 = *(FuncInfo *const *) p1;
+		FuncInfo   *fobj2 = *(FuncInfo *const *) p2;
 
 		cmpval = fobj1->nargs - fobj2->nargs;
 		if (cmpval != 0)
@@ -180,8 +180,8 @@ DOTypeNameCompare(const void *p1, const void *p2)
 	}
 	else if (obj1->objType == DO_OPERATOR)
 	{
-		OprInfo	*oobj1 = *(OprInfo * const *) p1;
-		OprInfo *oobj2 = *(OprInfo * const *) p2;
+		OprInfo    *oobj1 = *(OprInfo *const *) p1;
+		OprInfo    *oobj2 = *(OprInfo *const *) p2;
 
 		/* oprkind is 'l', 'r', or 'b'; this sorts prefix, postfix, infix */
 		cmpval = (oobj2->oprkind - oobj1->oprkind);
@@ -190,8 +190,8 @@ DOTypeNameCompare(const void *p1, const void *p2)
 	}
 	else if (obj1->objType == DO_ATTRDEF)
 	{
-		AttrDefInfo *adobj1 = *(AttrDefInfo * const *) p1;
-		AttrDefInfo *adobj2 = *(AttrDefInfo * const *) p2;
+		AttrDefInfo *adobj1 = *(AttrDefInfo *const *) p1;
+		AttrDefInfo *adobj2 = *(AttrDefInfo *const *) p2;
 
 		cmpval = (adobj1->adnum - adobj2->adnum);
 		if (cmpval != 0)
@@ -220,8 +220,8 @@ sortDumpableObjectsByTypeOid(DumpableObject **objs, int numObjs)
 static int
 DOTypeOidCompare(const void *p1, const void *p2)
 {
-	DumpableObject *obj1 = *(DumpableObject * const *) p1;
-	DumpableObject *obj2 = *(DumpableObject * const *) p2;
+	DumpableObject *obj1 = *(DumpableObject *const *) p1;
+	DumpableObject *obj2 = *(DumpableObject *const *) p2;
 	int			cmpval;
 
 	cmpval = oldObjectTypePriority[obj1->objType] -
@@ -545,7 +545,7 @@ findDependencyLoops(DumpableObject **objs, int nObjs, int totObjs)
 		{
 			/*
 			 * There's no loop starting at this object, but mark it processed
-			 * anyway.  This is not necessary for correctness, but saves later
+			 * anyway.	This is not necessary for correctness, but saves later
 			 * invocations of findLoop() from uselessly chasing references to
 			 * such an object.
 			 */
@@ -587,7 +587,7 @@ findLoop(DumpableObject *obj,
 	int			i;
 
 	/*
-	 * Reject if obj is already processed.  This test prevents us from finding
+	 * Reject if obj is already processed.	This test prevents us from finding
 	 * loops that overlap previously-processed loops.
 	 */
 	if (processed[obj->dumpId])
@@ -645,7 +645,7 @@ findLoop(DumpableObject *obj,
  * A user-defined datatype will have a dependency loop with each of its
  * I/O functions (since those have the datatype as input or output).
  * Similarly, a range type will have a loop with its canonicalize function,
- * if any.  Break the loop by making the function depend on the associated
+ * if any.	Break the loop by making the function depend on the associated
  * shell type, instead.
  */
 static void
@@ -993,7 +993,7 @@ repairDependencyLoop(DumpableObject **loop,
 		write_msg(NULL, "NOTICE: there are circular foreign-key constraints among these table(s):\n");
 		for (i = 0; i < nLoop; i++)
 			write_msg(NULL, "  %s\n", loop[i]->name);
-		write_msg(NULL, "You may not be able to restore the dump without using --disable-triggers or temporarily dropping the constraints.\n");
+		write_msg(NULL, "You might not be able to restore the dump without using --disable-triggers or temporarily dropping the constraints.\n");
 		write_msg(NULL, "Consider using a full dump instead of a --data-only dump to avoid this problem.\n");
 		if (nLoop > 1)
 			removeObjectDependency(loop[0], loop[1]->dumpId);

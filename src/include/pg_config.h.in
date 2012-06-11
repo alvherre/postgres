@@ -48,9 +48,6 @@
 /* Define to the default TCP port number as a string constant. */
 #undef DEF_PGPORT_STR
 
-/* Define to 1 to enable DTrace support. (--enable-dtrace) */
-#undef ENABLE_DTRACE
-
 /* Define to build with GSSAPI support. (--with-gssapi) */
 #undef ENABLE_GSS
 
@@ -148,12 +145,6 @@
 
 /* Define to 1 if you have the <editline/readline.h> header file. */
 #undef HAVE_EDITLINE_READLINE_H
-
-/* Define to 1 if you have the `ERR_set_mark' function. */
-#undef HAVE_ERR_SET_MARK
-
-/* Define to 1 if you have the `fcvt' function. */
-#undef HAVE_FCVT
 
 /* Define to 1 if you have the `fdatasync' function. */
 #undef HAVE_FDATASYNC
@@ -268,12 +259,6 @@
 
 /* Define to 1 if you have isinf(). */
 #undef HAVE_ISINF
-
-/* Define to 1 if you have the <kernel/image.h> header file. */
-#undef HAVE_KERNEL_IMAGE_H
-
-/* Define to 1 if you have the <kernel/OS.h> header file. */
-#undef HAVE_KERNEL_OS_H
 
 /* Define to 1 if `e_data' is member of `krb5_error'. */
 #undef HAVE_KRB5_ERROR_E_DATA
@@ -520,20 +505,11 @@
 /* Define to 1 if `__ss_len' is member of `struct sockaddr_storage'. */
 #undef HAVE_STRUCT_SOCKADDR_STORAGE___SS_LEN
 
-/* Define to 1 if the system has the type `struct sockaddr_un'. */
-#undef HAVE_STRUCT_SOCKADDR_UN
-
 /* Define to 1 if `tm_zone' is member of `struct tm'. */
 #undef HAVE_STRUCT_TM_TM_ZONE
 
-/* Define to 1 if you have the <SupportDefs.h> header file. */
-#undef HAVE_SUPPORTDEFS_H
-
 /* Define to 1 if you have the `symlink' function. */
 #undef HAVE_SYMLINK
-
-/* Define to 1 if you have the `sysconf' function. */
-#undef HAVE_SYSCONF
 
 /* Define to 1 if you have the syslog interface. */
 #undef HAVE_SYSLOG

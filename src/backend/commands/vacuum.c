@@ -323,13 +323,13 @@ get_rel_oids(Oid relid, const RangeVar *vacrel)
 		Oid			relid;
 
 		/*
-		 * Since we don't take a lock here, the relation might be gone,
-		 * or the RangeVar might no longer refer to the OID we look up
-		 * here.  In the former case, VACUUM will do nothing; in the
-		 * latter case, it will process the OID we looked up here, rather
-		 * than the new one.  Neither is ideal, but there's little practical
-		 * alternative, since we're going to commit this transaction and
-		 * begin a new one between now and then.
+		 * Since we don't take a lock here, the relation might be gone, or the
+		 * RangeVar might no longer refer to the OID we look up here.  In the
+		 * former case, VACUUM will do nothing; in the latter case, it will
+		 * process the OID we looked up here, rather than the new one.
+		 * Neither is ideal, but there's little practical alternative, since
+		 * we're going to commit this transaction and begin a new one between
+		 * now and then.
 		 */
 		relid = RangeVarGetRelid(vacrel, NoLock, false);
 
@@ -951,7 +951,7 @@ vacuum_rel(Oid relid, VacuumStmt *vacstmt, bool do_toast, bool for_wraparound)
 		 *
 		 * Note: these flags remain set until CommitTransaction or
 		 * AbortTransaction.  We don't want to clear them until we reset
-		 * MyProc->xid/xmin, else OldestXmin might appear to go backwards,
+		 * MyPgXact->xid/xmin, else OldestXmin might appear to go backwards,
 		 * which is probably Not Good.
 		 */
 		LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);

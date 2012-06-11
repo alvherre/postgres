@@ -1170,7 +1170,7 @@ do_status(void)
 			}
 		}
 		else
-		/* must be a postmaster */
+			/* must be a postmaster */
 		{
 			if (postmaster_is_alive((pid_t) pid))
 			{
@@ -1188,9 +1188,12 @@ do_status(void)
 		}
 	}
 	printf(_("%s: no server running\n"), progname);
+
 	/*
-	 * The Linux Standard Base Core Specification 3.1 says this should return '3'
-	 * http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html
+	 * The Linux Standard Base Core Specification 3.1 says this should return
+	 * '3'
+	 * http://refspecs.freestandards.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-ge
+	 * neric/iniscrptact.html
 	 */
 	exit(3);
 }
@@ -1762,9 +1765,9 @@ do_help(void)
 #endif
 
 	printf(_("\nCommon options:\n"));
-	printf(_("  -D, --pgdata DATADIR   location of the database storage area\n"));
+	printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
 	printf(_("  -s, --silent           only print errors, no informational messages\n"));
-	printf(_("  -t, --timeout SECS     seconds to wait when using -w option\n"));
+	printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
 	printf(_("  -w                     wait until operation completes\n"));
 	printf(_("  -W                     do not wait until operation completes\n"));
 	printf(_("  --help                 show this help, then exit\n"));
@@ -1778,12 +1781,12 @@ do_help(void)
 #else
 	printf(_("  -c, --core-files       not applicable on this platform\n"));
 #endif
-	printf(_("  -l, --log FILENAME     write (or append) server log to FILENAME\n"));
+	printf(_("  -l, --log=FILENAME     write (or append) server log to FILENAME\n"));
 	printf(_("  -o OPTIONS             command line options to pass to postgres\n"
 	 "                         (PostgreSQL server executable) or initdb\n"));
 	printf(_("  -p PATH-TO-POSTGRES    normally not necessary\n"));
 	printf(_("\nOptions for stop or restart:\n"));
-	printf(_("  -m, --mode MODE        MODE can be \"smart\", \"fast\", or \"immediate\"\n"));
+	printf(_("  -m, --mode=MODE        MODE can be \"smart\", \"fast\", or \"immediate\"\n"));
 
 	printf(_("\nShutdown modes are:\n"));
 	printf(_("  smart       quit after all clients have disconnected\n"));
@@ -1791,7 +1794,7 @@ do_help(void)
 	printf(_("  immediate   quit without complete shutdown; will lead to recovery on restart\n"));
 
 	printf(_("\nAllowed signal names for kill:\n"));
-	printf("  HUP INT QUIT ABRT TERM USR1 USR2\n");
+	printf("  ABRT HUP INT QUIT TERM USR1 USR2\n");
 
 #if defined(WIN32) || defined(__CYGWIN__)
 	printf(_("\nOptions for register and unregister:\n"));
@@ -1851,7 +1854,7 @@ set_sig(char *signame)
 		sig = SIGABRT;
 #if 0
 	/* probably should NOT provide SIGKILL */
-	else if (strcmp(signame,"KILL") == 0)
+	else if (strcmp(signame, "KILL") == 0)
 		sig = SIGKILL;
 #endif
 	else if (strcmp(signame, "TERM") == 0)
@@ -1894,7 +1897,9 @@ set_starttype(char *starttypeopt)
 static void
 adjust_data_dir(void)
 {
-	char		cmd[MAXPGPATH], filename[MAXPGPATH], *my_exec_path;
+	char		cmd[MAXPGPATH],
+				filename[MAXPGPATH],
+			   *my_exec_path;
 	FILE	   *fd;
 
 	/* If there is no postgresql.conf, it can't be a config-only dir */
@@ -1926,7 +1931,7 @@ adjust_data_dir(void)
 	fd = popen(cmd, "r");
 	if (fd == NULL || fgets(filename, sizeof(filename), fd) == NULL)
 	{
-		write_stderr(_("%s: cannot find the data directory using %s\n"), progname, my_exec_path);
+		write_stderr(_("%s: could not determine the data directory using \"%s\"\n"), progname, cmd);
 		exit(1);
 	}
 	pclose(fd);
@@ -2184,7 +2189,7 @@ main(int argc, char **argv)
 	}
 
 	adjust_data_dir();
-	
+
 	if (pg_config == NULL &&
 		ctl_command != KILL_COMMAND && ctl_command != UNREGISTER_COMMAND)
 	{
