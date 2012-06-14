@@ -817,8 +817,7 @@ index_create(Relation heapRelation,
 								RELKIND_INDEX,
 								relpersistence,
 								shared_relation,
-								mapped_relation,
-								allow_system_table_mods);
+								mapped_relation);
 
 	Assert(indexRelationId == RelationGetRelid(indexRelation));
 
@@ -837,7 +836,6 @@ index_create(Relation heapRelation,
 	 */
 	indexRelation->rd_rel->relowner = heapRelation->rd_rel->relowner;
 	indexRelation->rd_rel->relam = accessMethodObjectId;
-	indexRelation->rd_rel->relkind = RELKIND_INDEX;
 	indexRelation->rd_rel->relhasoids = false;
 
 	/*
