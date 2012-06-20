@@ -279,7 +279,7 @@ help(const char *progname)
 #endif
 	printf(_("  -B NBUFFERS        number of shared buffers\n"));
 	printf(_("  -c NAME=VALUE      set run-time parameter\n"));
-	printf(_("  -C NAME            return run-time parameter\n"));
+	printf(_("  -C NAME            print value of run-time parameter, then exit\n"));
 	printf(_("  -d 1-5             debugging level\n"));
 	printf(_("  -D DATADIR         database directory\n"));
 	printf(_("  -e                 use European date input format (DMY)\n"));
@@ -295,10 +295,10 @@ help(const char *progname)
 	printf(_("  -p PORT            port number to listen on\n"));
 	printf(_("  -s                 show statistics after each query\n"));
 	printf(_("  -S WORK-MEM        set amount of memory for sorts (in kB)\n"));
+	printf(_("  -V, --version      output version information, then exit\n"));
 	printf(_("  --NAME=VALUE       set run-time parameter\n"));
 	printf(_("  --describe-config  describe configuration parameters, then exit\n"));
-	printf(_("  --help             show this help, then exit\n"));
-	printf(_("  --version          output version information, then exit\n"));
+	printf(_("  -?, --help         show this help, then exit\n"));
 
 	printf(_("\nDeveloper options:\n"));
 	printf(_("  -f s|i|n|m|h       forbid use of some plan types\n"));

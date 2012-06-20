@@ -1018,7 +1018,7 @@ StartRestoreBlob(ArchiveHandle *AH, Oid oid, bool drop)
 	/* Initialize the LO Buffer */
 	AH->lo_buf_used = 0;
 
-	ahlog(AH, 2, "restoring large object with OID %u\n", oid);
+	ahlog(AH, 1, "restoring large object with OID %u\n", oid);
 
 	/* With an old archive we must do drop and create logic here */
 	if (old_blob_style && drop)
@@ -1566,7 +1566,7 @@ buildTocEntryArrays(ArchiveHandle *AH)
 	{
 		/* this check is purely paranoia, maxDumpId should be correct */
 		if (te->dumpId <= 0 || te->dumpId > maxDumpId)
-			exit_horribly(modulename, "bad dumpId");
+			exit_horribly(modulename, "bad dumpId\n");
 
 		/* tocsByDumpId indexes all TOCs by their dump ID */
 		AH->tocsByDumpId[te->dumpId] = te;
@@ -1587,7 +1587,7 @@ buildTocEntryArrays(ArchiveHandle *AH)
 			 * item's dump ID, so there should be a place for it in the array.
 			 */
 			if (tableId <= 0 || tableId > maxDumpId)
-				exit_horribly(modulename, "bad table dumpId for TABLE DATA item");
+				exit_horribly(modulename, "bad table dumpId for TABLE DATA item\n");
 
 			AH->tableDataId[tableId] = te->dumpId;
 		}
