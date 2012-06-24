@@ -181,6 +181,15 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
      </varlistentry>
 
      <varlistentry>
+      <term><option>--foreign-keys</option></term>
+      <listitem>
+       <para>
+        Create foreign key constraints between the standard tables.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><option>--index-tablespace=<replaceable>index_tablespace</replaceable></option></term>
       <listitem>
        <para>
@@ -453,6 +462,26 @@ pgbench <optional> <replaceable>options</> </optional> <replaceable>dbname</>
       </listitem>
      </varlistentry>
 
+     <varlistentry>
+      <term><option>-V</></term>
+      <term><option>--version</></term>
+      <listitem>
+       <para>
+        Print the <application>pgbench</application> version and exit.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-?</></term>
+      <term><option>--help</></term>
+      <listitem>
+       <para>
+        Show help about <application>pgbench</application> command line
+        arguments, and exit.
+       </para>
+      </listitem>
+     </varlistentry>
     </variablelist>
    </para>
 
