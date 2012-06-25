@@ -60,8 +60,7 @@ extern char *optarg;
 
 
 static ControlFileData ControlFile;		/* pg_control values */
-static uint32 newXlogId,
-			newXlogSeg;			/* ID/Segment of new XLOG segment */
+static XLogSegNo newXlogSegNo;	/* new XLOG segment # */
 static bool guessed = false;	/* T if we had to guess at any values */
 static const char *progname;
 
@@ -90,12 +89,9 @@ main(int argc, char *argv[])
 	MultiXactId set_mxid = 0;
 	int32		oldestMultiAge = -1;
 	MultiXactOffset set_mxoff = (MultiXactOffset) -1;
-	uint32		minXlogTli = 0,
-				minXlogId = 0,
-				minXlogSeg = 0;
+	uint32		minXlogTli = 0;
+	XLogSegNo	minXlogSegNo = 0;
 	char	   *endptr;
-	char	   *endptr2;
-	char	   *endptr3;
 	char	   *DataDir;
 	int			fd;
 	char		path[MAXPGPATH];
@@ -223,27 +219,13 @@ main(int argc, char *argv[])
 				break;
 
 			case 'l':
-				minXlogTli = strtoul(optarg, &endptr, 0);
-				if (endptr == optarg || *endptr != ',')
+				if (strspn(optarg, "01234567890ABCDEFabcdef") != 24)
 				{
 					fprintf(stderr, _("%s: invalid argument for option -l\n"), progname);
 					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 					exit(1);
 				}
-				minXlogId = strtoul(endptr + 1, &endptr2, 0);
-				if (endptr2 == endptr + 1 || *endptr2 != ',')
-				{
-					fprintf(stderr, _("%s: invalid argument for option -l\n"), progname);
-					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
-					exit(1);
-				}
-				minXlogSeg = strtoul(endptr2 + 1, &endptr3, 0);
-				if (endptr3 == endptr2 + 1 || *endptr3 != '\0')
-				{
-					fprintf(stderr, _("%s: invalid argument for option -l\n"), progname);
-					fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
-					exit(1);
-				}
+				XLogFromFileName(optarg, &minXlogTli, &minXlogSegNo);
 				break;
 
 			default:
@@ -314,7 +296,7 @@ main(int argc, char *argv[])
 		GuessControlValues();
 
 	/*
-	 * Also look at existing segment files to set up newXlogId/newXlogSeg
+	 * Also look at existing segment files to set up newXlogSegNo
 	 */
 	FindEndOfXLOG();
 
@@ -368,13 +350,8 @@ main(int argc, char *argv[])
 	if (minXlogTli > ControlFile.checkPointCopy.ThisTimeLineID)
 		ControlFile.checkPointCopy.ThisTimeLineID = minXlogTli;
 
-	if (minXlogId > newXlogId ||
-		(minXlogId == newXlogId &&
-		 minXlogSeg > newXlogSeg))
-	{
-		newXlogId = minXlogId;
-		newXlogSeg = minXlogSeg;
-	}
+	if (minXlogSegNo > newXlogSegNo)
+		newXlogSegNo = minXlogSegNo;
 
 	/*
 	 * If we had to guess anything, and -f was not given, just print the
@@ -519,8 +496,7 @@ GuessControlValues(void)
 
 	ControlFile.system_identifier = sysidentifier;
 
-	ControlFile.checkPointCopy.redo.xlogid = 0;
-	ControlFile.checkPointCopy.redo.xrecoff = SizeOfXLogLongPHD;
+	ControlFile.checkPointCopy.redo = SizeOfXLogLongPHD;
 	ControlFile.checkPointCopy.ThisTimeLineID = 1;
 	ControlFile.checkPointCopy.fullPageWrites = false;
 	ControlFile.checkPointCopy.nextXidEpoch = 0;
@@ -580,6 +556,7 @@ static void
 PrintControlValues(bool guessed)
 {
 	char		sysident_str[32];
+	char		fname[MAXFNAMELEN];
 
 	if (guessed)
 		printf(_("Guessed pg_control values:\n\n"));
@@ -593,10 +570,10 @@ PrintControlValues(bool guessed)
 	snprintf(sysident_str, sizeof(sysident_str), UINT64_FORMAT,
 			 ControlFile.system_identifier);
 
-	printf(_("First log file ID after reset:        %u\n"),
-		   newXlogId);
-	printf(_("First log file segment after reset:   %u\n"),
-		   newXlogSeg);
+	XLogFileName(fname, ControlFile.checkPointCopy.ThisTimeLineID, newXlogSegNo);
+
+	printf(_("First log segment after reset:        %s\n"),
+		   fname);
 	printf(_("pg_control version number:            %u\n"),
 		   ControlFile.pg_control_version);
 	printf(_("Catalog version number:               %u\n"),
@@ -663,24 +640,19 @@ RewriteControlFile(void)
 
 	/*
 	 * Adjust fields as needed to force an empty XLOG starting at
-	 * newXlogId/newXlogSeg.
+	 * newXlogSegNo.
 	 */
-	ControlFile.checkPointCopy.redo.xlogid = newXlogId;
-	ControlFile.checkPointCopy.redo.xrecoff =
-		newXlogSeg * XLogSegSize + SizeOfXLogLongPHD;
+	XLogSegNoOffsetToRecPtr(newXlogSegNo, SizeOfXLogLongPHD,
+							ControlFile.checkPointCopy.redo);
 	ControlFile.checkPointCopy.time = (pg_time_t) time(NULL);
 
 	ControlFile.state = DB_SHUTDOWNED;
 	ControlFile.time = (pg_time_t) time(NULL);
 	ControlFile.checkPoint = ControlFile.checkPointCopy.redo;
-	ControlFile.prevCheckPoint.xlogid = 0;
-	ControlFile.prevCheckPoint.xrecoff = 0;
-	ControlFile.minRecoveryPoint.xlogid = 0;
-	ControlFile.minRecoveryPoint.xrecoff = 0;
-	ControlFile.backupStartPoint.xlogid = 0;
-	ControlFile.backupStartPoint.xrecoff = 0;
-	ControlFile.backupEndPoint.xlogid = 0;
-	ControlFile.backupEndPoint.xrecoff = 0;
+	ControlFile.prevCheckPoint = 0;
+	ControlFile.minRecoveryPoint = 0;
+	ControlFile.backupStartPoint = 0;
+	ControlFile.backupEndPoint = 0;
 	ControlFile.backupEndRequired = false;
 
 	/*
@@ -767,14 +739,16 @@ FindEndOfXLOG(void)
 {
 	DIR		   *xldir;
 	struct dirent *xlde;
+	uint64		segs_per_xlogid;
+	uint64		xlogbytepos;
 
 	/*
 	 * Initialize the max() computation using the last checkpoint address from
 	 * old pg_control.	Note that for the moment we are working with segment
 	 * numbering according to the old xlog seg size.
 	 */
-	newXlogId = ControlFile.checkPointCopy.redo.xlogid;
-	newXlogSeg = ControlFile.checkPointCopy.redo.xrecoff / ControlFile.xlog_seg_size;
+	segs_per_xlogid = (0x100000000L / ControlFile.xlog_seg_size);
+	newXlogSegNo = ControlFile.checkPointCopy.redo / ControlFile.xlog_seg_size;
 
 	/*
 	 * Scan the pg_xlog directory to find existing WAL segment files. We
@@ -798,8 +772,10 @@ FindEndOfXLOG(void)
 			unsigned int tli,
 						log,
 						seg;
+			XLogSegNo	segno;
 
 			sscanf(xlde->d_name, "%08X%08X%08X", &tli, &log, &seg);
+			segno = ((uint64) log) * segs_per_xlogid + seg;
 
 			/*
 			 * Note: we take the max of all files found, regardless of their
@@ -807,12 +783,8 @@ FindEndOfXLOG(void)
 			 * timelines other than the target TLI, but this seems safer.
 			 * Better too large a result than too small...
 			 */
-			if (log > newXlogId ||
-				(log == newXlogId && seg > newXlogSeg))
-			{
-				newXlogId = log;
-				newXlogSeg = seg;
-			}
+			if (segno > newXlogSegNo)
+				newXlogSegNo = segno;
 		}
 		errno = 0;
 	}
@@ -838,11 +810,9 @@ FindEndOfXLOG(void)
 	 * Finally, convert to new xlog seg size, and advance by one to ensure we
 	 * are in virgin territory.
 	 */
-	newXlogSeg *= ControlFile.xlog_seg_size;
-	newXlogSeg = (newXlogSeg + XLogSegSize - 1) / XLogSegSize;
-
-	/* be sure we wrap around correctly at end of a logfile */
-	NextLogSeg(newXlogId, newXlogSeg);
+	xlogbytepos = newXlogSegNo * ControlFile.xlog_seg_size;
+	newXlogSegNo = (xlogbytepos + XLogSegSize - 1) / XLogSegSize;
+	newXlogSegNo++;
 }
 
 
@@ -982,10 +952,7 @@ WriteEmptyXLOG(void)
 	page->xlp_magic = XLOG_PAGE_MAGIC;
 	page->xlp_info = XLP_LONG_HEADER;
 	page->xlp_tli = ControlFile.checkPointCopy.ThisTimeLineID;
-	page->xlp_pageaddr.xlogid =
-		ControlFile.checkPointCopy.redo.xlogid;
-	page->xlp_pageaddr.xrecoff =
-		ControlFile.checkPointCopy.redo.xrecoff - SizeOfXLogLongPHD;
+	page->xlp_pageaddr = ControlFile.checkPointCopy.redo - SizeOfXLogLongPHD;
 	longpage = (XLogLongPageHeader) page;
 	longpage->xlp_sysid = ControlFile.system_identifier;
 	longpage->xlp_seg_size = XLogSegSize;
@@ -993,8 +960,7 @@ WriteEmptyXLOG(void)
 
 	/* Insert the initial checkpoint record */
 	record = (XLogRecord *) ((char *) page + SizeOfXLogLongPHD);
-	record->xl_prev.xlogid = 0;
-	record->xl_prev.xrecoff = 0;
+	record->xl_prev = 0;
 	record->xl_xid = InvalidTransactionId;
 	record->xl_tot_len = SizeOfXLogRecord + sizeof(CheckPoint);
 	record->xl_len = sizeof(CheckPoint);
@@ -1005,14 +971,12 @@ WriteEmptyXLOG(void)
 
 	INIT_CRC32(crc);
 	COMP_CRC32(crc, &ControlFile.checkPointCopy, sizeof(CheckPoint));
-	COMP_CRC32(crc, (char *) record + sizeof(pg_crc32),
-			   SizeOfXLogRecord - sizeof(pg_crc32));
+	COMP_CRC32(crc, (char *) record, offsetof(XLogRecord, xl_crc));
 	FIN_CRC32(crc);
 	record->xl_crc = crc;
 
 	/* Write the first page */
-	XLogFilePath(path, ControlFile.checkPointCopy.ThisTimeLineID,
-				 newXlogId, newXlogSeg);
+	XLogFilePath(path, ControlFile.checkPointCopy.ThisTimeLineID, newXlogSegNo);
 
 	unlink(path);
 

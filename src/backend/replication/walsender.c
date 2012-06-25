@@ -87,15 +87,14 @@ int			replication_timeout = 60 * 1000;	/* maximum time to send one
  * but for walsender to read the XLOG.
  */
 static int	sendFile = -1;
-static uint32 sendId = 0;
-static uint32 sendSeg = 0;
+static XLogSegNo sendSegNo = 0;
 static uint32 sendOff = 0;
 
 /*
  * How far have we sent WAL already? This is also advertised in
  * MyWalSnd->sentPtr.  (Actually, this is the next WAL location to send.)
  */
-static XLogRecPtr sentPtr = {0, 0};
+static XLogRecPtr sentPtr = 0;
 
 /*
  * Buffer for processing reply messages.
@@ -301,8 +300,7 @@ IdentifySystem(void)
 
 	logptr = am_cascading_walsender ? GetStandbyFlushRecPtr() : GetInsertRecPtr();
 
-	snprintf(xpos, sizeof(xpos), "%X/%X",
-			 logptr.xlogid, logptr.xrecoff);
+	snprintf(xpos, sizeof(xpos), "%X/%X", (uint32) (logptr >> 32), (uint32) logptr);
 
 	/* Send a RowDescription message */
 	pq_beginmessage(&buf, 'T');
@@ -614,9 +612,9 @@ ProcessStandbyReplyMessage(void)
 	pq_copymsgbytes(&reply_message, (char *) &reply, sizeof(StandbyReplyMessage));
 
 	elog(DEBUG2, "write %X/%X flush %X/%X apply %X/%X",
-		 reply.write.xlogid, reply.write.xrecoff,
-		 reply.flush.xlogid, reply.flush.xrecoff,
-		 reply.apply.xlogid, reply.apply.xrecoff);
+		 (uint32) (reply.write << 32), (uint32) reply.write,
+		 (uint32) (reply.flush << 32), (uint32) reply.flush,
+		 (uint32) (reply.apply << 32), (uint32) reply.apply);
 
 	/*
 	 * Update shared state for this WalSender process based on reply data from
@@ -977,10 +975,8 @@ XLogRead(char *buf, XLogRecPtr startptr, Size count)
 	char	   *p;
 	XLogRecPtr	recptr;
 	Size		nbytes;
-	uint32		lastRemovedLog;
-	uint32		lastRemovedSeg;
-	uint32		log;
-	uint32		seg;
+	XLogSegNo	lastRemovedSegNo;
+	XLogSegNo	segno;
 
 retry:
 	p = buf;
@@ -993,9 +989,9 @@ retry:
 		int			segbytes;
 		int			readbytes;
 
-		startoff = recptr.xrecoff % XLogSegSize;
+		startoff = recptr % XLogSegSize;
 
-		if (sendFile < 0 || !XLByteInSeg(recptr, sendId, sendSeg))
+		if (sendFile < 0 || !XLByteInSeg(recptr, sendSegNo))
 		{
 			char		path[MAXPGPATH];
 
@@ -1003,8 +999,8 @@ retry:
 			if (sendFile >= 0)
 				close(sendFile);
 
-			XLByteToSeg(recptr, sendId, sendSeg);
-			XLogFilePath(path, ThisTimeLineID, sendId, sendSeg);
+			XLByteToSeg(recptr, sendSegNo);
+			XLogFilePath(path, ThisTimeLineID, sendSegNo);
 
 			sendFile = BasicOpenFile(path, O_RDONLY | PG_BINARY, 0);
 			if (sendFile < 0)
@@ -1015,20 +1011,15 @@ retry:
 				 * removed or recycled.
 				 */
 				if (errno == ENOENT)
-				{
-					char		filename[MAXFNAMELEN];
-
-					XLogFileName(filename, ThisTimeLineID, sendId, sendSeg);
 					ereport(ERROR,
 							(errcode_for_file_access(),
 							 errmsg("requested WAL segment %s has already been removed",
-									filename)));
-				}
+									XLogFileNameP(ThisTimeLineID, sendSegNo))));
 				else
 					ereport(ERROR,
 							(errcode_for_file_access(),
-							 errmsg("could not open file \"%s\" (log file %u, segment %u): %m",
-									path, sendId, sendSeg)));
+							 errmsg("could not open file \"%s\": %m",
+									path)));
 			}
 			sendOff = 0;
 		}
@@ -1039,8 +1030,9 @@ retry:
 			if (lseek(sendFile, (off_t) startoff, SEEK_SET) < 0)
 				ereport(ERROR,
 						(errcode_for_file_access(),
-						 errmsg("could not seek in log file %u, segment %u to offset %u: %m",
-								sendId, sendSeg, startoff)));
+						 errmsg("could not seek in log segment %s to offset %u: %m",
+								XLogFileNameP(ThisTimeLineID, sendSegNo),
+								startoff)));
 			sendOff = startoff;
 		}
 
@@ -1052,11 +1044,13 @@ retry:
 
 		readbytes = read(sendFile, p, segbytes);
 		if (readbytes <= 0)
+		{
 			ereport(ERROR,
 					(errcode_for_file_access(),
-			errmsg("could not read from log file %u, segment %u, offset %u, "
-				   "length %lu: %m",
-				   sendId, sendSeg, sendOff, (unsigned long) segbytes)));
+			errmsg("could not read from log segment %s, offset %u, length %lu: %m",
+				   XLogFileNameP(ThisTimeLineID, sendSegNo),
+				   sendOff, (unsigned long) segbytes)));
+		}
 
 		/* Update state for read */
 		XLByteAdvance(recptr, readbytes);
@@ -1073,19 +1067,13 @@ retry:
 	 * read() succeeds in that case, but the data we tried to read might
 	 * already have been overwritten with new WAL records.
 	 */
-	XLogGetLastRemoved(&lastRemovedLog, &lastRemovedSeg);
-	XLByteToSeg(startptr, log, seg);
-	if (log < lastRemovedLog ||
-		(log == lastRemovedLog && seg <= lastRemovedSeg))
-	{
-		char		filename[MAXFNAMELEN];
-
-		XLogFileName(filename, ThisTimeLineID, log, seg);
+	XLogGetLastRemoved(&lastRemovedSegNo);
+	XLByteToSeg(startptr, segno);
+	if (segno <= lastRemovedSegNo)
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("requested WAL segment %s has already been removed",
-						filename)));
-	}
+						XLogFileNameP(ThisTimeLineID, segno))));
 
 	/*
 	 * During recovery, the currently-open WAL file might be replaced with the
@@ -1165,25 +1153,8 @@ XLogSend(char *msgbuf, bool *caughtup)
 	 * SendRqstPtr never points to the middle of a WAL record.
 	 */
 	startptr = sentPtr;
-	if (startptr.xrecoff >= XLogFileSize)
-	{
-		/*
-		 * crossing a logid boundary, skip the non-existent last log segment
-		 * in previous logical log file.
-		 */
-		startptr.xlogid += 1;
-		startptr.xrecoff = 0;
-	}
-
 	endptr = startptr;
 	XLByteAdvance(endptr, MAX_SEND_SIZE);
-	if (endptr.xlogid != startptr.xlogid)
-	{
-		/* Don't cross a logfile boundary within one message */
-		Assert(endptr.xlogid == startptr.xlogid + 1);
-		endptr.xlogid = startptr.xlogid;
-		endptr.xrecoff = XLogFileSize;
-	}
 
 	/* if we went beyond SendRqstPtr, back off */
 	if (XLByteLE(SendRqstPtr, endptr))
@@ -1194,11 +1165,11 @@ XLogSend(char *msgbuf, bool *caughtup)
 	else
 	{
 		/* round down to page boundary. */
-		endptr.xrecoff -= (endptr.xrecoff % XLOG_BLCKSZ);
+		endptr -= (endptr % XLOG_BLCKSZ);
 		*caughtup = false;
 	}
 
-	nbytes = endptr.xrecoff - startptr.xrecoff;
+	nbytes = endptr - startptr;
 	Assert(nbytes <= MAX_SEND_SIZE);
 
 	/*
@@ -1242,7 +1213,7 @@ XLogSend(char *msgbuf, bool *caughtup)
 		char		activitymsg[50];
 
 		snprintf(activitymsg, sizeof(activitymsg), "streaming %X/%X",
-				 sentPtr.xlogid, sentPtr.xrecoff);
+				 (uint32) (sentPtr >> 32), (uint32) sentPtr);
 		set_ps_display(activitymsg, false);
 	}
 
@@ -1584,25 +1555,25 @@ pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
 			values[1] = CStringGetTextDatum(WalSndGetStateString(state));
 
 			snprintf(location, sizeof(location), "%X/%X",
-					 sentPtr.xlogid, sentPtr.xrecoff);
+					 (uint32) (sentPtr >> 32), (uint32) sentPtr);
 			values[2] = CStringGetTextDatum(location);
 
-			if (write.xlogid == 0 && write.xrecoff == 0)
+			if (write == 0)
 				nulls[3] = true;
 			snprintf(location, sizeof(location), "%X/%X",
-					 write.xlogid, write.xrecoff);
+					 (uint32) (write >> 32), (uint32) write);
 			values[3] = CStringGetTextDatum(location);
 
-			if (flush.xlogid == 0 && flush.xrecoff == 0)
+			if (flush == 0)
 				nulls[4] = true;
 			snprintf(location, sizeof(location), "%X/%X",
-					 flush.xlogid, flush.xrecoff);
+					 (uint32) (flush >> 32), (uint32) flush);
 			values[4] = CStringGetTextDatum(location);
 
-			if (apply.xlogid == 0 && apply.xrecoff == 0)
+			if (apply == 0)
 				nulls[5] = true;
 			snprintf(location, sizeof(location), "%X/%X",
-					 apply.xlogid, apply.xrecoff);
+					 (uint32) (apply >> 32), (uint32) apply);
 			values[5] = CStringGetTextDatum(location);
 
 			values[6] = Int32GetDatum(sync_priority[i]);

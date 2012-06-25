@@ -40,15 +40,16 @@
  */
 typedef struct XLogRecord
 {
-	pg_crc32	xl_crc;			/* CRC for this record */
-	XLogRecPtr	xl_prev;		/* ptr to previous record in log */
-	TransactionId xl_xid;		/* xact id */
 	uint32		xl_tot_len;		/* total len of entire record */
+	TransactionId xl_xid;		/* xact id */
 	uint32		xl_len;			/* total len of rmgr data */
 	uint8		xl_info;		/* flag bits, see below */
 	RmgrId		xl_rmid;		/* resource manager for this record */
+	/* 2 bytes of padding here, initialize to zero */
+	XLogRecPtr	xl_prev;		/* ptr to previous record in log */
+	pg_crc32	xl_crc;			/* CRC for this record */
 
-	/* Depending on MAXALIGN, there are either 2 or 6 wasted bytes here */
+	/* If MAXALIGN==8, there are 4 wasted bytes here */
 
 	/* ACTUAL LOG DATA FOLLOWS AT END OF STRUCT */
 
@@ -267,12 +268,10 @@ extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, XLogRecData *rdata);
 extern void XLogFlush(XLogRecPtr RecPtr);
 extern bool XLogBackgroundFlush(void);
 extern bool XLogNeedsFlush(XLogRecPtr RecPtr);
-extern int XLogFileInit(uint32 log, uint32 seg,
-			 bool *use_existent, bool use_lock);
-extern int	XLogFileOpen(uint32 log, uint32 seg);
+extern int XLogFileInit(XLogSegNo segno, bool *use_existent, bool use_lock);
+extern int	XLogFileOpen(XLogSegNo segno);
 
-
-extern void XLogGetLastRemoved(uint32 *log, uint32 *seg);
+extern void XLogGetLastRemoved(XLogSegNo *segno);
 extern void XLogSetAsyncXactLSN(XLogRecPtr record);
 
 extern void RestoreBkpBlocks(XLogRecPtr lsn, XLogRecord *record, bool cleanup);
@@ -280,7 +279,7 @@ extern void RestoreBkpBlocks(XLogRecPtr lsn, XLogRecord *record, bool cleanup);
 extern void xlog_redo(XLogRecPtr lsn, XLogRecord *record);
 extern void xlog_desc(StringInfo buf, uint8 xl_info, char *rec);
 
-extern void issue_xlog_fsync(int fd, uint32 log, uint32 seg);
+extern void issue_xlog_fsync(int fd, XLogSegNo segno);
 
 extern bool RecoveryInProgress(void);
 extern bool HotStandbyActive(void);
@@ -294,6 +293,7 @@ extern bool RecoveryIsPaused(void);
 extern void SetRecoveryPause(bool recoveryPause);
 extern TimestampTz GetLatestXTime(void);
 extern TimestampTz GetCurrentChunkReplayStartTime(void);
+extern char *XLogFileNameP(TimeLineID tli, XLogSegNo segno);
 
 extern void UpdateControlFile(void);
 extern uint64 GetSystemIdentifier(void);

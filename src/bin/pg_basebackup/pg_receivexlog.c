@@ -77,7 +77,9 @@ stop_streaming(XLogRecPtr segendpos, uint32 timeline, bool segment_finished)
 {
 	if (verbose && segment_finished)
 		fprintf(stderr, _("%s: finished segment at %X/%X (timeline %u)\n"),
-				progname, segendpos.xlogid, segendpos.xrecoff, timeline);
+				progname,
+				(uint32) (segendpos >> 32), (uint32) segendpos,
+				timeline);
 
 	if (time_to_abort)
 	{
@@ -102,8 +104,7 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 	struct dirent *dirent;
 	int			i;
 	bool		b;
-	uint32		high_log = 0;
-	uint32		high_seg = 0;
+	XLogSegNo	high_segno = 0;
 
 	dir = opendir(basedir);
 	if (dir == NULL)
@@ -117,9 +118,10 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 	{
 		char		fullpath[MAXPGPATH];
 		struct stat statbuf;
-		uint32		tli,
-					log,
+		uint32		tli;
+		unsigned int log,
 					seg;
+		XLogSegNo	segno;
 
 		if (strcmp(dirent->d_name, ".") == 0 || strcmp(dirent->d_name, "..") == 0)
 			continue;
@@ -151,6 +153,7 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 					progname, dirent->d_name);
 			disconnect_and_exit(1);
 		}
+		segno = ((uint64) log) << 32 | seg;
 
 		/* Ignore any files that are for another timeline */
 		if (tli != currenttimeline)
@@ -168,11 +171,9 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 		if (statbuf.st_size == XLOG_SEG_SIZE)
 		{
 			/* Completed segment */
-			if (log > high_log ||
-				(log == high_log && seg > high_seg))
+			if (segno > high_segno)
 			{
-				high_log = log;
-				high_seg = seg;
+				high_segno = segno;
 				continue;
 			}
 		}
@@ -186,7 +187,7 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 
 	closedir(dir);
 
-	if (high_log > 0 || high_seg > 0)
+	if (high_segno > 0)
 	{
 		XLogRecPtr	high_ptr;
 
@@ -194,10 +195,9 @@ FindStreamingStart(XLogRecPtr currentpos, uint32 currenttimeline)
 		 * Move the starting pointer to the start of the next segment, since
 		 * the highest one we've seen was completed.
 		 */
-		NextLogSeg(high_log, high_seg);
+		high_segno++;
 
-		high_ptr.xlogid = high_log;
-		high_ptr.xrecoff = high_seg * XLOG_SEG_SIZE;
+		XLogSegNoOffsetToRecPtr(high_segno, 0, high_ptr);
 
 		return high_ptr;
 	}
@@ -214,6 +214,8 @@ StreamLog(void)
 	PGresult   *res;
 	uint32		timeline;
 	XLogRecPtr	startpos;
+	uint32		hi,
+				lo;
 
 	/*
 	 * Connect in replication mode to the server
@@ -241,12 +243,13 @@ StreamLog(void)
 		disconnect_and_exit(1);
 	}
 	timeline = atoi(PQgetvalue(res, 0, 1));
-	if (sscanf(PQgetvalue(res, 0, 2), "%X/%X", &startpos.xlogid, &startpos.xrecoff) != 2)
+	if (sscanf(PQgetvalue(res, 0, 2), "%X/%X", &hi, &lo) != 2)
 	{
 		fprintf(stderr, _("%s: could not parse log start position from value \"%s\"\n"),
 				progname, PQgetvalue(res, 0, 2));
 		disconnect_and_exit(1);
 	}
+	startpos = ((uint64) hi) << 32 | lo;
 	PQclear(res);
 
 	/*
@@ -257,14 +260,16 @@ StreamLog(void)
 	/*
 	 * Always start streaming at the beginning of a segment
 	 */
-	startpos.xrecoff -= startpos.xrecoff % XLOG_SEG_SIZE;
+	startpos -= startpos % XLOG_SEG_SIZE;
 
 	/*
 	 * Start the replication
 	 */
 	if (verbose)
 		fprintf(stderr, _("%s: starting log streaming at %X/%X (timeline %u)\n"),
-				progname, startpos.xlogid, startpos.xrecoff, timeline);
+				progname,
+				(uint32) (startpos >> 32), (uint32) startpos,
+				timeline);
 
 	ReceiveXlogStream(conn, startpos, timeline, NULL, basedir,
 					  stop_streaming,
