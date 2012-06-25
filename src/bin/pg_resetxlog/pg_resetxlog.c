@@ -92,6 +92,7 @@ main(int argc, char *argv[])
 	uint32		minXlogTli = 0;
 	XLogSegNo	minXlogSegNo = 0;
 	char	   *endptr;
+	char	   *endptr2;
 	char	   *DataDir;
 	int			fd;
 	char		path[MAXPGPATH];
