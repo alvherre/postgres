@@ -380,7 +380,8 @@ copy_clog_xlog_xid(void)
 		 * we preserve all files and contents, so we must preserve both "next"
 		 * counters here.  Oldest age does not matter much.
 		 */
-		exec_prog(true, true, SYSTEMQUOTE "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" > " DEVNULL SYSTEMQUOTE,
+		exec_prog(true, true, UTILITY_LOG_FILE,
+				  SYSTEMQUOTE "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" > " DEVNULL SYSTEMQUOTE,
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
 				  old_cluster.controldata.chkpnt_nxtmulti, 0,
