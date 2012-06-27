@@ -748,7 +748,7 @@ FindEndOfXLOG(void)
 	 * old pg_control.	Note that for the moment we are working with segment
 	 * numbering according to the old xlog seg size.
 	 */
-	segs_per_xlogid = (0x100000000L / ControlFile.xlog_seg_size);
+	segs_per_xlogid = (UINT64CONST(0x0000000100000000) / ControlFile.xlog_seg_size);
 	newXlogSegNo = ControlFile.checkPointCopy.redo / ControlFile.xlog_seg_size;
 
 	/*
@@ -1034,7 +1034,7 @@ usage(void)
 	printf(_("Options:\n"));
 	printf(_("  -e XIDEPOCH      set next transaction ID epoch\n"));
 	printf(_("  -f               force update to be done\n"));
-	printf(_("  -l TLI,FILE,SEG  force minimum WAL starting location for new transaction log\n"));
+	printf(_("  -l xlogfile      force minimum WAL starting location for new transaction log\n"));
 	printf(_("  -m XID[,OLDEST]  set next multitransaction ID, optionally age of oldest value\n"));
 	printf(_("  -n               no update, just show extracted control values (for testing)\n"));
 	printf(_("  -o OID           set next OID\n"));

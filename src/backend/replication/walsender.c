@@ -120,7 +120,7 @@ static void WalSndLastCycleHandler(SIGNAL_ARGS);
 
 /* Prototypes for private functions */
 static bool HandleReplicationCommand(const char *cmd_string);
-static int	WalSndLoop(void);
+static void WalSndLoop(void) __attribute__((noreturn));
 static void InitWalSnd(void);
 static void WalSndHandshake(void);
 static void WalSndKill(int code, Datum arg);
@@ -135,7 +135,7 @@ static void WalSndKeepalive(char *msgbuf);
 
 
 /* Main entry point for walsender process */
-int
+void
 WalSenderMain(void)
 {
 	MemoryContext walsnd_context;
@@ -192,7 +192,7 @@ WalSenderMain(void)
 	SyncRepInitConfig();
 
 	/* Main loop of walsender */
-	return WalSndLoop();
+	WalSndLoop();
 }
 
 /*
@@ -612,9 +612,9 @@ ProcessStandbyReplyMessage(void)
 	pq_copymsgbytes(&reply_message, (char *) &reply, sizeof(StandbyReplyMessage));
 
 	elog(DEBUG2, "write %X/%X flush %X/%X apply %X/%X",
-		 (uint32) (reply.write << 32), (uint32) reply.write,
-		 (uint32) (reply.flush << 32), (uint32) reply.flush,
-		 (uint32) (reply.apply << 32), (uint32) reply.apply);
+		 (uint32) (reply.write >> 32), (uint32) reply.write,
+		 (uint32) (reply.flush >> 32), (uint32) reply.flush,
+		 (uint32) (reply.apply >> 32), (uint32) reply.apply);
 
 	/*
 	 * Update shared state for this WalSender process based on reply data from
@@ -706,7 +706,7 @@ ProcessStandbyHSFeedbackMessage(void)
 }
 
 /* Main loop of walsender process */
-static int
+static void
 WalSndLoop(void)
 {
 	char	   *output_message;
@@ -882,7 +882,7 @@ WalSndLoop(void)
 		whereToSendOutput = DestNone;
 
 	proc_exit(0);
-	return 1;					/* keep the compiler quiet */
+	abort();					/* keep the compiler quiet */
 }
 
 /* Initialize a per-walsender data structure for this walsender process */

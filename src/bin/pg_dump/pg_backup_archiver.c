@@ -247,8 +247,42 @@ SetArchiveRestoreOptions(Archive *AHX, RestoreOptions *ropt)
 	curSection = SECTION_PRE_DATA;
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{
+		/*
+		 * When writing an archive, we also take this opportunity to check
+		 * that we have generated the entries in a sane order that respects
+		 * the section divisions.  When reading, don't complain, since buggy
+		 * old versions of pg_dump might generate out-of-order archives.
+		 */
+		if (AH->mode != archModeRead)
+		{
+			switch (te->section)
+			{
+				case SECTION_NONE:
+					/* ok to be anywhere */
+					break;
+				case SECTION_PRE_DATA:
+					if (curSection != SECTION_PRE_DATA)
+						write_msg(modulename,
+								  "WARNING: archive items not in correct section order\n");
+					break;
+				case SECTION_DATA:
+					if (curSection == SECTION_POST_DATA)
+						write_msg(modulename,
+								  "WARNING: archive items not in correct section order\n");
+					break;
+				case SECTION_POST_DATA:
+					/* ok no matter which section we were in */
+					break;
+				default:
+					exit_horribly(modulename, "unexpected section code %d\n",
+								  (int) te->section);
+					break;
+			}
+		}
+
 		if (te->section != SECTION_NONE)
 			curSection = te->section;
+
 		te->reqs = _tocEntryRequired(te, curSection, ropt);
 	}
 }
@@ -3464,9 +3498,14 @@ restore_toc_entries_parallel(ArchiveHandle *AH)
 	 * Do all the early stuff in a single connection in the parent. There's no
 	 * great point in running it in parallel, in fact it will actually run
 	 * faster in a single connection because we avoid all the connection and
-	 * setup overhead.	Also, pg_dump is not currently very good about showing
-	 * all the dependencies of SECTION_PRE_DATA items, so we do not risk
-	 * trying to process them out-of-order.
+	 * setup overhead.  Also, pre-9.2 pg_dump versions were not very good
+	 * about showing all the dependencies of SECTION_PRE_DATA items, so we do
+	 * not risk trying to process them out-of-order.
+	 *
+	 * Note: as of 9.2, it should be guaranteed that all PRE_DATA items appear
+	 * before DATA items, and all DATA items before POST_DATA items.  That is
+	 * not certain to be true in older archives, though, so this loop is coded
+	 * to not assume it.
 	 */
 	skipped_some = false;
 	for (next_work_item = AH->toc->next; next_work_item != AH->toc; next_work_item = next_work_item->next)
@@ -4128,8 +4167,9 @@ fix_dependencies(ArchiveHandle *AH)
 
 	/*
 	 * Count the incoming dependencies for each item.  Also, it is possible
-	 * that the dependencies list items that are not in the archive at all.
-	 * Subtract such items from the depCounts.
+	 * that the dependencies list items that are not in the archive at all
+	 * (that should not happen in 9.2 and later, but is highly likely in
+	 * older archives).  Subtract such items from the depCounts.
 	 */
 	for (te = AH->toc->next; te != AH->toc; te = te->next)
 	{
