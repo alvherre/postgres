@@ -76,7 +76,6 @@ exec_prog(bool throw_error, bool is_priv,
 	else
 		retval = 0;
 
-	fflush(log);
 	fprintf(log, "\n\n");
 	fclose(log);
 
