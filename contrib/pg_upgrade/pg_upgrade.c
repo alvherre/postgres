@@ -381,11 +381,12 @@ copy_clog_xlog_xid(void)
 		 * counters here.  Oldest age does not matter much.
 		 */
 		exec_prog(true, true, UTILITY_LOG_FILE,
-				  SYSTEMQUOTE "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" > " DEVNULL SYSTEMQUOTE,
-				  new_cluster.bindir,
+				  SYSTEMQUOTE
+				  "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" >> \"%s\" 2>&1"
+				  SYSTEMQUOTE, new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
 				  old_cluster.controldata.chkpnt_nxtmulti, 0,
-				  new_cluster.pgdata);
+				  new_cluster.pgdata, UTILITY_LOG_FILE);
 		check_ok();
 	}
 	else if (new_cluster.controldata.cat_ver >= MULTIXACT_FORMATCHANGE_CAT_VER)
@@ -396,10 +397,13 @@ copy_clog_xlog_xid(void)
 		 * oldest age is set to the latest value used by the old system, so
 		 * that we return correctly for multis queried.
 		 */
-		exec_prog(true, true, SYSTEMQUOTE "\"%s/pg_resetxlog\" -m %u,%u \"%s\" > " DEVNULL SYSTEMQUOTE,
+		exec_prog(true, true, UTILITY_LOG_FILE,
+				  SYSTEMQUOTE
+				  "\"%s/pg_resetxlog\" -m %u,%u \"%s\" >> \"%s\" 2>&1"
+				  SYSTEMQUOTE,
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmulti, 0,
-				  new_cluster.pgdata);
+				  new_cluster.pgdata, UTILITY_LOG_FILE);
 		check_ok();
 	}
 
