@@ -42,6 +42,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	bool		got_nextxlogfile = false;
 	bool		got_multi = false;
 	bool		got_mxoff = false;
+	bool		got_oldestmulti = false;
 	bool		got_log_id = false;
 	bool		got_log_seg = false;
 	bool		got_tli = false;
@@ -259,6 +260,17 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			cluster->controldata.chkpnt_nxtmulti = str2uint(p);
 			got_multi = true;
 		}
+		else if ((p = strstr(bufin, "Latest checkpoint's oldestMultiXid:")) != NULL)
+		{
+			p = strchr(p, ':');
+
+			if (p == NULL || strlen(p) <= 1)
+				pg_log(PG_FATAL, "%d: controldata retrieval problem\n", __LINE__);
+
+			p++;				/* removing ':' char */
+			cluster->controldata.chkpnt_oldstMulti = str2uint(p);
+			got_oldestmulti = true;
+		}
 		else if ((p = strstr(bufin, "Latest checkpoint's NextMultiOffset:")) != NULL)
 		{
 			p = strchr(p, ':');
@@ -457,7 +469,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 
 	/* verify that we got all the mandatory pg_control data */
 	if (!got_xid || !got_oid || !got_multi || !got_mxoff ||
-		(!live_check && !got_nextxlogfile) ||
+		!got_oldestmulti || (!live_check && !got_nextxlogfile) ||
 		!got_tli ||
 		!got_align || !got_blocksz || !got_largesz || !got_walsz ||
 		!got_walseg || !got_ident || !got_index || !got_toast ||
@@ -477,6 +489,9 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 
 		if (!got_mxoff)
 			pg_log(PG_REPORT, "  latest checkpoint next MultiXactOffset\n");
+
+		if (!got_oldestmulti)
+			pg_log(PG_REPORT, "  latest checkpoint oldest MultiXactId\n");
 
 		if (!live_check && !got_nextxlogfile)
 			pg_log(PG_REPORT, "  first WAL segment after reset\n");

@@ -376,14 +376,15 @@ copy_clog_xlog_xid(void)
 		prep_status("Setting next multixact ID and offset for new cluster");
 		/*
 		 * we preserve all files and contents, so we must preserve both "next"
-		 * counters here.  Oldest age does not matter much.
+		 * counters here and the oldest multi present on system.
 		 */
 		exec_prog(true, true, UTILITY_LOG_FILE,
 				  SYSTEMQUOTE
 				  "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" >> \"%s\" 2>&1"
 				  SYSTEMQUOTE, new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
-				  old_cluster.controldata.chkpnt_nxtmulti, 0,
+				  old_cluster.controldata.chkpnt_nxtmulti,
+				  old_cluster.controldata.chkpnt_oldstMulti,
 				  new_cluster.pgdata, UTILITY_LOG_FILE);
 		check_ok();
 	}
@@ -394,6 +395,9 @@ copy_clog_xlog_xid(void)
 		 * We don't preserve files in this case, but it's important that the
 		 * oldest age is set to the latest value used by the old system, so
 		 * that we return correctly for multis queried.
+		 *
+		 * FIXME isn't this value bogus?
+		 * I think it should be -m nextMulti,nextMulti
 		 */
 		exec_prog(true, true, UTILITY_LOG_FILE,
 				  SYSTEMQUOTE

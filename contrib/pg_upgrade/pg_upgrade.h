@@ -178,6 +178,7 @@ typedef struct
 	uint32		chkpnt_nxtoid;
 	uint32		chkpnt_nxtmulti;
 	uint32		chkpnt_nxtmxoff;
+	uint32		chkpnt_oldstMulti;
 	uint32		align;
 	uint32		blocksz;
 	uint32		largesz;
