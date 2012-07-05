@@ -311,7 +311,6 @@ create_new_objects(void)
 	uninstall_support_functions_from_new_cluster();
 }
 
-
 /*
  * Delete the given subdirectory contents from the new cluster, and copy the
  * files from the old cluster into it.
@@ -349,7 +348,6 @@ copy_subdir_files(char *subdir)
 static void
 copy_clog_xlog_xid(void)
 {
-
 	/* copy old commit logs to new data dir */
 	copy_subdir_files("pg_clog");
 

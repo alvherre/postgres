@@ -895,7 +895,7 @@ test_config_settings(void)
 		100, 50, 40, 30, 20, 10
 	};
 	static const int trial_bufs[] = {
-		4096, 3584, 3072, 2560, 2048, 1536,
+		16384, 8192, 4096, 3584, 3072, 2560, 2048, 1536,
 		1000, 900, 800, 700, 600, 500,
 		400, 300, 200, 100, 50
 	};
@@ -2574,13 +2574,19 @@ check_authmethod_valid(const char *authmethod, const char **valid_methods, const
 }
 
 static void
-check_need_password(const char *authmethod)
+check_need_password(const char *authmethodlocal, const char *authmethodhost)
 {
-	if ((strcmp(authmethod, "md5") == 0 ||
-		 strcmp(authmethod, "password") == 0) &&
+	if ((strcmp(authmethodlocal, "md5") == 0 ||
+		 strcmp(authmethodlocal, "password") == 0) &&
+		(strcmp(authmethodhost, "md5") == 0 ||
+		 strcmp(authmethodhost, "password") == 0) &&
 		!(pwprompt || pwfilename))
 	{
-		fprintf(stderr, _("%s: must specify a password for the superuser to enable %s authentication\n"), progname, authmethod);
+		fprintf(stderr, _("%s: must specify a password for the superuser to enable %s authentication\n"), progname,
+				(strcmp(authmethodlocal, "md5") == 0 ||
+				 strcmp(authmethodlocal, "password") == 0)
+				? authmethodlocal
+				: authmethodhost);
 		exit(1);
 	}
 }
@@ -2792,8 +2798,7 @@ main(int argc, char *argv[])
 	check_authmethod_valid(authmethodlocal, auth_methods_local, "local");
 	check_authmethod_valid(authmethodhost, auth_methods_host, "host");
 
-	check_need_password(authmethodlocal);
-	check_need_password(authmethodhost);
+	check_need_password(authmethodlocal, authmethodhost);
 
 	if (strlen(pg_data) == 0)
 	{

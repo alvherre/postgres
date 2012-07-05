@@ -65,7 +65,7 @@ typedef int IpcMemoryId;		/* shared memory ID returned by shmget(2) */
 unsigned long UsedShmemSegID = 0;
 void	   *UsedShmemSegAddr = NULL;
 static Size AnonymousShmemSize;
-static PGShmemHeader *AnonymousShmem;
+static void *AnonymousShmem;
 
 static void *InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size);
 static void IpcMemoryDetach(int status, Datum shmaddr);
@@ -167,39 +167,25 @@ InternalIpcMemoryCreate(IpcMemoryKey memKey, Size size)
 					IPC_CREAT | IPC_EXCL | IPCProtection),
 				 (errno == EINVAL) ?
 				 errhint("This error usually means that PostgreSQL's request for a shared memory "
-		  "segment exceeded your kernel's SHMMAX parameter.  You can either "
-						 "reduce the request size or reconfigure the kernel with larger SHMMAX.  "
-				  "To reduce the request size (currently %lu bytes), reduce "
-						 "PostgreSQL's shared memory usage, perhaps by reducing shared_buffers "
-						 "or max_connections.\n"
-						 "If the request size is already small, it's possible that it is less than "
-						 "your kernel's SHMMIN parameter, in which case raising the request size or "
-						 "reconfiguring SHMMIN is called for.\n"
+		  "segment exceeded your kernel's SHMMAX parameter, or possibly that "
+						 "it is less than "
+						 "your kernel's SHMMIN parameter.\n"
 		"The PostgreSQL documentation contains more information about shared "
-						 "memory configuration.",
-						 (unsigned long) size) : 0,
+						 "memory configuration.") : 0,
 				 (errno == ENOMEM) ?
 				 errhint("This error usually means that PostgreSQL's request for a shared "
-				   "memory segment exceeded available memory or swap space, "
-			   "or exceeded your kernel's SHMALL parameter.  You can either "
-						 "reduce the request size or reconfigure the kernel with larger SHMALL.  "
-				  "To reduce the request size (currently %lu bytes), reduce "
-						 "PostgreSQL's shared memory usage, perhaps by reducing shared_buffers "
-						 "or max_connections.\n"
+				   "memory segment exceeded your kernel's SHMALL parameter.  You may need "
+						 "to reconfigure the kernel with larger SHMALL.\n"
 		"The PostgreSQL documentation contains more information about shared "
-						 "memory configuration.",
-						 (unsigned long) size) : 0,
+						 "memory configuration.") : 0,
 				 (errno == ENOSPC) ?
 				 errhint("This error does *not* mean that you have run out of disk space.  "
 						 "It occurs either if all available shared memory IDs have been taken, "
 						 "in which case you need to raise the SHMMNI parameter in your kernel, "
 		  "or because the system's overall limit for shared memory has been "
-				 "reached.  If you cannot increase the shared memory limit, "
-		  "reduce PostgreSQL's shared memory request (currently %lu bytes), "
-				   "perhaps by reducing shared_buffers or max_connections.\n"
+				 "reached.\n"
 		"The PostgreSQL documentation contains more information about shared "
-						 "memory configuration.",
-						 (unsigned long) size) : 0));
+						 "memory configuration.") : 0));
 	}
 
 	/* Register on-exit routine to delete the new segment */
@@ -382,7 +368,7 @@ PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 	PGShmemHeader *hdr;
 	IpcMemoryId shmid;
 	struct stat statbuf;
-	Size		allocsize = size;
+	Size		sysvsize = size;
 
 	/* Room for a header? */
 	Assert(size > MAXALIGN(sizeof(PGShmemHeader)));
@@ -408,13 +394,14 @@ PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 		long	pagesize = sysconf(_SC_PAGE_SIZE);
 
 		/*
+		 * Ensure request size is a multiple of pagesize.
+		 *
 		 * pagesize will, for practical purposes, always be a power of two.
 		 * But just in case it isn't, we do it this way instead of using
 		 * TYPEALIGN().
 		 */
-		AnonymousShmemSize = size;
-		if (size % pagesize != 0)
-			AnonymousShmemSize += pagesize - (size % pagesize);
+		if (pagesize > 0 && size % pagesize != 0)
+			size += pagesize - (size % pagesize);
 
 		/*
 		 * We assume that no one will attempt to run PostgreSQL 9.3 or later
@@ -435,10 +422,11 @@ PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 					   "%lu bytes), reduce PostgreSQL's shared memory usage, "
 					   "perhaps by reducing shared_buffers or "
 					   "max_connections.",
-					(unsigned long) AnonymousShmemSize) : 0));
+					   (unsigned long) size) : 0));
+		AnonymousShmemSize = size;
 
-		/* Now we can allocate a minimal SHM block. */
-		allocsize = sizeof(PGShmemHeader);
+		/* Now we need only allocate a minimal-sized SysV shmem block. */
+		sysvsize = sizeof(PGShmemHeader);
 	}
 #endif
 
@@ -451,7 +439,7 @@ PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 	for (NextShmemSegID++;; NextShmemSegID++)
 	{
 		/* Try to create new segment */
-		memAddress = InternalIpcMemoryCreate(NextShmemSegID, allocsize);
+		memAddress = InternalIpcMemoryCreate(NextShmemSegID, sysvsize);
 		if (memAddress)
 			break;				/* successful create and attach */
 
@@ -490,7 +478,7 @@ PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 		/*
 		 * Now try again to create the segment.
 		 */
-		memAddress = InternalIpcMemoryCreate(NextShmemSegID, allocsize);
+		memAddress = InternalIpcMemoryCreate(NextShmemSegID, sysvsize);
 		if (memAddress)
 			break;				/* successful create and attach */
 
@@ -538,8 +526,7 @@ PGSharedMemoryCreate(Size size, bool makePrivate, int port)
 	if (AnonymousShmem == NULL)
 		return hdr;
 	memcpy(AnonymousShmem, hdr, sizeof(PGShmemHeader));
-	return AnonymousShmem;
-
+	return (PGShmemHeader *) AnonymousShmem;
 }
 
 #ifdef EXEC_BACKEND

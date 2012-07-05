@@ -80,6 +80,8 @@ bool		fullPageWrites = true;
 bool		log_checkpoints = false;
 int			sync_method = DEFAULT_SYNC_METHOD;
 int			wal_level = WAL_LEVEL_MINIMAL;
+int			CommitDelay = 0;	/* precommit delay in microseconds */
+int			CommitSiblings = 5; /* # concurrent xacts needed to sleep */
 
 #ifdef WAL_DEBUG
 bool		XLOG_DEBUG = false;
@@ -1025,6 +1027,8 @@ begin:;
 
 		END_CRIT_SECTION();
 
+		/* wake up walsenders now that we've released heavily contended locks */
+		WalSndWakeupProcessRequests();
 		return RecPtr;
 	}
 
@@ -1207,6 +1211,9 @@ begin:;
 	XactLastRecEnd = RecPtr;
 
 	END_CRIT_SECTION();
+
+	/* wake up walsenders now that we've released heavily contended locks */
+	WalSndWakeupProcessRequests();
 
 	return RecPtr;
 }
@@ -1792,6 +1799,10 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible, bool xlog_switch)
 			if (finishing_seg || (xlog_switch && last_iteration))
 			{
 				issue_xlog_fsync(openLogFile, openLogSegNo);
+
+				/* signal that we need to wakeup walsenders later */
+				WalSndWakeupRequest();
+
 				LogwrtResult.Flush = LogwrtResult.Write;		/* end of page */
 
 				if (XLogArchivingActive())
@@ -1854,8 +1865,13 @@ XLogWrite(XLogwrtRqst WriteRqst, bool flexible, bool xlog_switch)
 				openLogFile = XLogFileOpen(openLogSegNo);
 				openLogOff = 0;
 			}
+
 			issue_xlog_fsync(openLogFile, openLogSegNo);
 		}
+
+		/* signal that we need to wakeup walsenders later */
+		WalSndWakeupRequest();
+
 		LogwrtResult.Flush = LogwrtResult.Write;
 	}
 
@@ -2085,40 +2101,61 @@ XLogFlush(XLogRecPtr record)
 			 */
 			continue;
 		}
-		/* Got the lock */
-		LogwrtResult = XLogCtl->LogwrtResult;
-		if (!XLByteLE(record, LogwrtResult.Flush))
-		{
-			/* try to write/flush later additions to XLOG as well */
-			if (LWLockConditionalAcquire(WALInsertLock, LW_EXCLUSIVE))
-			{
-				XLogCtlInsert *Insert = &XLogCtl->Insert;
-				uint32		freespace = INSERT_FREESPACE(Insert);
 
-				if (freespace == 0)		/* buffer is full */
-					WriteRqstPtr = XLogCtl->xlblocks[Insert->curridx];
-				else
-				{
-					WriteRqstPtr = XLogCtl->xlblocks[Insert->curridx];
-					WriteRqstPtr -= freespace;
-				}
-				LWLockRelease(WALInsertLock);
-				WriteRqst.Write = WriteRqstPtr;
-				WriteRqst.Flush = WriteRqstPtr;
-			}
+		/* Got the lock; recheck whether request is satisfied */
+		LogwrtResult = XLogCtl->LogwrtResult;
+		if (XLByteLE(record, LogwrtResult.Flush))
+		{
+			LWLockRelease(WALWriteLock);
+			break;
+		}
+
+		/*
+		 * Sleep before flush! By adding a delay here, we may give further
+		 * backends the opportunity to join the backlog of group commit
+		 * followers; this can significantly improve transaction throughput, at
+		 * the risk of increasing transaction latency.
+		 *
+		 * We do not sleep if enableFsync is not turned on, nor if there are
+		 * fewer than CommitSiblings other backends with active transactions.
+		 */
+		if (CommitDelay > 0 && enableFsync &&
+			MinimumActiveBackends(CommitSiblings))
+			pg_usleep(CommitDelay);
+
+		/* try to write/flush later additions to XLOG as well */
+		if (LWLockConditionalAcquire(WALInsertLock, LW_EXCLUSIVE))
+		{
+			XLogCtlInsert *Insert = &XLogCtl->Insert;
+			uint32		freespace = INSERT_FREESPACE(Insert);
+
+			if (freespace == 0)		/* buffer is full */
+				WriteRqstPtr = XLogCtl->xlblocks[Insert->curridx];
 			else
 			{
-				WriteRqst.Write = WriteRqstPtr;
-				WriteRqst.Flush = record;
+				WriteRqstPtr = XLogCtl->xlblocks[Insert->curridx];
+				WriteRqstPtr -= freespace;
 			}
-			XLogWrite(WriteRqst, false, false);
+			LWLockRelease(WALInsertLock);
+			WriteRqst.Write = WriteRqstPtr;
+			WriteRqst.Flush = WriteRqstPtr;
 		}
+		else
+		{
+			WriteRqst.Write = WriteRqstPtr;
+			WriteRqst.Flush = record;
+		}
+		XLogWrite(WriteRqst, false, false);
+
 		LWLockRelease(WALWriteLock);
 		/* done */
 		break;
 	}
 
 	END_CRIT_SECTION();
+
+	/* wake up walsenders now that we've released heavily contended locks */
+	WalSndWakeupProcessRequests();
 
 	/*
 	 * If we still haven't flushed to the request point then we have a
@@ -2245,13 +2282,8 @@ XLogBackgroundFlush(void)
 
 	END_CRIT_SECTION();
 
-	/*
-	 * If we wrote something then we have something to send to standbys also,
-	 * otherwise the replication delay become around 7s with just async
-	 * commit.
-	 */
-	if (wrote_something)
-		WalSndWakeup();
+	/* wake up walsenders now that we've released heavily contended locks */
+	WalSndWakeupProcessRequests();
 
 	return wrote_something;
 }
@@ -3829,13 +3861,30 @@ retry:
 	}
 
 	/*
+	 * Read the record length.
+	 *
 	 * NB: Even though we use an XLogRecord pointer here, the whole record
-	 * header might not fit on this page. xl_tot_len is the first field in
-	 * struct, so it must be on this page, but we cannot safely access any
-	 * other fields yet.
+	 * header might not fit on this page. xl_tot_len is the first field of
+	 * the struct, so it must be on this page (the records are MAXALIGNed),
+	 * but we cannot access any other fields until we've verified that we
+	 * got the whole header.
 	 */
 	record = (XLogRecord *) (readBuf + (*RecPtr) % XLOG_BLCKSZ);
 	total_len = record->xl_tot_len;
+
+	/*
+	 * If the whole record header is on this page, validate it immediately.
+	 * Otherwise validate it after reading the rest of the header from next
+	 * page.
+	 */
+	if (targetRecOff <= XLOG_BLCKSZ - SizeOfXLogRecord)
+	{
+		if (!ValidXLogRecordHeader(RecPtr, record, emode, randAccess))
+			goto next_record_is_invalid;
+		gotheader = true;
+	}
+	else
+		gotheader = false;
 
 	/*
 	 * Allocate or enlarge readRecordBuf as needed.  To avoid useless small
@@ -3864,19 +3913,6 @@ retry:
 		}
 		readRecordBufSize = newSize;
 	}
-
-	/*
-	 * If we got the whole header already, validate it immediately. Otherwise
-	 * we validate it after reading the rest of the header from the next page.
-	 */
-	if (targetRecOff <= XLOG_BLCKSZ - SizeOfXLogRecord)
-	{
-		if (!ValidXLogRecordHeader(RecPtr, record, emode, randAccess))
-			goto next_record_is_invalid;
-		gotheader = true;
-	}
-	else
-		gotheader = false;
 
 	len = XLOG_BLCKSZ - (*RecPtr) % XLOG_BLCKSZ;
 	if (total_len > len)
@@ -6330,7 +6366,7 @@ StartupXLOG(void)
 			{
 				if (dbstate_at_startup != DB_IN_ARCHIVE_RECOVERY)
 					ereport(FATAL,
-							(errmsg("backup_label contains inconsistent data with control file"),
+							(errmsg("backup_label contains data inconsistent with control file"),
 							 errhint("This means that the backup is corrupted and you will "
 							   "have to use another backup for recovery.")));
 				ControlFile->backupEndPoint = ControlFile->minRecoveryPoint;
