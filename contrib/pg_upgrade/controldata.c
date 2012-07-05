@@ -468,8 +468,9 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	}
 
 	/* verify that we got all the mandatory pg_control data */
-	if (!got_xid || !got_oid || !got_multi || !got_mxoff ||
-		!got_oldestmulti || (!live_check && !got_nextxlogfile) ||
+	if (!got_xid || !got_oid ||
+		!got_multi || !got_mxoff || !got_oldestmulti ||
+		(!live_check && !got_nextxlogfile) ||
 		!got_tli ||
 		!got_align || !got_blocksz || !got_largesz || !got_walsz ||
 		!got_walseg || !got_ident || !got_index || !got_toast ||
