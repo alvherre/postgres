@@ -309,26 +309,92 @@ create_index_paths(PlannerInfo *root, RelOptInfo *rel)
 	}
 
 	/*
-	 * Likewise, if we found anything usable, generate a BitmapHeapPath for
-	 * the most promising combination of join bitmap index paths.  Note there
-	 * will be only one such path no matter how many join clauses are
-	 * available.  (XXX is that good enough, or do we need to consider even
-	 * more paths for different subsets of possible join partners?	Also,
-	 * should we add in restriction bitmap paths as well?)
+	 * Likewise, if we found anything usable, generate BitmapHeapPaths for the
+	 * most promising combinations of join bitmap index paths.	Our strategy
+	 * is to generate one such path for each distinct parameterization seen
+	 * among the available bitmap index paths.	This may look pretty
+	 * expensive, but usually there won't be very many distinct
+	 * parameterizations.
 	 */
 	if (bitjoinpaths != NIL)
 	{
-		Path	   *bitmapqual;
-		Relids		required_outer;
-		double		loop_count;
-		BitmapHeapPath *bpath;
+		List	   *path_outer;
+		List	   *all_path_outers;
+		ListCell   *lc;
 
-		bitmapqual = choose_bitmap_and(root, rel, bitjoinpaths);
-		required_outer = get_bitmap_tree_required_outer(bitmapqual);
-		loop_count = get_loop_count(root, required_outer);
-		bpath = create_bitmap_heap_path(root, rel, bitmapqual,
-										required_outer, loop_count);
-		add_path(rel, (Path *) bpath);
+		/*
+		 * path_outer holds the parameterization of each path in bitjoinpaths
+		 * (to save recalculating that several times), while all_path_outers
+		 * holds all distinct parameterization sets.
+		 */
+		path_outer = all_path_outers = NIL;
+		foreach(lc, bitjoinpaths)
+		{
+			Path	   *path = (Path *) lfirst(lc);
+			Relids		required_outer;
+			bool		found = false;
+			ListCell   *lco;
+
+			required_outer = get_bitmap_tree_required_outer(path);
+			path_outer = lappend(path_outer, required_outer);
+
+			/* Have we already seen this param set? */
+			foreach(lco, all_path_outers)
+			{
+				Relids		existing_outers = (Relids) lfirst(lco);
+
+				if (bms_equal(existing_outers, required_outer))
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				/* No, so add it to all_path_outers */
+				all_path_outers = lappend(all_path_outers, required_outer);
+			}
+		}
+
+		/* Now, for each distinct parameterization set ... */
+		foreach(lc, all_path_outers)
+		{
+			Relids		max_outers = (Relids) lfirst(lc);
+			List	   *this_path_set;
+			Path	   *bitmapqual;
+			Relids		required_outer;
+			double		loop_count;
+			BitmapHeapPath *bpath;
+			ListCell   *lcp;
+			ListCell   *lco;
+
+			/* Identify all the bitmap join paths needing no more than that */
+			this_path_set = NIL;
+			forboth(lcp, bitjoinpaths, lco, path_outer)
+			{
+				Path	   *path = (Path *) lfirst(lcp);
+				Relids		p_outers = (Relids) lfirst(lco);
+
+				if (bms_is_subset(p_outers, max_outers))
+					this_path_set = lappend(this_path_set, path);
+			}
+
+			/*
+			 * Add in restriction bitmap paths, since they can be used
+			 * together with any join paths.
+			 */
+			this_path_set = list_concat(this_path_set, bitindexpaths);
+
+			/* Select best AND combination for this parameterization */
+			bitmapqual = choose_bitmap_and(root, rel, this_path_set);
+
+			/* And push that path into the mix */
+			required_outer = get_bitmap_tree_required_outer(bitmapqual);
+			loop_count = get_loop_count(root, required_outer);
+			bpath = create_bitmap_heap_path(root, rel, bitmapqual,
+											required_outer, loop_count);
+			add_path(rel, (Path *) bpath);
+		}
 	}
 }
 
@@ -2785,7 +2851,6 @@ match_special_index_operator(Expr *clause, Oid opfamily, Oid idxcollation,
 	Oid			expr_coll;
 	Const	   *patt;
 	Const	   *prefix = NULL;
-	Const	   *rest = NULL;
 	Pattern_Prefix_Status pstatus = Pattern_Prefix_None;
 
 	/*
@@ -2814,13 +2879,13 @@ match_special_index_operator(Expr *clause, Oid opfamily, Oid idxcollation,
 		case OID_NAME_LIKE_OP:
 			/* the right-hand const is type text for all of these */
 			pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll,
-										   &prefix, &rest);
+										   &prefix, NULL);
 			isIndexable = (pstatus != Pattern_Prefix_None);
 			break;
 
 		case OID_BYTEA_LIKE_OP:
 			pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll,
-										   &prefix, &rest);
+										   &prefix, NULL);
 			isIndexable = (pstatus != Pattern_Prefix_None);
 			break;
 
@@ -2829,7 +2894,7 @@ match_special_index_operator(Expr *clause, Oid opfamily, Oid idxcollation,
 		case OID_NAME_ICLIKE_OP:
 			/* the right-hand const is type text for all of these */
 			pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like_IC, expr_coll,
-										   &prefix, &rest);
+										   &prefix, NULL);
 			isIndexable = (pstatus != Pattern_Prefix_None);
 			break;
 
@@ -2838,7 +2903,7 @@ match_special_index_operator(Expr *clause, Oid opfamily, Oid idxcollation,
 		case OID_NAME_REGEXEQ_OP:
 			/* the right-hand const is type text for all of these */
 			pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex, expr_coll,
-										   &prefix, &rest);
+										   &prefix, NULL);
 			isIndexable = (pstatus != Pattern_Prefix_None);
 			break;
 
@@ -2847,7 +2912,7 @@ match_special_index_operator(Expr *clause, Oid opfamily, Oid idxcollation,
 		case OID_NAME_ICREGEXEQ_OP:
 			/* the right-hand const is type text for all of these */
 			pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex_IC, expr_coll,
-										   &prefix, &rest);
+										   &prefix, NULL);
 			isIndexable = (pstatus != Pattern_Prefix_None);
 			break;
 
@@ -3115,7 +3180,6 @@ expand_indexqual_opclause(RestrictInfo *rinfo, Oid opfamily, Oid idxcollation)
 	Oid			expr_coll = ((OpExpr *) clause)->inputcollid;
 	Const	   *patt = (Const *) rightop;
 	Const	   *prefix = NULL;
-	Const	   *rest = NULL;
 	Pattern_Prefix_Status pstatus;
 
 	/*
@@ -3135,7 +3199,7 @@ expand_indexqual_opclause(RestrictInfo *rinfo, Oid opfamily, Oid idxcollation)
 			if (!op_in_opfamily(expr_op, opfamily))
 			{
 				pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like, expr_coll,
-											   &prefix, &rest);
+											   &prefix, NULL);
 				return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
 			}
 			break;
@@ -3147,7 +3211,7 @@ expand_indexqual_opclause(RestrictInfo *rinfo, Oid opfamily, Oid idxcollation)
 			{
 				/* the right-hand const is type text for all of these */
 				pstatus = pattern_fixed_prefix(patt, Pattern_Type_Like_IC, expr_coll,
-											   &prefix, &rest);
+											   &prefix, NULL);
 				return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
 			}
 			break;
@@ -3159,7 +3223,7 @@ expand_indexqual_opclause(RestrictInfo *rinfo, Oid opfamily, Oid idxcollation)
 			{
 				/* the right-hand const is type text for all of these */
 				pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex, expr_coll,
-											   &prefix, &rest);
+											   &prefix, NULL);
 				return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
 			}
 			break;
@@ -3171,7 +3235,7 @@ expand_indexqual_opclause(RestrictInfo *rinfo, Oid opfamily, Oid idxcollation)
 			{
 				/* the right-hand const is type text for all of these */
 				pstatus = pattern_fixed_prefix(patt, Pattern_Type_Regex_IC, expr_coll,
-											   &prefix, &rest);
+											   &prefix, NULL);
 				return prefix_quals(leftop, opfamily, idxcollation, prefix, pstatus);
 			}
 			break;

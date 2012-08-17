@@ -72,6 +72,7 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/snapmgr.h"
+#include "utils/timeout.h"
 #include "utils/timestamp.h"
 #include "mb/pg_wchar.h"
 
@@ -2396,9 +2397,9 @@ start_xact_command(void)
 		/* Set statement timeout running, if any */
 		/* NB: this mustn't be enabled until we are within an xact */
 		if (StatementTimeout > 0)
-			enable_sig_alarm(StatementTimeout, true);
+			enable_timeout_after(STATEMENT_TIMEOUT, StatementTimeout);
 		else
-			cancel_from_timeout = false;
+			disable_timeout(STATEMENT_TIMEOUT, false);
 
 		xact_started = true;
 	}
@@ -2410,7 +2411,7 @@ finish_xact_command(void)
 	if (xact_started)
 	{
 		/* Cancel any active statement timeout before committing */
-		disable_sig_alarm(true);
+		disable_timeout(STATEMENT_TIMEOUT, false);
 
 		/* Now commit the command */
 		ereport(DEBUG3,
@@ -2891,7 +2892,7 @@ ProcessInterrupts(void)
 					(errcode(ERRCODE_QUERY_CANCELED),
 					 errmsg("canceling authentication due to timeout")));
 		}
-		if (cancel_from_timeout)
+		if (get_timeout_indicator(STATEMENT_TIMEOUT))
 		{
 			ImmediateInterruptOK = false;		/* not idle anymore */
 			DisableNotifyInterrupt();
@@ -3343,7 +3344,7 @@ process_postgres_switches(int argc, char *argv[], GucContext ctx)
 				break;
 
 			case 'k':
-				SetConfigOption("unix_socket_directory", optarg, ctx, gucsource);
+				SetConfigOption("unix_socket_directories", optarg, ctx, gucsource);
 				break;
 
 			case 'l':
@@ -3614,7 +3615,7 @@ PostgresMain(int argc, char *argv[], const char *username)
 			pqsignal(SIGQUIT, quickdie);		/* hard crash time */
 		else
 			pqsignal(SIGQUIT, die);		/* cancel current query and exit */
-		pqsignal(SIGALRM, handle_sig_alarm);	/* timeout conditions */
+		InitializeTimeouts();		/* establishes SIGALRM handler */
 
 		/*
 		 * Ignore failure to write to frontend. Note: if frontend closes
@@ -3802,10 +3803,10 @@ PostgresMain(int argc, char *argv[], const char *username)
 
 		/*
 		 * Forget any pending QueryCancel request, since we're returning to
-		 * the idle loop anyway, and cancel the statement timer if running.
+		 * the idle loop anyway, and cancel any active timeout requests.
 		 */
 		QueryCancelPending = false;
-		disable_sig_alarm(true);
+		disable_all_timeouts(false);
 		QueryCancelPending = false;		/* again in case timeout occurred */
 
 		/*
@@ -4198,11 +4199,6 @@ PostgresMain(int argc, char *argv[], const char *username)
 								firstchar)));
 		}
 	}							/* end of input-reading loop */
-
-	/* can't get here because the above loop never exits */
-	Assert(false);
-
-	abort();					/* keep compiler quiet */
 }
 
 

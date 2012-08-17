@@ -490,6 +490,9 @@ exec_command(const char *cmd,
 				else
 					success = listExtensions(pattern);
 				break;
+			case 'y':			/* Event Triggers */
+				success = listEventTriggers(pattern, show_verbose);
+				break;
 			default:
 				status = PSQL_CMD_UNKNOWN;
 		}
@@ -1509,6 +1512,17 @@ do_connect(char *dbname, char *user, char *host, char *port)
 			   *n_conn;
 	char	   *password = NULL;
 
+	if (!o_conn && (!dbname || !user || !host || !port))
+	{
+		/*
+		 *	We don't know the supplied connection parameters and don't want
+		 *	to connect to the wrong database by using defaults, so require
+		 *	all parameters to be specified.
+		 */
+		fputs(_("All connection parameters must be supplied because no database connection exists\n"), stderr);
+		return false;
+	}
+
 	if (!dbname)
 		dbname = PQdb(o_conn);
 	if (!user)
@@ -2040,9 +2054,11 @@ process_file(char *filename, bool single_txn, bool use_relative_path)
 	PGresult   *res;
 
 	if (!filename)
-		return EXIT_FAILURE;
-
-	if (strcmp(filename, "-") != 0)
+	{
+		fd = stdin;
+		filename = NULL;
+	}
+	else if (strcmp(filename, "-") != 0)
 	{
 		canonicalize_path(filename);
 

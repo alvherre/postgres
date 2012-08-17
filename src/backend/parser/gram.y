@@ -55,6 +55,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_trigger.h"
 #include "commands/defrem.h"
+#include "commands/trigger.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "parser/gramparse.h"
@@ -100,6 +101,7 @@ typedef struct PrivTarget
 #define CAS_INITIALLY_IMMEDIATE		0x04
 #define CAS_INITIALLY_DEFERRED		0x08
 #define CAS_NOT_VALID				0x10
+#define CAS_NO_INHERIT				0x20
 
 
 #define parser_yyerror(msg)  scanner_yyerror(msg, yyscanner)
@@ -143,7 +145,7 @@ static void SplitColQualList(List *qualList,
 							 core_yyscan_t yyscanner);
 static void processCASbits(int cas_bits, int location, const char *constrType,
 			   bool *deferrable, bool *initdeferred, bool *not_valid,
-			   core_yyscan_t yyscanner);
+			   bool *no_inherit, core_yyscan_t yyscanner);
 
 %}
 
@@ -194,6 +196,7 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 }
 
 %type <node>	stmt schema_stmt
+		AlterEventTrigStmt
 		AlterDatabaseStmt AlterDatabaseSetStmt AlterDomainStmt AlterEnumStmt
 		AlterFdwStmt AlterForeignServerStmt AlterGroupStmt
 		AlterObjectSchemaStmt AlterOwnerStmt AlterSeqStmt AlterTableStmt
@@ -207,7 +210,7 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 		CreateOpFamilyStmt AlterOpFamilyStmt CreatePLangStmt
 		CreateSchemaStmt CreateSeqStmt CreateStmt CreateTableSpaceStmt
 		CreateFdwStmt CreateForeignServerStmt CreateForeignTableStmt
-		CreateAssertStmt CreateTrigStmt
+		CreateAssertStmt CreateTrigStmt CreateEventTrigStmt
 		CreateUserStmt CreateUserMappingStmt CreateRoleStmt
 		CreatedbStmt DeclareCursorStmt DefineStmt DeleteStmt DiscardStmt DoStmt
 		DropGroupStmt DropOpClassStmt DropOpFamilyStmt DropPLangStmt DropStmt
@@ -267,6 +270,10 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 %type <list>	TriggerEvents TriggerOneEvent
 %type <value>	TriggerFuncArg
 %type <node>	TriggerWhen
+
+%type <list>	event_trigger_when_list event_trigger_value_list
+%type <defelt>	event_trigger_when_item
+%type <chr>		enable_trigger
 
 %type <str>		copy_file_name
 				database_name access_method_clause access_method attr_name
@@ -389,7 +396,8 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 %type <node>	ctext_expr
 %type <value>	NumericOnly
 %type <list>	NumericOnly_list
-%type <alias>	alias_clause
+%type <alias>	alias_clause opt_alias_clause
+%type <list>	func_alias_clause
 %type <sortby>	sortby
 %type <ielem>	index_elem
 %type <node>	table_ref
@@ -505,7 +513,7 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DESC
 	DICTIONARY DISABLE_P DISCARD DISTINCT DO DOCUMENT_P DOMAIN_P DOUBLE_P DROP
 
-	EACH ELSE ENABLE_P ENCODING ENCRYPTED END_P ENUM_P ESCAPE EXCEPT
+	EACH ELSE ENABLE_P ENCODING ENCRYPTED END_P ENUM_P ESCAPE EVENT EXCEPT
 	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
 	EXTENSION EXTERNAL EXTRACT
 
@@ -525,9 +533,9 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 
 	KEY
 
-	LABEL LANGUAGE LARGE_P LAST_P LC_COLLATE_P LC_CTYPE_P LEADING LEAKPROOF
-	LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
-	LOCATION LOCK_P
+	LABEL LANGUAGE LARGE_P LAST_P LATERAL_P LC_COLLATE_P LC_CTYPE_P
+	LEADING LEAKPROOF LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL
+	LOCALTIME LOCALTIMESTAMP LOCATION LOCK_P
 
 	MAPPING MATCH MAXVALUE MINUTE_P MINVALUE MODE MONTH_P MOVE
 
@@ -674,7 +682,8 @@ stmtmulti:	stmtmulti ';' stmt
 		;
 
 stmt :
-			AlterDatabaseStmt
+			AlterEventTrigStmt
+			| AlterDatabaseStmt
 			| AlterDatabaseSetStmt
 			| AlterDefaultPrivilegesStmt
 			| AlterDomainStmt
@@ -725,6 +734,7 @@ stmt :
 			| CreateStmt
 			| CreateTableSpaceStmt
 			| CreateTrigStmt
+			| CreateEventTrigStmt
 			| CreateRoleStmt
 			| CreateUserStmt
 			| CreateUserMappingStmt
@@ -2701,13 +2711,13 @@ ColConstraintElem:
 					n->indexspace = $4;
 					$$ = (Node *)n;
 				}
-			| CHECK opt_no_inherit '(' a_expr ')'
+			| CHECK '(' a_expr ')' opt_no_inherit
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_CHECK;
 					n->location = @1;
-					n->is_no_inherit = $2;
-					n->raw_expr = $4;
+					n->is_no_inherit = $5;
+					n->raw_expr = $3;
 					n->cooked_expr = NULL;
 					$$ = (Node *)n;
 				}
@@ -2747,10 +2757,10 @@ ColConstraintElem:
  * combinations.
  *
  * See also ConstraintAttributeSpec, which can be used in places where
- * there is no parsing conflict.  (Note: currently, NOT VALID is an allowed
- * clause in ConstraintAttributeSpec, but not here.  Someday we might need
- * to allow it here too, but for the moment it doesn't seem useful in the
- * statements that use ConstraintAttr.)
+ * there is no parsing conflict.  (Note: currently, NOT VALID and NO INHERIT
+ * are allowed clauses in ConstraintAttributeSpec, but not here.  Someday we
+ * might need to allow them here too, but for the moment it doesn't seem
+ * useful in the statements that use ConstraintAttr.)
  */
 ConstraintAttr:
 			DEFERRABLE
@@ -2827,17 +2837,16 @@ TableConstraint:
 		;
 
 ConstraintElem:
-			CHECK opt_no_inherit '(' a_expr ')' ConstraintAttributeSpec
+			CHECK '(' a_expr ')' ConstraintAttributeSpec
 				{
 					Constraint *n = makeNode(Constraint);
 					n->contype = CONSTR_CHECK;
 					n->location = @1;
-					n->is_no_inherit = $2;
-					n->raw_expr = $4;
+					n->raw_expr = $3;
 					n->cooked_expr = NULL;
-					processCASbits($6, @6, "CHECK",
+					processCASbits($5, @5, "CHECK",
 								   NULL, NULL, &n->skip_validation,
-								   yyscanner);
+								   &n->is_no_inherit, yyscanner);
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
 				}
@@ -2853,7 +2862,7 @@ ConstraintElem:
 					n->indexspace = $6;
 					processCASbits($7, @7, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 					$$ = (Node *)n;
 				}
 			| UNIQUE ExistingIndex ConstraintAttributeSpec
@@ -2867,7 +2876,7 @@ ConstraintElem:
 					n->indexspace = NULL;
 					processCASbits($3, @3, "UNIQUE",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 					$$ = (Node *)n;
 				}
 			| PRIMARY KEY '(' columnList ')' opt_definition OptConsTableSpace
@@ -2882,7 +2891,7 @@ ConstraintElem:
 					n->indexspace = $7;
 					processCASbits($8, @8, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 					$$ = (Node *)n;
 				}
 			| PRIMARY KEY ExistingIndex ConstraintAttributeSpec
@@ -2896,7 +2905,7 @@ ConstraintElem:
 					n->indexspace = NULL;
 					processCASbits($4, @4, "PRIMARY KEY",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 					$$ = (Node *)n;
 				}
 			| EXCLUDE access_method_clause '(' ExclusionConstraintList ')'
@@ -2914,7 +2923,7 @@ ConstraintElem:
 					n->where_clause		= $8;
 					processCASbits($9, @9, "EXCLUDE",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 					$$ = (Node *)n;
 				}
 			| FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
@@ -2931,7 +2940,7 @@ ConstraintElem:
 					n->fk_del_action	= (char) ($10 & 0xFF);
 					processCASbits($11, @11, "FOREIGN KEY",
 								   &n->deferrable, &n->initdeferred,
-								   &n->skip_validation,
+								   &n->skip_validation, NULL,
 								   yyscanner);
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *)n;
@@ -3554,6 +3563,15 @@ AlterExtensionContentsStmt:
 					n->objname = list_make1(makeString($6));
 					$$ = (Node *)n;
 				}
+			| ALTER EXTENSION name add_drop EVENT TRIGGER name
+				{
+					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
+					n->extname = $3;
+					n->action = $4;
+					n->objtype = OBJECT_EVENT_TRIGGER;
+					n->objname = list_make1(makeString($7));
+					$$ = (Node *)n;
+				}
 			| ALTER EXTENSION name add_drop TABLE any_name
 				{
 					AlterExtensionContentsStmt *n = makeNode(AlterExtensionContentsStmt);
@@ -4116,7 +4134,7 @@ CreateTrigStmt:
 					n->isconstraint  = TRUE;
 					processCASbits($10, @10, "TRIGGER",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 					n->constrrel = $9;
 					$$ = (Node *)n;
 				}
@@ -4253,6 +4271,7 @@ ConstraintAttributeElem:
 			| INITIALLY IMMEDIATE			{ $$ = CAS_INITIALLY_IMMEDIATE; }
 			| INITIALLY DEFERRED			{ $$ = CAS_INITIALLY_DEFERRED; }
 			| NOT VALID						{ $$ = CAS_NOT_VALID; }
+			| NO INHERIT					{ $$ = CAS_NO_INHERIT; }
 		;
 
 
@@ -4285,6 +4304,75 @@ DropTrigStmt:
 /*****************************************************************************
  *
  *		QUERIES :
+ *				CREATE EVENT TRIGGER ...
+ *				DROP EVENT TRIGGER ...
+ *				ALTER EVENT TRIGGER ...
+ *
+ *****************************************************************************/
+
+CreateEventTrigStmt:
+			CREATE EVENT TRIGGER name ON ColLabel
+			EXECUTE PROCEDURE func_name '(' ')'
+				{
+					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
+					n->trigname = $4;
+					n->eventname = $6;
+					n->whenclause = NULL;
+					n->funcname = $9;
+					$$ = (Node *)n;
+				}
+		  | CREATE EVENT TRIGGER name ON ColLabel
+			WHEN event_trigger_when_list
+			EXECUTE PROCEDURE func_name '(' ')'
+				{
+					CreateEventTrigStmt *n = makeNode(CreateEventTrigStmt);
+					n->trigname = $4;
+					n->eventname = $6;
+					n->whenclause = $8;
+					n->funcname = $11;
+					$$ = (Node *)n;
+				}
+		;
+
+event_trigger_when_list:
+		  event_trigger_when_item
+			{ $$ = list_make1($1); }
+		| event_trigger_when_list AND event_trigger_when_item
+			{ $$ = lappend($1, $3); }
+		;
+
+event_trigger_when_item:
+		ColId IN_P '(' event_trigger_value_list ')'
+			{ $$ = makeDefElem($1, (Node *) $4); }
+		;
+
+event_trigger_value_list:
+		  SCONST
+			{ $$ = list_make1(makeString($1)); }
+		| event_trigger_value_list ',' SCONST
+			{ $$ = lappend($1, makeString($3)); }
+		;
+
+AlterEventTrigStmt:
+			ALTER EVENT TRIGGER name enable_trigger
+				{
+					AlterEventTrigStmt *n = makeNode(AlterEventTrigStmt);
+					n->trigname = $4;
+					n->tgenabled = $5;
+					$$ = (Node *) n;
+				}
+		;
+
+enable_trigger:
+			ENABLE_P					{ $$ = TRIGGER_FIRES_ON_ORIGIN; }
+			| ENABLE_P REPLICA			{ $$ = TRIGGER_FIRES_ON_REPLICA; }
+			| ENABLE_P ALWAYS			{ $$ = TRIGGER_FIRES_ALWAYS; }
+			| DISABLE_P					{ $$ = TRIGGER_DISABLED; }
+		;
+
+/*****************************************************************************
+ *
+ *		QUERIES :
  *				CREATE ASSERTION ...
  *				DROP ASSERTION ...
  *
@@ -4300,7 +4388,7 @@ CreateAssertStmt:
 					n->isconstraint  = TRUE;
 					processCASbits($8, @8, "ASSERTION",
 								   &n->deferrable, &n->initdeferred, NULL,
-								   yyscanner);
+								   NULL, yyscanner);
 
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -4868,6 +4956,7 @@ drop_type:	TABLE									{ $$ = OBJECT_TABLE; }
 			| VIEW									{ $$ = OBJECT_VIEW; }
 			| INDEX									{ $$ = OBJECT_INDEX; }
 			| FOREIGN TABLE							{ $$ = OBJECT_FOREIGN_TABLE; }
+			| EVENT TRIGGER 						{ $$ = OBJECT_EVENT_TRIGGER; }
 			| TYPE_P								{ $$ = OBJECT_TYPE; }
 			| DOMAIN_P								{ $$ = OBJECT_DOMAIN; }
 			| COLLATION								{ $$ = OBJECT_COLLATION; }
@@ -4931,7 +5020,7 @@ opt_restart_seqs:
  *				   EXTENSION | ROLE | TEXT SEARCH PARSER |
  *				   TEXT SEARCH DICTIONARY | TEXT SEARCH TEMPLATE |
  *				   TEXT SEARCH CONFIGURATION | FOREIGN TABLE |
- *				   FOREIGN DATA WRAPPER | SERVER ] <objname> |
+ *				   FOREIGN DATA WRAPPER | SERVER | EVENT TRIGGER ] <objname> |
  *				 AGGREGATE <aggname> (arg1, ...) |
  *				 FUNCTION <funcname> (arg1, arg2, ...) |
  *				 OPERATOR <op> (leftoperand_typ, rightoperand_typ) |
@@ -5113,6 +5202,7 @@ comment_type:
 			| FOREIGN TABLE						{ $$ = OBJECT_FOREIGN_TABLE; }
 			| SERVER							{ $$ = OBJECT_FOREIGN_SERVER; }
 			| FOREIGN DATA_P WRAPPER			{ $$ = OBJECT_FDW; }
+			| EVENT TRIGGER						{ $$ = OBJECT_EVENT_TRIGGER; }
 		;
 
 comment_text:
@@ -5195,6 +5285,7 @@ opt_provider:	FOR ColId_or_Sconst	{ $$ = $2; }
 security_label_type:
 			COLUMN								{ $$ = OBJECT_COLUMN; }
 			| DATABASE							{ $$ = OBJECT_DATABASE; }
+			| EVENT TRIGGER						{ $$ = OBJECT_EVENT_TRIGGER; }
 			| FOREIGN TABLE						{ $$ = OBJECT_FOREIGN_TABLE; }
 			| SCHEMA							{ $$ = OBJECT_SCHEMA; }
 			| SEQUENCE							{ $$ = OBJECT_SEQUENCE; }
@@ -5837,7 +5928,14 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->options = $12;
 					n->tableSpace = $13;
 					n->whereClause = $14;
+					n->excludeOpNames = NIL;
+					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
+					n->oldNode = InvalidOid;
+					n->primary = false;
+					n->isconstraint = false;
+					n->deferrable = false;
+					n->initdeferred = false;
 					$$ = (Node *)n;
 				}
 		;
@@ -6843,6 +6941,14 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
+			| ALTER EVENT TRIGGER name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_EVENT_TRIGGER;
+					n->subname = $4;
+					n->newname = $7;
+					$$ = (Node *)n;
+				}
 			| ALTER ROLE RoleId RENAME TO RoleId
 				{
 					RenameStmt *n = makeNode(RenameStmt);
@@ -7320,6 +7426,14 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->objectType = OBJECT_FOREIGN_SERVER;
 					n->object = list_make1(makeString($3));
 					n->newowner = $6;
+					$$ = (Node *)n;
+				}
+			| ALTER EVENT TRIGGER name OWNER TO RoleId
+				{
+					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
+					n->objectType = OBJECT_EVENT_TRIGGER;
+					n->object = list_make1(makeString($4));
+					n->newowner = $7;
 					$$ = (Node *)n;
 				}
 		;
@@ -9212,65 +9326,37 @@ from_list:
 		;
 
 /*
- * table_ref is where an alias clause can be attached.	Note we cannot make
- * alias_clause have an empty production because that causes parse conflicts
- * between table_ref := '(' joined_table ')' alias_clause
- * and joined_table := '(' joined_table ')'.  So, we must have the
- * redundant-looking productions here instead.
+ * table_ref is where an alias clause can be attached.
  */
-table_ref:	relation_expr
-				{
-					$$ = (Node *) $1;
-				}
-			| relation_expr alias_clause
+table_ref:	relation_expr opt_alias_clause
 				{
 					$1->alias = $2;
 					$$ = (Node *) $1;
 				}
-			| func_table
+			| func_table func_alias_clause
 				{
 					RangeFunction *n = makeNode(RangeFunction);
+					n->lateral = false;
 					n->funccallnode = $1;
-					n->coldeflist = NIL;
+					n->alias = linitial($2);
+					n->coldeflist = lsecond($2);
 					$$ = (Node *) n;
 				}
-			| func_table alias_clause
+			| LATERAL_P func_table func_alias_clause
 				{
 					RangeFunction *n = makeNode(RangeFunction);
-					n->funccallnode = $1;
+					n->lateral = true;
+					n->funccallnode = $2;
+					n->alias = linitial($3);
+					n->coldeflist = lsecond($3);
+					$$ = (Node *) n;
+				}
+			| select_with_parens opt_alias_clause
+				{
+					RangeSubselect *n = makeNode(RangeSubselect);
+					n->lateral = false;
+					n->subquery = $1;
 					n->alias = $2;
-					n->coldeflist = NIL;
-					$$ = (Node *) n;
-				}
-			| func_table AS '(' TableFuncElementList ')'
-				{
-					RangeFunction *n = makeNode(RangeFunction);
-					n->funccallnode = $1;
-					n->coldeflist = $4;
-					$$ = (Node *) n;
-				}
-			| func_table AS ColId '(' TableFuncElementList ')'
-				{
-					RangeFunction *n = makeNode(RangeFunction);
-					Alias *a = makeNode(Alias);
-					n->funccallnode = $1;
-					a->aliasname = $3;
-					n->alias = a;
-					n->coldeflist = $5;
-					$$ = (Node *) n;
-				}
-			| func_table ColId '(' TableFuncElementList ')'
-				{
-					RangeFunction *n = makeNode(RangeFunction);
-					Alias *a = makeNode(Alias);
-					n->funccallnode = $1;
-					a->aliasname = $2;
-					n->alias = a;
-					n->coldeflist = $4;
-					$$ = (Node *) n;
-				}
-			| select_with_parens
-				{
 					/*
 					 * The SQL spec does not permit a subselect
 					 * (<derived_table>) without an alias clause,
@@ -9282,26 +9368,47 @@ table_ref:	relation_expr
 					 * However, it does seem like a good idea to emit
 					 * an error message that's better than "syntax error".
 					 */
-					if (IsA($1, SelectStmt) &&
-						((SelectStmt *) $1)->valuesLists)
-						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("VALUES in FROM must have an alias"),
-								 errhint("For example, FROM (VALUES ...) [AS] foo."),
-								 parser_errposition(@1)));
-					else
-						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("subquery in FROM must have an alias"),
-								 errhint("For example, FROM (SELECT ...) [AS] foo."),
-								 parser_errposition(@1)));
-					$$ = NULL;
+					if ($2 == NULL)
+					{
+						if (IsA($1, SelectStmt) &&
+							((SelectStmt *) $1)->valuesLists)
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("VALUES in FROM must have an alias"),
+									 errhint("For example, FROM (VALUES ...) [AS] foo."),
+									 parser_errposition(@1)));
+						else
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("subquery in FROM must have an alias"),
+									 errhint("For example, FROM (SELECT ...) [AS] foo."),
+									 parser_errposition(@1)));
+					}
+					$$ = (Node *) n;
 				}
-			| select_with_parens alias_clause
+			| LATERAL_P select_with_parens opt_alias_clause
 				{
 					RangeSubselect *n = makeNode(RangeSubselect);
-					n->subquery = $1;
-					n->alias = $2;
+					n->lateral = true;
+					n->subquery = $2;
+					n->alias = $3;
+					/* same coment as above */
+					if ($3 == NULL)
+					{
+						if (IsA($2, SelectStmt) &&
+							((SelectStmt *) $2)->valuesLists)
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("VALUES in FROM must have an alias"),
+									 errhint("For example, FROM (VALUES ...) [AS] foo."),
+									 parser_errposition(@2)));
+						else
+							ereport(ERROR,
+									(errcode(ERRCODE_SYNTAX_ERROR),
+									 errmsg("subquery in FROM must have an alias"),
+									 errhint("For example, FROM (SELECT ...) [AS] foo."),
+									 parser_errposition(@2)));
+					}
 					$$ = (Node *) n;
 				}
 			| joined_table
@@ -9424,6 +9531,41 @@ alias_clause:
 				{
 					$$ = makeNode(Alias);
 					$$->aliasname = $1;
+				}
+		;
+
+opt_alias_clause: alias_clause						{ $$ = $1; }
+			| /*EMPTY*/								{ $$ = NULL; }
+		;
+
+/*
+ * func_alias_clause can include both an Alias and a coldeflist, so we make it
+ * return a 2-element list that gets disassembled by calling production.
+ */
+func_alias_clause:
+			alias_clause
+				{
+					$$ = list_make2($1, NIL);
+				}
+			| AS '(' TableFuncElementList ')'
+				{
+					$$ = list_make2(NULL, $3);
+				}
+			| AS ColId '(' TableFuncElementList ')'
+				{
+					Alias *a = makeNode(Alias);
+					a->aliasname = $2;
+					$$ = list_make2(a, $4);
+				}
+			| ColId '(' TableFuncElementList ')'
+				{
+					Alias *a = makeNode(Alias);
+					a->aliasname = $1;
+					$$ = list_make2(a, $3);
+				}
+			| /*EMPTY*/
+				{
+					$$ = list_make2(NULL, NIL);
 				}
 		;
 
@@ -12639,6 +12781,7 @@ reserved_keyword:
 			| INITIALLY
 			| INTERSECT
 			| INTO
+			| LATERAL_P
 			| LEADING
 			| LIMIT
 			| LOCALTIME
@@ -13284,7 +13427,7 @@ SplitColQualList(List *qualList,
 static void
 processCASbits(int cas_bits, int location, const char *constrType,
 			   bool *deferrable, bool *initdeferred, bool *not_valid,
-			   core_yyscan_t yyscanner)
+			   bool *no_inherit, core_yyscan_t yyscanner)
 {
 	/* defaults */
 	if (deferrable)
@@ -13329,6 +13472,19 @@ processCASbits(int cas_bits, int location, const char *constrType,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 /* translator: %s is CHECK, UNIQUE, or similar */
 					 errmsg("%s constraints cannot be marked NOT VALID",
+							constrType),
+					 parser_errposition(location)));
+	}
+
+	if (cas_bits & CAS_NO_INHERIT)
+	{
+		if (no_inherit)
+			*no_inherit = true;
+		else
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 /* translator: %s is CHECK, UNIQUE, or similar */
+					 errmsg("%s constraints cannot be marked NO INHERIT",
 							constrType),
 					 parser_errposition(location)));
 	}

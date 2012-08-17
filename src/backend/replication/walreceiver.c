@@ -52,10 +52,8 @@
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
 
-/* Global variable to indicate if this process is a walreceiver process */
-bool		am_walreceiver;
 
-/* GUC variable */
+/* GUC variables */
 int			wal_receiver_status_interval;
 bool		hot_standby_feedback;
 
@@ -73,7 +71,7 @@ walrcv_disconnect_type walrcv_disconnect = NULL;
  * corresponding the filename of recvFile, used for error messages.
  */
 static int	recvFile = -1;
-static TimeLineID	recvFileTLI = -1;
+static TimeLineID	recvFileTLI = 0;
 static XLogSegNo recvSegNo = 0;
 static uint32 recvOff = 0;
 
@@ -176,8 +174,6 @@ WalReceiverMain(void)
 	/* use volatile pointer to prevent code rearrangement */
 	volatile WalRcvData *walrcv = WalRcv;
 
-	am_walreceiver = true;
-
 	/*
 	 * WalRcv should be set up already (if we are a backend, we inherit this
 	 * by fork() or EXEC_BACKEND mechanism from the postmaster).
@@ -222,7 +218,7 @@ WalReceiverMain(void)
 	startpoint = walrcv->receiveStart;
 
 	/* Initialise to a sanish value */
-	walrcv->lastMsgSendTime = walrcv->lastMsgReceiptTime = GetCurrentTimestamp();
+	walrcv->lastMsgSendTime = walrcv->lastMsgReceiptTime = walrcv->latestWalEndTime = GetCurrentTimestamp();
 
 	SpinLockRelease(&walrcv->mutex);
 
@@ -753,6 +749,9 @@ ProcessWalSndrMessage(XLogRecPtr walEnd, TimestampTz sendTime)
 
 	/* Update shared-memory status */
 	SpinLockAcquire(&walrcv->mutex);
+	if (XLByteLT(walrcv->latestWalEnd, walEnd))
+		walrcv->latestWalEndTime = sendTime;
+	walrcv->latestWalEnd = walEnd;
 	walrcv->lastMsgSendTime = sendTime;
 	walrcv->lastMsgReceiptTime = lastMsgReceiptTime;
 	SpinLockRelease(&walrcv->mutex);

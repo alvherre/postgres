@@ -290,7 +290,6 @@ extern UserOpts user_opts;
 extern ClusterInfo old_cluster,
 			new_cluster;
 extern OSInfo os_info;
-extern char scandir_file_pattern[];
 
 
 /* check.c */
@@ -325,9 +324,9 @@ void		split_old_dump(void);
 /* exec.c */
 
 int
-exec_prog(bool throw_error, bool is_priv,
-		  const char *log_file, const char *cmd,...)
-__attribute__((format(PG_PRINTF_ATTRIBUTE, 4, 5)));
+exec_prog(bool throw_error, bool is_priv, const char *log_file,
+		  const char *opt_log_file, const char *cmd,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 5, 6)));
 void		verify_directories(void);
 bool		is_server_running(const char *datadir);
 
@@ -364,7 +363,7 @@ const char *setupPageConverter(pageCnvCtx **result);
 typedef void *pageCnvCtx;
 #endif
 
-int			load_directory(const char *dirname, struct dirent *** namelist);
+int			load_directory(const char *dirname, char ***namelist);
 const char *copyAndUpdateFile(pageCnvCtx *pageConverter, const char *src,
 				  const char *dst, bool force);
 const char *linkAndUpdateFile(pageCnvCtx *pageConverter, const char *src,
@@ -436,7 +435,8 @@ prep_status(const char *fmt,...)
 __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 void		check_ok(void);
 char	   *pg_strdup(const char *s);
-void	   *pg_malloc(int size);
+void	   *pg_malloc(size_t size);
+void	   *pg_realloc(void *ptr, size_t size);
 void		pg_free(void *ptr);
 const char *getErrorText(int errNum);
 unsigned int str2uint(const char *str);

@@ -253,8 +253,9 @@ set_rel_size(PlannerInfo *root, RelOptInfo *rel,
 			case RTE_SUBQUERY:
 
 				/*
-				 * Subqueries don't support parameterized paths, so just go
-				 * ahead and build their paths immediately.
+				 * Subqueries don't support making a choice between
+				 * parameterized and unparameterized paths, so just go ahead
+				 * and build their paths immediately.
 				 */
 				set_subquery_pathlist(root, rel, rti, rte);
 				break;
@@ -660,6 +661,7 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	int			parentRTindex = rti;
 	List	   *live_childrels = NIL;
 	List	   *subpaths = NIL;
+	bool		subpaths_valid = true;
 	List	   *all_child_pathkeys = NIL;
 	List	   *all_child_outers = NIL;
 	ListCell   *l;
@@ -699,14 +701,20 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 			continue;
 
 		/*
-		 * Child is live, so add its cheapest access path to the Append path
-		 * we are constructing for the parent.
+		 * Child is live, so add it to the live_childrels list for use below.
 		 */
-		subpaths = accumulate_append_subpath(subpaths,
-											 childrel->cheapest_total_path);
-
-		/* Remember which childrels are live, for logic below */
 		live_childrels = lappend(live_childrels, childrel);
+
+		/*
+		 * If child has an unparameterized cheapest-total path, add that to
+		 * the unparameterized Append path we are constructing for the parent.
+		 * If not, there's no workable unparameterized path.
+		 */
+		if (childrel->cheapest_total_path)
+			subpaths = accumulate_append_subpath(subpaths,
+											 childrel->cheapest_total_path);
+		else
+			subpaths_valid = false;
 
 		/*
 		 * Collect lists of all the available path orderings and
@@ -774,17 +782,20 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	}
 
 	/*
-	 * Next, build an unordered, unparameterized Append path for the rel.
-	 * (Note: this is correct even if we have zero or one live subpath due to
-	 * constraint exclusion.)
+	 * If we found unparameterized paths for all children, build an unordered,
+	 * unparameterized Append path for the rel.  (Note: this is correct even
+	 * if we have zero or one live subpath due to constraint exclusion.)
 	 */
-	add_path(rel, (Path *) create_append_path(rel, subpaths, NULL));
+	if (subpaths_valid)
+		add_path(rel, (Path *) create_append_path(rel, subpaths, NULL));
 
 	/*
-	 * Build unparameterized MergeAppend paths based on the collected list of
-	 * child pathkeys.
+	 * Also build unparameterized MergeAppend paths based on the collected
+	 * list of child pathkeys.
 	 */
-	generate_mergeappend_paths(root, rel, live_childrels, all_child_pathkeys);
+	if (subpaths_valid)
+		generate_mergeappend_paths(root, rel, live_childrels,
+								   all_child_pathkeys);
 
 	/*
 	 * Build Append paths for each parameterization seen among the child rels.
@@ -802,11 +813,11 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	foreach(l, all_child_outers)
 	{
 		Relids		required_outer = (Relids) lfirst(l);
-		bool		ok = true;
 		ListCell   *lcr;
 
 		/* Select the child paths for an Append with this parameterization */
 		subpaths = NIL;
+		subpaths_valid = true;
 		foreach(lcr, live_childrels)
 		{
 			RelOptInfo *childrel = (RelOptInfo *) lfirst(lcr);
@@ -826,7 +837,7 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 													 required_outer, 1.0);
 				if (cheapest_total == NULL)
 				{
-					ok = false;
+					subpaths_valid = false;
 					break;
 				}
 			}
@@ -834,7 +845,7 @@ set_append_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 			subpaths = accumulate_append_subpath(subpaths, cheapest_total);
 		}
 
-		if (ok)
+		if (subpaths_valid)
 			add_path(rel, (Path *)
 					 create_append_path(rel, subpaths, required_outer));
 	}
@@ -908,7 +919,9 @@ generate_mergeappend_paths(PlannerInfo *root, RelOptInfo *rel,
 			{
 				cheapest_startup = cheapest_total =
 					childrel->cheapest_total_path;
+				/* Assert we do have an unparameterized path for this child */
 				Assert(cheapest_total != NULL);
+				Assert(cheapest_total->param_info == NULL);
 			}
 
 			/*
@@ -1012,8 +1025,13 @@ has_multiple_baserels(PlannerInfo *root)
  * set_subquery_pathlist
  *		Build the (single) access path for a subquery RTE
  *
- * There's no need for a separate set_subquery_size phase, since we don't
- * support parameterized paths for subqueries.
+ * We don't currently support generating parameterized paths for subqueries
+ * by pushing join clauses down into them; it seems too expensive to re-plan
+ * the subquery multiple times to consider different alternatives.	So the
+ * subquery will have exactly one path.  (The path will be parameterized
+ * if the subquery contains LATERAL references, otherwise not.)  Since there's
+ * no freedom of action here, there's no need for a separate set_subquery_size
+ * phase: we just make the path right away.
  */
 static void
 set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
@@ -1021,6 +1039,7 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 {
 	Query	   *parse = root->parse;
 	Query	   *subquery = rte->subquery;
+	Relids		required_outer;
 	bool	   *differentTypes;
 	double		tuple_fraction;
 	PlannerInfo *subroot;
@@ -1032,6 +1051,20 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	 * someday).
 	 */
 	subquery = copyObject(subquery);
+
+	/*
+	 * If it's a LATERAL subquery, it might contain some Vars of the current
+	 * query level, requiring it to be treated as parameterized.
+	 */
+	if (rte->lateral)
+	{
+		required_outer = pull_varnos_of_level((Node *) subquery, 1);
+		/* Enforce convention that empty required_outer is exactly NULL */
+		if (bms_is_empty(required_outer))
+			required_outer = NULL;
+	}
+	else
+		required_outer = NULL;
 
 	/* We need a workspace for keeping track of set-op type coercions */
 	differentTypes = (bool *)
@@ -1051,10 +1084,9 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	 * pseudoconstant clauses; better to have the gating node above the
 	 * subquery.
 	 *
-	 * Also, if the sub-query has "security_barrier" flag, it means the
+	 * Also, if the sub-query has the "security_barrier" flag, it means the
 	 * sub-query originated from a view that must enforce row-level security.
-	 * We must not push down quals in order to avoid information leaks, either
-	 * via side-effects or error output.
+	 * Then we must not push down quals that contain leaky functions.
 	 *
 	 * Non-pushed-down clauses will get evaluated as qpquals of the
 	 * SubqueryScan node.
@@ -1134,7 +1166,7 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	pathkeys = convert_subquery_pathkeys(root, rel, subroot->query_pathkeys);
 
 	/* Generate appropriate path */
-	add_path(rel, create_subqueryscan_path(root, rel, pathkeys, NULL));
+	add_path(rel, create_subqueryscan_path(root, rel, pathkeys, required_outer));
 
 	/* Select cheapest path (pretty easy in this case...) */
 	set_cheapest(rel);
@@ -1143,12 +1175,32 @@ set_subquery_pathlist(PlannerInfo *root, RelOptInfo *rel,
 /*
  * set_function_pathlist
  *		Build the (single) access path for a function RTE
+ *
+ * As with subqueries, a function RTE's path might be parameterized due to
+ * LATERAL references, but that's inherent in the function expression and
+ * not a result of pushing down join quals.
  */
 static void
 set_function_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
+	Relids		required_outer;
+
+	/*
+	 * If it's a LATERAL function, it might contain some Vars of the current
+	 * query level, requiring it to be treated as parameterized.
+	 */
+	if (rte->lateral)
+	{
+		required_outer = pull_varnos_of_level(rte->funcexpr, 0);
+		/* Enforce convention that empty required_outer is exactly NULL */
+		if (bms_is_empty(required_outer))
+			required_outer = NULL;
+	}
+	else
+		required_outer = NULL;
+
 	/* Generate appropriate path */
-	add_path(rel, create_functionscan_path(root, rel));
+	add_path(rel, create_functionscan_path(root, rel, required_outer));
 
 	/* Select cheapest path (pretty easy in this case...) */
 	set_cheapest(rel);
@@ -1157,12 +1209,34 @@ set_function_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 /*
  * set_values_pathlist
  *		Build the (single) access path for a VALUES RTE
+ *
+ * As with subqueries, a VALUES RTE's path might be parameterized due to
+ * LATERAL references, but that's inherent in the values expressions and
+ * not a result of pushing down join quals.
  */
 static void
 set_values_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
+	Relids		required_outer;
+
+	/*
+	 * If it's a LATERAL RTE, it might contain some Vars of the current query
+	 * level, requiring it to be treated as parameterized.  (NB: even though
+	 * the parser never marks VALUES RTEs as LATERAL, they could be so marked
+	 * by now, as a result of subquery pullup.)
+	 */
+	if (rte->lateral)
+	{
+		required_outer = pull_varnos_of_level((Node *) rte->values_lists, 0);
+		/* Enforce convention that empty required_outer is exactly NULL */
+		if (bms_is_empty(required_outer))
+			required_outer = NULL;
+	}
+	else
+		required_outer = NULL;
+
 	/* Generate appropriate path */
-	add_path(rel, create_valuesscan_path(root, rel));
+	add_path(rel, create_valuesscan_path(root, rel, required_outer));
 
 	/* Select cheapest path (pretty easy in this case...) */
 	set_cheapest(rel);
@@ -1988,10 +2062,16 @@ debug_print_rel(PlannerInfo *root, RelOptInfo *rel)
 	printf("\tpath list:\n");
 	foreach(l, rel->pathlist)
 		print_path(root, lfirst(l), 1);
-	printf("\n\tcheapest startup path:\n");
-	print_path(root, rel->cheapest_startup_path, 1);
-	printf("\n\tcheapest total path:\n");
-	print_path(root, rel->cheapest_total_path, 1);
+	if (rel->cheapest_startup_path)
+	{
+		printf("\n\tcheapest startup path:\n");
+		print_path(root, rel->cheapest_startup_path, 1);
+	}
+	if (rel->cheapest_total_path)
+	{
+		printf("\n\tcheapest total path:\n");
+		print_path(root, rel->cheapest_total_path, 1);
+	}
 	printf("\n");
 	fflush(stdout);
 }

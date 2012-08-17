@@ -286,25 +286,10 @@ CreateTrigger(CreateTrigStmt *stmt, const char *queryString,
 		/* Transform expression.  Copy to be sure we don't modify original */
 		whenClause = transformWhereClause(pstate,
 										  copyObject(stmt->whenClause),
+										  EXPR_KIND_TRIGGER_WHEN,
 										  "WHEN");
 		/* we have to fix its collations too */
 		assign_expr_collations(pstate, whenClause);
-
-		/*
-		 * No subplans or aggregates, please
-		 */
-		if (pstate->p_hasSubLinks)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				   errmsg("cannot use subquery in trigger WHEN condition")));
-		if (pstate->p_hasAggs)
-			ereport(ERROR,
-					(errcode(ERRCODE_GROUPING_ERROR),
-					 errmsg("cannot use aggregate function in trigger WHEN condition")));
-		if (pstate->p_hasWindowFuncs)
-			ereport(ERROR,
-					(errcode(ERRCODE_WINDOWING_ERROR),
-			errmsg("cannot use window function in trigger WHEN condition")));
 
 		/*
 		 * Check for disallowed references to OLD/NEW.
@@ -459,7 +444,7 @@ CreateTrigger(CreateTrigStmt *stmt, const char *queryString,
 											  NULL,
 											  true,		/* islocal */
 											  0,		/* inhcount */
-											  false);	/* isnoinherit */
+											  true);	/* isnoinherit */
 	}
 
 	/*
@@ -1026,7 +1011,7 @@ ConvertTriggerToFK(CreateTrigStmt *stmt, Oid funcoid)
 		/* ... and execute it */
 		ProcessUtility((Node *) atstmt,
 					   "(generated ALTER TABLE ADD FOREIGN KEY command)",
-					   NULL, false, None_Receiver, NULL);
+					   NULL, None_Receiver, NULL, PROCESS_UTILITY_GENERATED);
 
 		/* Remove the matched item from the list */
 		info_list = list_delete_ptr(info_list, info);

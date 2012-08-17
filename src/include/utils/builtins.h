@@ -532,6 +532,8 @@ extern Datum void_recv(PG_FUNCTION_ARGS);
 extern Datum void_send(PG_FUNCTION_ARGS);
 extern Datum trigger_in(PG_FUNCTION_ARGS);
 extern Datum trigger_out(PG_FUNCTION_ARGS);
+extern Datum event_trigger_in(PG_FUNCTION_ARGS);
+extern Datum event_trigger_out(PG_FUNCTION_ARGS);
 extern Datum language_handler_in(PG_FUNCTION_ARGS);
 extern Datum language_handler_out(PG_FUNCTION_ARGS);
 extern Datum fdw_handler_in(PG_FUNCTION_ARGS);
@@ -568,6 +570,8 @@ extern Datum regexp_split_to_table(PG_FUNCTION_ARGS);
 extern Datum regexp_split_to_table_no_flags(PG_FUNCTION_ARGS);
 extern Datum regexp_split_to_array(PG_FUNCTION_ARGS);
 extern Datum regexp_split_to_array_no_flags(PG_FUNCTION_ARGS);
+extern char *regexp_fixed_prefix(text *text_re, bool case_insensitive,
+								 Oid collation, bool *exact);
 
 /* regproc.c */
 extern Datum regprocin(PG_FUNCTION_ARGS);
@@ -752,6 +756,8 @@ extern int	varstr_cmp(char *arg1, int len1, char *arg2, int len2, Oid collid);
 extern List *textToQualifiedNameList(text *textval);
 extern bool SplitIdentifierString(char *rawstring, char separator,
 					  List **namelist);
+extern bool SplitDirectoriesString(char *rawstring, char separator,
+					   List **namelist);
 extern Datum replace_text(PG_FUNCTION_ARGS);
 extern text *replace_text_regexp(text *src_text, void *regexp,
 					text *replace_text, bool glob);

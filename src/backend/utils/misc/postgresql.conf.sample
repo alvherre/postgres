@@ -65,7 +65,8 @@
 # Note:  Increasing max_connections costs ~400 bytes of shared memory per
 # connection slot, plus lock space (see max_locks_per_transaction).
 #superuser_reserved_connections = 3	# (change requires restart)
-#unix_socket_directory = ''		# (change requires restart)
+#unix_socket_directories = '/tmp'	# comma-separated list of directories
+					# (change requires restart)
 #unix_socket_group = ''			# (change requires restart)
 #unix_socket_permissions = 0777		# begin with 0 to use octal notation
 					# (change requires restart)
@@ -136,7 +137,7 @@
 
 # - Cost-Based Vacuum Delay -
 
-#vacuum_cost_delay = 0ms		# 0-100 milliseconds
+#vacuum_cost_delay = 0			# 0-100 milliseconds
 #vacuum_cost_page_hit = 1		# 0-10000 credits
 #vacuum_cost_page_miss = 10		# 0-10000 credits
 #vacuum_cost_page_dirty = 20		# 0-10000 credits

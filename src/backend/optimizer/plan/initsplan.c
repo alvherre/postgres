@@ -204,6 +204,66 @@ add_vars_to_targetlist(PlannerInfo *root, List *vars,
 	}
 }
 
+/*
+ * extract_lateral_references
+ *	  If the specified RTE is a LATERAL subquery, extract all its references
+ *	  to Vars of the current query level, and make sure those Vars will be
+ *	  available for evaluation of the RTE.
+ *
+ * XXX this is rather duplicative of processing that has to happen elsewhere.
+ * Maybe it'd be a good idea to do this type of extraction further upstream
+ * and save the results?
+ */
+static void
+extract_lateral_references(PlannerInfo *root, int rtindex)
+{
+	RangeTblEntry *rte = root->simple_rte_array[rtindex];
+	List	   *vars;
+	List	   *newvars;
+	Relids		where_needed;
+	ListCell   *lc;
+
+	/* No cross-references are possible if it's not LATERAL */
+	if (!rte->lateral)
+		return;
+
+	/* Fetch the appropriate variables */
+	if (rte->rtekind == RTE_SUBQUERY)
+		vars = pull_vars_of_level((Node *) rte->subquery, 1);
+	else if (rte->rtekind == RTE_FUNCTION)
+		vars = pull_vars_of_level(rte->funcexpr, 0);
+	else if (rte->rtekind == RTE_VALUES)
+		vars = pull_vars_of_level((Node *) rte->values_lists, 0);
+	else
+		return;
+
+	/* Copy each Var and adjust it to match our level */
+	newvars = NIL;
+	foreach(lc, vars)
+	{
+		Var		   *var = (Var *) lfirst(lc);
+
+		var = copyObject(var);
+		var->varlevelsup = 0;
+		newvars = lappend(newvars, var);
+	}
+
+	/*
+	 * We mark the Vars as being "needed" at the LATERAL RTE.  This is a bit
+	 * of a cheat: a more formal approach would be to mark each one as needed
+	 * at the join of the LATERAL RTE with its source RTE.	But it will work,
+	 * and it's much less tedious than computing a separate where_needed for
+	 * each Var.
+	 */
+	where_needed = bms_make_singleton(rtindex);
+
+	/* Push the Vars into their source relations' targetlists */
+	add_vars_to_targetlist(root, newvars, where_needed, false);
+
+	list_free(newvars);
+	list_free(vars);
+}
+
 
 /*****************************************************************************
  *
@@ -286,7 +346,9 @@ deconstruct_recurse(PlannerInfo *root, Node *jtnode, bool below_outer_join,
 	{
 		int			varno = ((RangeTblRef *) jtnode)->rtindex;
 
-		/* No quals to deal with, just return correct result */
+		/* No quals to deal with, but do check for LATERAL subqueries */
+		extract_lateral_references(root, varno);
+		/* Result qualscope is just the one Relid */
 		*qualscope = bms_make_singleton(varno);
 		/* A single baserel does not create an inner join */
 		*inner_join_rels = NULL;
@@ -814,9 +876,19 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
 	/*
 	 * Cross-check: clause should contain no relids not within its scope.
 	 * Otherwise the parser messed up.
+	 *
+	 * XXX temporarily disable the qualscope cross-check, which tends to
+	 * reject quals pulled up from LATERAL subqueries.  This is only in the
+	 * nature of a debugging crosscheck anyway.  I'm loath to remove it
+	 * permanently, but need to think a bit harder about how to replace it.
+	 * See also disabled Assert below.  (The ojscope test is still okay
+	 * because we prevent pullup of LATERAL subqueries that might cause it to
+	 * be violated.)
 	 */
+#ifdef NOT_USED
 	if (!bms_is_subset(relids, qualscope))
 		elog(ERROR, "JOIN qualification cannot refer to other relations");
+#endif
 	if (ojscope && !bms_is_subset(relids, ojscope))
 		elog(ERROR, "JOIN qualification cannot refer to other relations");
 
@@ -971,7 +1043,9 @@ distribute_qual_to_rels(PlannerInfo *root, Node *clause,
 		if (outerjoin_delayed)
 		{
 			/* Should still be a subset of current scope ... */
+#ifdef NOT_USED					/* XXX temporarily disabled for LATERAL */
 			Assert(bms_is_subset(relids, qualscope));
+#endif
 
 			/*
 			 * Because application of the qual will be delayed by outer join,

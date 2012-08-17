@@ -867,6 +867,10 @@ DATA(insert OID = 1286 (  array_fill PGNSP PGUID 12 1 0 0 0 f f f f f f i 3 0 22
 DESCR("array constructor with value");
 DATA(insert OID = 2331 (  unnest		   PGNSP PGUID 12 1 100 0 0 f f f f t t i 1 0 2283 "2277" _null_ _null_ _null_ _null_ array_unnest _null_ _null_ _null_ ));
 DESCR("expand array to set of rows");
+DATA(insert OID = 3167 (  array_remove	   PGNSP PGUID 12 1 0 0 0 f f f f f f i 2 0 2277 "2277 2283" _null_ _null_ _null_ _null_ array_remove _null_ _null_ _null_ ));
+DESCR("remove any occurrences of an element from an array");
+DATA(insert OID = 3168 (  array_replace	   PGNSP PGUID 12 1 0 0 0 f f f f f f i 3 0 2277 "2277 2283 2283" _null_ _null_ _null_ _null_ array_replace _null_ _null_ _null_ ));
+DESCR("replace any occurrences of an element in an array");
 DATA(insert OID = 2333 (  array_agg_transfn   PGNSP PGUID 12 1 0 0 0 f f f f f f i 2 0 2281 "2281 2283" _null_ _null_ _null_ _null_ array_agg_transfn _null_ _null_ _null_ ));
 DESCR("aggregate transition function");
 DATA(insert OID = 2334 (  array_agg_finalfn   PGNSP PGUID 12 1 0 0 0 f f f f f f i 1 0 2277 "2281" _null_ _null_ _null_ _null_ array_agg_finalfn _null_ _null_ _null_ ));
@@ -3458,6 +3462,10 @@ DATA(insert OID = 2300 (  trigger_in		PGNSP PGUID 12 1 0 0 0 f f f f f f i 1 0 2
 DESCR("I/O");
 DATA(insert OID = 2301 (  trigger_out		PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 2275 "2279" _null_ _null_ _null_ _null_ trigger_out _null_ _null_ _null_ ));
 DESCR("I/O");
+DATA(insert OID = 3594 (  event_trigger_in	PGNSP PGUID 12 1 0 0 0 f f f f f f i 1 0 3838 "2275" _null_ _null_ _null_ _null_ event_trigger_in _null_ _null_ _null_ ));
+DESCR("I/O");
+DATA(insert OID = 3595 (  event_trigger_out	PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 2275 "3838" _null_ _null_ _null_ _null_ event_trigger_out _null_ _null_ _null_ ));
+DESCR("I/O");
 DATA(insert OID = 2302 (  language_handler_in	PGNSP PGUID 12 1 0 0 0 f f f f f f i 1 0 2280 "2275" _null_ _null_ _null_ _null_ language_handler_in _null_ _null_ _null_ ));
 DESCR("I/O");
 DATA(insert OID = 2303 (  language_handler_out	PGNSP PGUID 12 1 0 0 0 f f f f t f i 1 0 2275 "2280" _null_ _null_ _null_ _null_ language_handler_out _null_ _null_ _null_ ));
@@ -4646,6 +4654,17 @@ DATA(insert OID = 4030 (  spg_text_inner_consistent PGNSP PGUID 12 1 0 0 0 f f f
 DESCR("SP-GiST support for suffix tree over text");
 DATA(insert OID = 4031 (  spg_text_leaf_consistent	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 16 "2281 2281" _null_ _null_ _null_ _null_  spg_text_leaf_consistent _null_ _null_ _null_ ));
 DESCR("SP-GiST support for suffix tree over text");
+
+DATA(insert OID = 3469 (  spg_range_quad_config	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 2278 "2281 2281" _null_ _null_ _null_ _null_  spg_range_quad_config _null_ _null_ _null_ ));
+DESCR("SP-GiST support for quad tree over range");
+DATA(insert OID = 3470 (  spg_range_quad_choose	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 2278 "2281 2281" _null_ _null_ _null_ _null_  spg_range_quad_choose _null_ _null_ _null_ ));
+DESCR("SP-GiST support for quad tree over range");
+DATA(insert OID = 3471 (  spg_range_quad_picksplit	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 2278 "2281 2281" _null_ _null_ _null_ _null_  spg_range_quad_picksplit _null_ _null_ _null_ ));
+DESCR("SP-GiST support for quad tree over range");
+DATA(insert OID = 3472 (  spg_range_quad_inner_consistent	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 2278 "2281 2281" _null_ _null_ _null_ _null_  spg_range_quad_inner_consistent _null_ _null_ _null_ ));
+DESCR("SP-GiST support for quad tree over range");
+DATA(insert OID = 3473 (  spg_range_quad_leaf_consistent	PGNSP PGUID 12 1 0 0 0 f f f f t f i 2 0 16 "2281 2281" _null_ _null_ _null_ _null_  spg_range_quad_leaf_consistent _null_ _null_ _null_ ));
+DESCR("SP-GiST support for quad tree over range");
 
 
 /*

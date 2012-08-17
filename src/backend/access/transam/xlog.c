@@ -2806,6 +2806,11 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 							path, xlogfpath)));
 
 		/*
+		 * Set path to point at the new file in pg_xlog.
+		 */
+		strncpy(path, xlogfpath, MAXPGPATH);
+
+		/*
 		 * If the existing segment was replaced, since walsenders might have
 		 * it open, request them to reload a currently-open segment.
 		 */
@@ -8961,7 +8966,7 @@ get_sync_bit(int method)
 	 * after its written. Also, walreceiver performs unaligned writes, which
 	 * don't work with O_DIRECT, so it is required for correctness too.
 	 */
-	if (!XLogIsNeeded() && !am_walreceiver)
+	if (!XLogIsNeeded() && !AmWalReceiverProcess())
 		o_direct_flag = PG_O_DIRECT;
 
 	switch (method)
@@ -9361,6 +9366,7 @@ do_pg_start_backup(const char *backupidstr, bool fast, char **labelfile)
 								BACKUP_LABEL_FILE)));
 			if (fwrite(labelfbuf.data, labelfbuf.len, 1, fp) != 1 ||
 				fflush(fp) != 0 ||
+				pg_fsync(fileno(fp)) != 0 ||
 				ferror(fp) ||
 				FreeFile(fp))
 				ereport(ERROR,

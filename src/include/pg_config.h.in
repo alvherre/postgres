@@ -511,6 +511,9 @@
 /* Define to 1 if you have the `symlink' function. */
 #undef HAVE_SYMLINK
 
+/* Define to 1 if you have the `sync_file_range' function. */
+#undef HAVE_SYNC_FILE_RANGE
+
 /* Define to 1 if you have the syslog interface. */
 #undef HAVE_SYSLOG
 
@@ -628,9 +631,6 @@
 
 /* Define to 1 if you have the <winldap.h> header file. */
 #undef HAVE_WINLDAP_H
-
-/* Define to 1 if your libxml has xmlStructuredErrorContext. */
-#undef HAVE_XMLSTRUCTUREDERRORCONTEXT
 
 /* Define to the appropriate snprintf format for 64-bit ints. */
 #undef INT64_FORMAT

@@ -5394,6 +5394,7 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 	Oid			new_index;
 
 	Assert(IsA(stmt, IndexStmt));
+	Assert(!stmt->concurrent);
 
 	/* suppress schema rights check when rebuilding existing index */
 	check_rights = !is_rebuild;
@@ -5404,26 +5405,12 @@ ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 
 	/* The IndexStmt has already been through transformIndexStmt */
 
-	new_index = DefineIndex(stmt->relation,		/* relation */
-							stmt->idxname,		/* index name */
+	new_index = DefineIndex(stmt,
 							InvalidOid, /* no predefined OID */
-							stmt->oldNode,
-							stmt->accessMethod, /* am name */
-							stmt->tableSpace,
-							stmt->indexParams,	/* parameters */
-							(Expr *) stmt->whereClause,
-							stmt->options,
-							stmt->excludeOpNames,
-							stmt->unique,
-							stmt->primary,
-							stmt->isconstraint,
-							stmt->deferrable,
-							stmt->initdeferred,
 							true,		/* is_alter_table */
 							check_rights,
 							skip_build,
-							quiet,
-							false);
+							quiet);
 
 	/*
 	 * If TryReuseIndex() stashed a relfilenode for us, we used it for the new
@@ -5505,7 +5492,8 @@ ATExecAddIndexConstraint(AlteredTableInfo *tab, Relation rel,
 							stmt->deferrable,
 							stmt->initdeferred,
 							stmt->primary,
-							true,
+							true, /* update pg_index */
+							true, /* remove old dependencies */
 							allowSystemTableMods);
 
 	index_close(indexRel, NoLock);
@@ -6057,7 +6045,7 @@ ATAddForeignKeyConstraint(AlteredTableInfo *tab, Relation rel,
 									  NULL,
 									  true,		/* islocal */
 									  0,		/* inhcount */
-									  false);	/* isnoinherit */
+									  true);	/* isnoinherit */
 
 	/*
 	 * Create the triggers that will enforce the constraint.
@@ -7196,27 +7184,14 @@ ATPrepAlterColumnType(List **wqueue,
 												true);
 			addRTEtoQuery(pstate, rte, false, true, true);
 
-			transform = transformExpr(pstate, transform);
+			transform = transformExpr(pstate, transform,
+									  EXPR_KIND_ALTER_COL_TRANSFORM);
 
 			/* It can't return a set */
 			if (expression_returns_set(transform))
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
 					  errmsg("transform expression must not return a set")));
-
-			/* No subplans or aggregates, either... */
-			if (pstate->p_hasSubLinks)
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot use subquery in transform expression")));
-			if (pstate->p_hasAggs)
-				ereport(ERROR,
-						(errcode(ERRCODE_GROUPING_ERROR),
-						 errmsg("cannot use aggregate function in transform expression")));
-			if (pstate->p_hasWindowFuncs)
-				ereport(ERROR,
-						(errcode(ERRCODE_WINDOWING_ERROR),
-						 errmsg("cannot use window function in transform expression")));
 		}
 		else
 		{
@@ -7973,7 +7948,6 @@ ATPostAlterTypeParse(Oid oldId, char *cmd,
 static void
 TryReuseIndex(Oid oldId, IndexStmt *stmt)
 {
-
 	if (CheckIndexCompatible(oldId,
 							 stmt->relation,
 							 stmt->accessMethod,
@@ -10174,7 +10148,7 @@ AtEOSubXact_on_commit_actions(bool isCommit, SubTransactionId mySubid,
  * This is intended as a callback for RangeVarGetRelidExtended().  It allows
  * the table to be locked only if (1) it's a plain table or TOAST table and
  * (2) the current user is the owner (or the superuser).  This meets the
- * permission-checking needs of both CLUTER and REINDEX TABLE; we expose it
+ * permission-checking needs of both CLUSTER and REINDEX TABLE; we expose it
  * here so that it can be used by both.
  */
 void

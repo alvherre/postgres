@@ -122,6 +122,9 @@ PostgreSQL documentation
       <listitem>
        <para>
         Directory to write the output to.
+        <application>pg_basebackup</application> will create the directory and
+        any parent directories if necessary.  The directory may already exist,
+        but it is an error if the directory already exists and is not empty.
        </para>
        <para>
         When the backup is in tar mode, and the directory is specified as
@@ -343,7 +346,7 @@ PostgreSQL documentation
     <variablelist>
      <varlistentry>
       <term><option>-s <replaceable class="parameter">interval</replaceable></option></term>
-      <term><option>--statusint=<replaceable class="parameter">interval</replaceable></option></term>
+      <term><option>--status-interval=<replaceable class="parameter">interval</replaceable></option></term>
       <listitem>
        <para>
         Specifies the number of seconds between status packets sent back to the

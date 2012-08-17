@@ -921,8 +921,14 @@ DefineDomain(CreateDomainStmt *stmt)
 
 				/*
 				 * Check constraints are handled after domain creation, as
-				 * they require the Oid of the domain
+				 * they require the Oid of the domain; at this point we can
+				 * only check that they're not marked NO INHERIT, because
+				 * that would be bogus.
 				 */
+				if (constr->is_no_inherit)
+					ereport(ERROR,
+							(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+							 errmsg("CHECK constraints for domains cannot be marked NO INHERIT")));
 				break;
 
 				/*
@@ -2865,7 +2871,7 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 
 	pstate->p_value_substitute = (Node *) domVal;
 
-	expr = transformExpr(pstate, constr->raw_expr);
+	expr = transformExpr(pstate, constr->raw_expr, EXPR_KIND_DOMAIN_CHECK);
 
 	/*
 	 * Make sure it yields a boolean result.
@@ -2878,37 +2884,14 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 	assign_expr_collations(pstate, expr);
 
 	/*
-	 * Make sure no outside relations are referred to.
+	 * Domains don't allow variables (this is probably dead code now that
+	 * add_missing_from is history, but let's be sure).
 	 */
-	if (list_length(pstate->p_rtable) != 0)
+	if (list_length(pstate->p_rtable) != 0 ||
+		contain_var_clause(expr))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
 		  errmsg("cannot use table references in domain check constraint")));
-
-	/*
-	 * Domains don't allow var clauses (this should be redundant with the
-	 * above check, but make it anyway)
-	 */
-	if (contain_var_clause(expr))
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-		  errmsg("cannot use table references in domain check constraint")));
-
-	/*
-	 * No subplans or aggregates, either...
-	 */
-	if (pstate->p_hasSubLinks)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot use subquery in check constraint")));
-	if (pstate->p_hasAggs)
-		ereport(ERROR,
-				(errcode(ERRCODE_GROUPING_ERROR),
-			   errmsg("cannot use aggregate function in check constraint")));
-	if (pstate->p_hasWindowFuncs)
-		ereport(ERROR,
-				(errcode(ERRCODE_WINDOWING_ERROR),
-				 errmsg("cannot use window function in check constraint")));
 
 	/*
 	 * Convert to string form for storage.

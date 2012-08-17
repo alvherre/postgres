@@ -106,7 +106,6 @@ static void transformTableLikeClause(CreateStmtContext *cxt,
 						 TableLikeClause *table_like_clause);
 static void transformOfType(CreateStmtContext *cxt,
 				TypeName *ofTypename);
-static char *chooseIndexName(const RangeVar *relation, IndexStmt *index_stmt);
 static IndexStmt *generateClonedIndexStmt(CreateStmtContext *cxt,
 						Relation source_idx,
 						const AttrNumber *attmap, int attmap_length);
@@ -872,33 +871,16 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 			index_stmt = generateClonedIndexStmt(cxt, parent_index,
 												 attmap, tupleDesc->natts);
 
-			/* Copy comment on index */
+			/* Copy comment on index, if requested */
 			if (table_like_clause->options & CREATE_TABLE_LIKE_COMMENTS)
 			{
 				comment = GetComment(parent_index_oid, RelationRelationId, 0);
 
-				if (comment != NULL)
-				{
-					CommentStmt *stmt;
-
-					/*
-					 * We have to assign the index a name now, so that we can
-					 * reference it in CommentStmt.
-					 */
-					if (index_stmt->idxname == NULL)
-						index_stmt->idxname = chooseIndexName(cxt->relation,
-															  index_stmt);
-
-					stmt = makeNode(CommentStmt);
-					stmt->objtype = OBJECT_INDEX;
-					stmt->objname =
-						list_make2(makeString(cxt->relation->schemaname),
-								   makeString(index_stmt->idxname));
-					stmt->objargs = NIL;
-					stmt->comment = comment;
-
-					cxt->alist = lappend(cxt->alist, stmt);
-				}
+				/*
+				 * We make use of IndexStmt's idxcomment option, so as not to
+				 * need to know now what name the index will have.
+				 */
+				index_stmt->idxcomment = comment;
 			}
 
 			/* Save it in the inh_indexes list for the time being */
@@ -958,29 +940,6 @@ transformOfType(CreateStmtContext *cxt, TypeName *ofTypename)
 	DecrTupleDescRefCount(tupdesc);
 
 	ReleaseSysCache(tuple);
-}
-
-/*
- * chooseIndexName
- *
- * Compute name for an index.  This must match code in indexcmds.c.
- *
- * XXX this is inherently broken because the indexes aren't created
- * immediately, so we fail to resolve conflicts when the same name is
- * derived for multiple indexes.  However, that's a reasonably uncommon
- * situation, so we'll live with it for now.
- */
-static char *
-chooseIndexName(const RangeVar *relation, IndexStmt *index_stmt)
-{
-	Oid			namespaceId;
-	List	   *colnames;
-
-	namespaceId = RangeVarGetCreationNamespace(relation);
-	colnames = ChooseIndexColumnNames(index_stmt->indexParams);
-	return ChooseIndexName(relation->relname, namespaceId,
-						   colnames, index_stmt->excludeOpNames,
-						   index_stmt->primary, index_stmt->isconstraint);
 }
 
 /*
@@ -1046,7 +1005,10 @@ generateClonedIndexStmt(CreateStmtContext *cxt, Relation source_idx,
 		index->tableSpace = get_tablespace_name(idxrelrec->reltablespace);
 	else
 		index->tableSpace = NULL;
+	index->excludeOpNames = NIL;
+	index->idxcomment = NULL;
 	index->indexOid = InvalidOid;
+	index->oldNode = InvalidOid;
 	index->unique = idxrec->indisunique;
 	index->primary = idxrec->indisprimary;
 	index->concurrent = false;
@@ -1504,7 +1466,9 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 	index->whereClause = constraint->where_clause;
 	index->indexParams = NIL;
 	index->excludeOpNames = NIL;
+	index->idxcomment = NULL;
 	index->indexOid = InvalidOid;
+	index->oldNode = InvalidOid;
 	index->concurrent = false;
 
 	/*
@@ -1953,6 +1917,7 @@ transformIndexStmt(IndexStmt *stmt, const char *queryString)
 	{
 		stmt->whereClause = transformWhereClause(pstate,
 												 stmt->whereClause,
+												 EXPR_KIND_INDEX_PREDICATE,
 												 "WHERE");
 		/* we have to fix its collations too */
 		assign_expr_collations(pstate, stmt->whereClause);
@@ -1970,15 +1935,20 @@ transformIndexStmt(IndexStmt *stmt, const char *queryString)
 				ielem->indexcolname = FigureIndexColname(ielem->expr);
 
 			/* Now do parse transformation of the expression */
-			ielem->expr = transformExpr(pstate, ielem->expr);
+			ielem->expr = transformExpr(pstate, ielem->expr,
+										EXPR_KIND_INDEX_EXPRESSION);
 
 			/* We have to fix its collations too */
 			assign_expr_collations(pstate, ielem->expr);
 
 			/*
-			 * We check only that the result type is legitimate; this is for
-			 * consistency with what transformWhereClause() checks for the
-			 * predicate.  DefineIndex() will make more checks.
+			 * transformExpr() should have already rejected subqueries,
+			 * aggregates, and window functions, based on the EXPR_KIND_ for
+			 * an index expression.
+			 *
+			 * Also reject expressions returning sets; this is for consistency
+			 * with what transformWhereClause() checks for the predicate.
+			 * DefineIndex() will make more checks.
 			 */
 			if (expression_returns_set(ielem->expr))
 				ereport(ERROR,
@@ -1988,7 +1958,8 @@ transformIndexStmt(IndexStmt *stmt, const char *queryString)
 	}
 
 	/*
-	 * Check that only the base rel is mentioned.
+	 * Check that only the base rel is mentioned.  (This should be dead code
+	 * now that add_missing_from is history.)
 	 */
 	if (list_length(pstate->p_rtable) != 1)
 		ereport(ERROR,
@@ -2083,24 +2054,16 @@ transformRuleStmt(RuleStmt *stmt, const char *queryString,
 	/* take care of the where clause */
 	*whereClause = transformWhereClause(pstate,
 									  (Node *) copyObject(stmt->whereClause),
+										EXPR_KIND_WHERE,
 										"WHERE");
 	/* we have to fix its collations too */
 	assign_expr_collations(pstate, *whereClause);
 
+	/* this is probably dead code without add_missing_from: */
 	if (list_length(pstate->p_rtable) != 2)		/* naughty, naughty... */
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 				 errmsg("rule WHERE condition cannot contain references to other relations")));
-
-	/* aggregates not allowed (but subselects are okay) */
-	if (pstate->p_hasAggs)
-		ereport(ERROR,
-				(errcode(ERRCODE_GROUPING_ERROR),
-		   errmsg("cannot use aggregate function in rule WHERE condition")));
-	if (pstate->p_hasWindowFuncs)
-		ereport(ERROR,
-				(errcode(ERRCODE_WINDOWING_ERROR),
-			  errmsg("cannot use window function in rule WHERE condition")));
 
 	/*
 	 * 'instead nothing' rules with a qualification need a query rangetable so

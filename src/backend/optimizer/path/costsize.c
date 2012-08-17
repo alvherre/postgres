@@ -989,12 +989,17 @@ cost_subqueryscan(Path *path, PlannerInfo *root,
 /*
  * cost_functionscan
  *	  Determines and returns the cost of scanning a function RTE.
+ *
+ * 'baserel' is the relation to be scanned
+ * 'param_info' is the ParamPathInfo if this is a parameterized path, else NULL
  */
 void
-cost_functionscan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
+cost_functionscan(Path *path, PlannerInfo *root,
+				  RelOptInfo *baserel, ParamPathInfo *param_info)
 {
 	Cost		startup_cost = 0;
 	Cost		run_cost = 0;
+	QualCost	qpqual_cost;
 	Cost		cpu_per_tuple;
 	RangeTblEntry *rte;
 	QualCost	exprcost;
@@ -1004,8 +1009,11 @@ cost_functionscan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
 	rte = planner_rt_fetch(baserel->relid, root);
 	Assert(rte->rtekind == RTE_FUNCTION);
 
-	/* functionscans are never parameterized */
-	path->rows = baserel->rows;
+	/* Mark the path with the correct row estimate */
+	if (param_info)
+		path->rows = param_info->ppi_rows;
+	else
+		path->rows = baserel->rows;
 
 	/*
 	 * Estimate costs of executing the function expression.
@@ -1025,8 +1033,10 @@ cost_functionscan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
 	startup_cost += exprcost.startup + exprcost.per_tuple;
 
 	/* Add scanning CPU costs */
-	startup_cost += baserel->baserestrictcost.startup;
-	cpu_per_tuple = cpu_tuple_cost + baserel->baserestrictcost.per_tuple;
+	get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+
+	startup_cost += qpqual_cost.startup;
+	cpu_per_tuple = cpu_tuple_cost + qpqual_cost.per_tuple;
 	run_cost += cpu_per_tuple * baserel->tuples;
 
 	path->startup_cost = startup_cost;
@@ -1036,20 +1046,28 @@ cost_functionscan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
 /*
  * cost_valuesscan
  *	  Determines and returns the cost of scanning a VALUES RTE.
+ *
+ * 'baserel' is the relation to be scanned
+ * 'param_info' is the ParamPathInfo if this is a parameterized path, else NULL
  */
 void
-cost_valuesscan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
+cost_valuesscan(Path *path, PlannerInfo *root,
+				RelOptInfo *baserel, ParamPathInfo *param_info)
 {
 	Cost		startup_cost = 0;
 	Cost		run_cost = 0;
+	QualCost	qpqual_cost;
 	Cost		cpu_per_tuple;
 
 	/* Should only be applied to base relations that are values lists */
 	Assert(baserel->relid > 0);
 	Assert(baserel->rtekind == RTE_VALUES);
 
-	/* valuesscans are never parameterized */
-	path->rows = baserel->rows;
+	/* Mark the path with the correct row estimate */
+	if (param_info)
+		path->rows = param_info->ppi_rows;
+	else
+		path->rows = baserel->rows;
 
 	/*
 	 * For now, estimate list evaluation cost at one operator eval per list
@@ -1058,8 +1076,10 @@ cost_valuesscan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
 	cpu_per_tuple = cpu_operator_cost;
 
 	/* Add scanning CPU costs */
-	startup_cost += baserel->baserestrictcost.startup;
-	cpu_per_tuple += cpu_tuple_cost + baserel->baserestrictcost.per_tuple;
+	get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+
+	startup_cost += qpqual_cost.startup;
+	cpu_per_tuple += cpu_tuple_cost + qpqual_cost.per_tuple;
 	run_cost += cpu_per_tuple * baserel->tuples;
 
 	path->startup_cost = startup_cost;
@@ -2958,6 +2978,13 @@ cost_qual_eval_walker(Node *node, cost_qual_eval_context *context)
 	 * to expect that the current ordering of the clauses is the one that's
 	 * going to end up being used.	The above per-RestrictInfo caching would
 	 * not mix well with trying to re-order clauses anyway.
+	 *
+	 * Another issue that is entirely ignored here is that if a set-returning
+	 * function is below top level in the tree, the functions/operators above
+	 * it will need to be evaluated multiple times.  In practical use, such
+	 * cases arise so seldom as to not be worth the added complexity needed;
+	 * moreover, since our rowcount estimates for functions tend to be pretty
+	 * phony, the results would also be pretty phony.
 	 */
 	if (IsA(node, FuncExpr))
 	{
@@ -3742,7 +3769,7 @@ set_function_size_estimates(PlannerInfo *root, RelOptInfo *rel)
 	Assert(rte->rtekind == RTE_FUNCTION);
 
 	/* Estimate number of rows the function itself will return */
-	rel->tuples = clamp_row_est(expression_returns_set_rows(rte->funcexpr));
+	rel->tuples = expression_returns_set_rows(rte->funcexpr);
 
 	/* Now estimate number of output rows, etc */
 	set_baserel_size_estimates(root, rel);

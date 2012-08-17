@@ -5575,7 +5575,9 @@ SELECT SUBSTRING('XY1234Z', 'Y*?([0-9]{1,3})');
        if there is a <literal>YYY</literal>, <literal>YYYY</literal> or
        <literal>Y,YYY</literal> field. If <literal>CC</literal> is used with
        <literal>YY</literal> or <literal>Y</literal> then the year is computed
-       as <literal>(CC-1)*100+YY</literal>.
+       as the year in the specified century.  If the century is
+       specified but the year is not, the first year of the century
+       is assumed.
       </para>
      </listitem>
 
@@ -9820,6 +9822,27 @@ nextval('foo'::text)      <lineannotation><literal>foo</literal> is looked up at
         execute <function>nextval</function> concurrently, each will safely receive
         a distinct sequence value.
        </para>
+
+       <para>
+        If a sequence object has been created with default parameters,
+        successive <function>nextval</function> calls will return successive
+        values beginning with 1.  Other behaviors can be obtained by using
+        special parameters in the <xref linkend="sql-createsequence"> command;
+        see its command reference page for more information.
+       </para>
+
+       <important>
+        <para>
+         To avoid blocking concurrent transactions that obtain numbers from the
+         same sequence, a <function>nextval</function> operation is never
+         rolled back; that is, once a value has been fetched it is considered
+         used, even if the transaction that did the
+         <function>nextval</function> later aborts.  This means that aborted
+         transactions might leave unused <quote>holes</quote> in the sequence
+         of assigned values.
+        </para>
+       </important>
+
       </listitem>
      </varlistentry>
 
@@ -9883,30 +9906,17 @@ SELECT setval('foo', 42, false);    <lineannotation>Next <function>nextval</> wi
         The result returned by <function>setval</function> is just the value of its
         second argument.
        </para>
+       <important>
+        <para>
+         Because sequences are non-transactional, changes made by
+         <function>setval</function> are not undone if the transaction rolls
+         back.
+        </para>
+       </important>
       </listitem>
      </varlistentry>
     </variablelist>
   </para>
-
-  <para>
-   If a sequence object has been created with default parameters,
-   successive <function>nextval</function> calls will return successive values
-   beginning with 1.  Other behaviors can be obtained by using
-   special parameters in the <xref linkend="sql-createsequence"> command;
-   see its command reference page for more information.
-  </para>
-
-  <important>
-   <para>
-    To avoid blocking concurrent transactions that obtain numbers from the
-    same sequence, a <function>nextval</function> operation is never rolled back;
-    that is, once a value has been fetched it is considered used, even if the
-    transaction that did the <function>nextval</function> later aborts.  This means
-    that aborted transactions might leave unused <quote>holes</quote> in the
-    sequence of assigned values.  <function>setval</function> operations are never
-    rolled back, either.
-   </para>
-  </important>
 
  </sect1>
 
@@ -10317,6 +10327,12 @@ SELECT NULLIF(value, '(none)') ...
     <primary>array_prepend</primary>
   </indexterm>
   <indexterm>
+    <primary>array_remove</primary>
+  </indexterm>
+  <indexterm>
+    <primary>array_replace</primary>
+  </indexterm>
+  <indexterm>
     <primary>array_to_string</primary>
   </indexterm>
  <indexterm>
@@ -10431,6 +10447,29 @@ SELECT NULLIF(value, '(none)') ...
         <entry>append an element to the beginning of an array</entry>
         <entry><literal>array_prepend(1, ARRAY[2,3])</literal></entry>
         <entry><literal>{1,2,3}</literal></entry>
+       </row>
+       <row>
+        <entry>
+         <literal>
+          <function>array_remove</function>(<type>anyarray</type>, <type>anyelement</type>)
+         </literal>
+        </entry>
+        <entry><type>anyarray</type></entry>
+        <entry>remove all elements equal to the given value from the array
+         (array must be one-dimensional)</entry>
+        <entry><literal>array_remove(ARRAY[1,2,3,2], 2)</literal></entry>
+        <entry><literal>{1,3}</literal></entry>
+       </row>
+       <row>
+        <entry>
+         <literal>
+          <function>array_replace</function>(<type>anyarray</type>, <type>anyelement</type>, <type>anyelement</type>)
+         </literal>
+        </entry>
+        <entry><type>anyarray</type></entry>
+        <entry>replace each array element equal to the given value with a new value</entry>
+        <entry><literal>array_replace(ARRAY[1,2,5,4], 5, 3)</literal></entry>
+        <entry><literal>{1,2,3,4}</literal></entry>
        </row>
        <row>
         <entry>

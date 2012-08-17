@@ -30,6 +30,7 @@
 #include "optimizer/placeholder.h"
 #include "optimizer/plancat.h"
 #include "optimizer/planmain.h"
+#include "optimizer/planner.h"
 #include "optimizer/predtest.h"
 #include "optimizer/restrictinfo.h"
 #include "optimizer/subselect.h"
@@ -83,6 +84,7 @@ static HashJoin *create_hashjoin_plan(PlannerInfo *root, HashPath *best_path,
 					 Plan *outer_plan, Plan *inner_plan);
 static Node *replace_nestloop_params(PlannerInfo *root, Node *expr);
 static Node *replace_nestloop_params_mutator(Node *node, PlannerInfo *root);
+static void identify_nestloop_extparams(PlannerInfo *root, Plan *subplan);
 static List *fix_indexqual_references(PlannerInfo *root, IndexPath *index_path);
 static List *fix_indexorderby_references(PlannerInfo *root, IndexPath *index_path);
 static Node *fix_indexqual_operand(Node *node, IndexOptInfo *index, int indexcol);
@@ -1639,6 +1641,7 @@ create_subqueryscan_plan(PlannerInfo *root, Path *best_path,
 	{
 		scan_clauses = (List *)
 			replace_nestloop_params(root, (Node *) scan_clauses);
+		identify_nestloop_extparams(root, best_path->parent->subplan);
 	}
 
 	scan_plan = make_subqueryscan(tlist,
@@ -1663,11 +1666,13 @@ create_functionscan_plan(PlannerInfo *root, Path *best_path,
 	FunctionScan *scan_plan;
 	Index		scan_relid = best_path->parent->relid;
 	RangeTblEntry *rte;
+	Node	   *funcexpr;
 
 	/* it should be a function base rel... */
 	Assert(scan_relid > 0);
 	rte = planner_rt_fetch(scan_relid, root);
 	Assert(rte->rtekind == RTE_FUNCTION);
+	funcexpr = rte->funcexpr;
 
 	/* Sort clauses into best execution order */
 	scan_clauses = order_qual_clauses(root, scan_clauses);
@@ -1675,8 +1680,17 @@ create_functionscan_plan(PlannerInfo *root, Path *best_path,
 	/* Reduce RestrictInfo list to bare expressions; ignore pseudoconstants */
 	scan_clauses = extract_actual_clauses(scan_clauses, false);
 
+	/* Replace any outer-relation variables with nestloop params */
+	if (best_path->param_info)
+	{
+		scan_clauses = (List *)
+			replace_nestloop_params(root, (Node *) scan_clauses);
+		/* The func expression itself could contain nestloop params, too */
+		funcexpr = replace_nestloop_params(root, funcexpr);
+	}
+
 	scan_plan = make_functionscan(tlist, scan_clauses, scan_relid,
-								  rte->funcexpr,
+								  funcexpr,
 								  rte->eref->colnames,
 								  rte->funccoltypes,
 								  rte->funccoltypmods,
@@ -1699,11 +1713,13 @@ create_valuesscan_plan(PlannerInfo *root, Path *best_path,
 	ValuesScan *scan_plan;
 	Index		scan_relid = best_path->parent->relid;
 	RangeTblEntry *rte;
+	List	   *values_lists;
 
 	/* it should be a values base rel... */
 	Assert(scan_relid > 0);
 	rte = planner_rt_fetch(scan_relid, root);
 	Assert(rte->rtekind == RTE_VALUES);
+	values_lists = rte->values_lists;
 
 	/* Sort clauses into best execution order */
 	scan_clauses = order_qual_clauses(root, scan_clauses);
@@ -1711,8 +1727,18 @@ create_valuesscan_plan(PlannerInfo *root, Path *best_path,
 	/* Reduce RestrictInfo list to bare expressions; ignore pseudoconstants */
 	scan_clauses = extract_actual_clauses(scan_clauses, false);
 
+	/* Replace any outer-relation variables with nestloop params */
+	if (best_path->param_info)
+	{
+		scan_clauses = (List *)
+			replace_nestloop_params(root, (Node *) scan_clauses);
+		/* The values lists could contain nestloop params, too */
+		values_lists = (List *)
+			replace_nestloop_params(root, (Node *) values_lists);
+	}
+
 	scan_plan = make_valuesscan(tlist, scan_clauses, scan_relid,
-								rte->values_lists);
+								values_lists);
 
 	copy_path_costsize(&scan_plan->scan.plan, best_path);
 
@@ -2556,6 +2582,102 @@ replace_nestloop_params_mutator(Node *node, PlannerInfo *root)
 	return expression_tree_mutator(node,
 								   replace_nestloop_params_mutator,
 								   (void *) root);
+}
+
+/*
+ * identify_nestloop_extparams
+ *	  Identify extParams of a parameterized subquery that need to be fed
+ *	  from an outer nestloop.
+ *
+ * The subplan's references to the outer variables are already represented
+ * as PARAM_EXEC Params, so we need not modify the subplan here.  What we
+ * do need to do is add entries to root->curOuterParams to signal the parent
+ * nestloop plan node that it must provide these values.
+ */
+static void
+identify_nestloop_extparams(PlannerInfo *root, Plan *subplan)
+{
+	Bitmapset  *tmpset;
+	int			paramid;
+
+	/* Examine each extParam of the subquery's plan */
+	tmpset = bms_copy(subplan->extParam);
+	while ((paramid = bms_first_member(tmpset)) >= 0)
+	{
+		PlannerParamItem *pitem = list_nth(root->glob->paramlist, paramid);
+
+		/* Ignore anything coming from an upper query level */
+		if (pitem->abslevel != root->query_level)
+			continue;
+
+		if (IsA(pitem->item, Var))
+		{
+			Var		   *var = (Var *) pitem->item;
+			NestLoopParam *nlp;
+			ListCell   *lc;
+
+			/* If not from a nestloop outer rel, nothing to do */
+			if (!bms_is_member(var->varno, root->curOuterRels))
+				continue;
+			/* Is this param already listed in root->curOuterParams? */
+			foreach(lc, root->curOuterParams)
+			{
+				nlp = (NestLoopParam *) lfirst(lc);
+				if (nlp->paramno == paramid)
+				{
+					Assert(equal(var, nlp->paramval));
+					/* Present, so nothing to do */
+					break;
+				}
+			}
+			if (lc == NULL)
+			{
+				/* No, so add it */
+				nlp = makeNode(NestLoopParam);
+				nlp->paramno = paramid;
+				nlp->paramval = copyObject(var);
+				root->curOuterParams = lappend(root->curOuterParams, nlp);
+			}
+		}
+		else if (IsA(pitem->item, PlaceHolderVar))
+		{
+			PlaceHolderVar *phv = (PlaceHolderVar *) pitem->item;
+			NestLoopParam *nlp;
+			ListCell   *lc;
+
+			/*
+			 * If not from a nestloop outer rel, nothing to do.  We use
+			 * bms_overlap as a cheap/quick test to see if the PHV might be
+			 * evaluated in the outer rels, and then grab its PlaceHolderInfo
+			 * to tell for sure.
+			 */
+			if (!bms_overlap(phv->phrels, root->curOuterRels))
+				continue;
+			if (!bms_is_subset(find_placeholder_info(root, phv, false)->ph_eval_at,
+							   root->curOuterRels))
+				continue;
+			/* Is this param already listed in root->curOuterParams? */
+			foreach(lc, root->curOuterParams)
+			{
+				nlp = (NestLoopParam *) lfirst(lc);
+				if (nlp->paramno == paramid)
+				{
+					Assert(equal(phv, nlp->paramval));
+					/* Present, so nothing to do */
+					break;
+				}
+			}
+			if (lc == NULL)
+			{
+				/* No, so add it */
+				nlp = makeNode(NestLoopParam);
+				nlp->paramno = paramid;
+				nlp->paramval = copyObject(phv);
+				root->curOuterParams = lappend(root->curOuterParams, nlp);
+			}
+		}
+	}
+	bms_free(tmpset);
 }
 
 /*
@@ -4126,8 +4248,8 @@ make_agg(PlannerInfo *root, List *tlist, List *qual,
 	 * anything for Aggref nodes; this is okay since they are really
 	 * comparable to Vars.
 	 *
-	 * See notes in grouping_planner about why only make_agg, make_windowagg
-	 * and make_group worry about tlist eval cost.
+	 * See notes in add_tlist_costs_to_plan about why only make_agg,
+	 * make_windowagg and make_group worry about tlist eval cost.
 	 */
 	if (qual)
 	{
@@ -4136,10 +4258,7 @@ make_agg(PlannerInfo *root, List *tlist, List *qual,
 		plan->total_cost += qual_cost.startup;
 		plan->total_cost += qual_cost.per_tuple * plan->plan_rows;
 	}
-	cost_qual_eval(&qual_cost, tlist, root);
-	plan->startup_cost += qual_cost.startup;
-	plan->total_cost += qual_cost.startup;
-	plan->total_cost += qual_cost.per_tuple * plan->plan_rows;
+	add_tlist_costs_to_plan(root, plan, tlist);
 
 	plan->qual = qual;
 	plan->targetlist = tlist;
@@ -4160,7 +4279,6 @@ make_windowagg(PlannerInfo *root, List *tlist,
 	WindowAgg  *node = makeNode(WindowAgg);
 	Plan	   *plan = &node->plan;
 	Path		windowagg_path; /* dummy for result of cost_windowagg */
-	QualCost	qual_cost;
 
 	node->winref = winref;
 	node->partNumCols = partNumCols;
@@ -4185,13 +4303,10 @@ make_windowagg(PlannerInfo *root, List *tlist,
 	/*
 	 * We also need to account for the cost of evaluation of the tlist.
 	 *
-	 * See notes in grouping_planner about why only make_agg, make_windowagg
-	 * and make_group worry about tlist eval cost.
+	 * See notes in add_tlist_costs_to_plan about why only make_agg,
+	 * make_windowagg and make_group worry about tlist eval cost.
 	 */
-	cost_qual_eval(&qual_cost, tlist, root);
-	plan->startup_cost += qual_cost.startup;
-	plan->total_cost += qual_cost.startup;
-	plan->total_cost += qual_cost.per_tuple * plan->plan_rows;
+	add_tlist_costs_to_plan(root, plan, tlist);
 
 	plan->targetlist = tlist;
 	plan->lefttree = lefttree;
@@ -4242,8 +4357,8 @@ make_group(PlannerInfo *root,
 	 * lower plan level and will only be copied by the Group node. Worth
 	 * fixing?
 	 *
-	 * See notes in grouping_planner about why only make_agg, make_windowagg
-	 * and make_group worry about tlist eval cost.
+	 * See notes in add_tlist_costs_to_plan about why only make_agg,
+	 * make_windowagg and make_group worry about tlist eval cost.
 	 */
 	if (qual)
 	{
@@ -4252,10 +4367,7 @@ make_group(PlannerInfo *root,
 		plan->total_cost += qual_cost.startup;
 		plan->total_cost += qual_cost.per_tuple * plan->plan_rows;
 	}
-	cost_qual_eval(&qual_cost, tlist, root);
-	plan->startup_cost += qual_cost.startup;
-	plan->total_cost += qual_cost.startup;
-	plan->total_cost += qual_cost.per_tuple * plan->plan_rows;
+	add_tlist_costs_to_plan(root, plan, tlist);
 
 	plan->qual = qual;
 	plan->targetlist = tlist;
