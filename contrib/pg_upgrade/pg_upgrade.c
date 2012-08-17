@@ -393,18 +393,19 @@ copy_clog_xlog_xid(void)
 		prep_status("Setting oldest multixact ID on new cluster");
 		/*
 		 * We don't preserve files in this case, but it's important that the
-		 * oldest age is set to the latest value used by the old system, so
-		 * that we return correctly for multis queried.
-		 *
-		 * FIXME isn't this value bogus?
-		 * I think it should be -m nextMulti,nextMulti
+		 * oldest multi is set to the latest value used by the old system, so
+		 * that multixact.c returns the empty set for multis that might be
+		 * present on disk.  We set next multi to the value following that; it
+		 * might end up wrapped around (i.e. 0) if the old cluster had
+		 * next=MaxMultiXactId, but multixact.c can cope with that just fine.
 		 */
 		exec_prog(true, true, UTILITY_LOG_FILE,
 				  SYSTEMQUOTE
 				  "\"%s/pg_resetxlog\" -m %u,%u \"%s\" >> \"%s\" 2>&1"
 				  SYSTEMQUOTE,
 				  new_cluster.bindir,
-				  old_cluster.controldata.chkpnt_nxtmulti, 0,
+				  old_cluster.controldata.chkpnt_nxtmulti + 1,
+				  old_cluster.controldata.chkpnt_nxtmulti,
 				  new_cluster.pgdata, UTILITY_LOG_FILE);
 		check_ok();
 	}
