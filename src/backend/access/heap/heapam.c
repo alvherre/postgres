@@ -2554,11 +2554,9 @@ l1:
 
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
-			int		remain;
-
 			/* wait for multixact */
 			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate,
-							&remain, infomask);
+							NULL, infomask);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
 			/*
@@ -4025,7 +4023,6 @@ l3:
 			if (infomask & HEAP_XMAX_IS_MULTI)
 			{
 				MultiXactStatus status = get_mxact_status_for_lock(mode, false);
-				int		remain;
 
 				/* We only ever lock tuples, never update them */
 				if (status >= MultiXactStatusUpdate)
@@ -4035,14 +4032,14 @@ l3:
 				if (nowait)
 				{
 					if (!ConditionalMultiXactIdWait((MultiXactId) xwait,
-													status, &remain, infomask))
+													status, NULL, infomask))
 						ereport(ERROR,
 								(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
 								 errmsg("could not obtain lock on row in relation \"%s\"",
 										RelationGetRelationName(relation))));
 				}
 				else
-					MultiXactIdWait((MultiXactId) xwait, status, &remain, infomask);
+					MultiXactIdWait((MultiXactId) xwait, status, NULL, infomask);
 
 				/* if there are updates, follow the update chain */
 				if (follow_updates &&
@@ -5033,7 +5030,7 @@ XmaxGetUpdateXid(TransactionId xmax, uint16 t_infomask)
 	Assert(t_infomask & HEAP_XMAX_IS_MULTI);
 
 	/*
-	 * Since we know the LOCK_ONLY bit is not set, this cannot be a 
+	 * Since we know the LOCK_ONLY bit is not set, this cannot be a
 	 * multi from pre-pg_upgrade.
 	 */
 	nmembers = GetMultiXactIdMembers(xmax, &members, false);
@@ -5104,8 +5101,8 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
  *
- * We return the number of members that are still running, including any
- * (non-aborted) subtransactions of our own transaction.
+ * We return (in *remaining, if not NULL) the number of members that are still
+ * running, including any (non-aborted) subtransactions of our own transaction.
  *
  * The infomask is passed for consistency checks.
  */
@@ -5141,7 +5138,8 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining,
 			if (!DoLockModesConflict(LOCKMODE_from_mxstatus(memstatus),
 									 LOCKMODE_from_mxstatus(status)))
 			{
-				if (TransactionIdIsInProgress(memxid))
+				/* skip overhead if we don't need the count */
+				if (remaining && TransactionIdIsInProgress(memxid))
 					remain++;
 				continue;
 			}
@@ -5150,7 +5148,8 @@ MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining,
 		}
 	}
 
-	*remaining = remain;
+	if (remaining)
+		*remaining = remain;
 }
 
 /*
@@ -5193,7 +5192,7 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 			if (!DoLockModesConflict(LOCKMODE_from_mxstatus(memstatus),
 									 LOCKMODE_from_mxstatus(status)))
 			{
-				if (TransactionIdIsInProgress(memxid))
+				if (remaining && TransactionIdIsInProgress(memxid))
 					remain++;
 				continue;
 			}
@@ -5205,7 +5204,8 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 		pfree(members);
 	}
 
-	*remaining = remain;
+	if (remaining)
+		*remaining = remain;
 
 	return result;
 }
