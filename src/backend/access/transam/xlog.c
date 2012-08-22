@@ -3697,7 +3697,10 @@ RestoreBkpBlocks(XLogRecPtr lsn, XLogRecord *record, bool cleanup)
  * record (other than to the minimal extent of computing the amount of
  * data to read in) until we've checked the CRCs.
  *
- * We assume all of the record has been read into memory at *record.
+ * We assume all of the record (that is, xl_tot_len bytes) has been read
+ * into memory at *record.  Also, ValidXLogRecordHeader() has accepted the
+ * record's header, which means in particular that xl_tot_len is at least
+ * SizeOfXlogRecord, so it is safe to fetch xl_len.
  */
 static bool
 RecordIsValid(XLogRecord *record, XLogRecPtr recptr, int emode)
@@ -3707,8 +3710,18 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr, int emode)
 	uint32		len = record->xl_len;
 	BkpBlock	bkpb;
 	char	   *blk;
+	size_t		remaining = record->xl_tot_len;
 
 	/* First the rmgr data */
+	if (remaining < SizeOfXLogRecord + len)
+	{
+		/* ValidXLogRecordHeader() should've caught this already... */
+		ereport(emode_for_corrupt_record(emode, recptr),
+				(errmsg("invalid record length at %X/%X",
+						(uint32) (recptr >> 32), (uint32) recptr)));
+		return false;
+	}
+	remaining -= SizeOfXLogRecord + len;
 	INIT_CRC32(crc);
 	COMP_CRC32(crc, XLogRecGetData(record), len);
 
@@ -3721,7 +3734,15 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr, int emode)
 		if (!(record->xl_info & XLR_SET_BKP_BLOCK(i)))
 			continue;
 
+		if (remaining < sizeof(BkpBlock))
+		{
+			ereport(emode_for_corrupt_record(emode, recptr),
+					(errmsg("invalid backup block size in record at %X/%X",
+							(uint32) (recptr >> 32), (uint32) recptr)));
+			return false;
+		}
 		memcpy(&bkpb, blk, sizeof(BkpBlock));
+
 		if (bkpb.hole_offset + bkpb.hole_length > BLCKSZ)
 		{
 			ereport(emode_for_corrupt_record(emode, recptr),
@@ -3730,12 +3751,21 @@ RecordIsValid(XLogRecord *record, XLogRecPtr recptr, int emode)
 			return false;
 		}
 		blen = sizeof(BkpBlock) + BLCKSZ - bkpb.hole_length;
+
+		if (remaining < blen)
+		{
+			ereport(emode_for_corrupt_record(emode, recptr),
+					(errmsg("invalid backup block size in record at %X/%X",
+							(uint32) (recptr >> 32), (uint32) recptr)));
+			return false;
+		}
+		remaining -= blen;
 		COMP_CRC32(crc, blk, blen);
 		blk += blen;
 	}
 
 	/* Check that xl_tot_len agrees with our calculation */
-	if (blk != (char *) record + record->xl_tot_len)
+	if (remaining != 0)
 	{
 		ereport(emode_for_corrupt_record(emode, recptr),
 				(errmsg("incorrect total length in record at %X/%X",
@@ -3879,8 +3909,11 @@ retry:
 
 	/*
 	 * If the whole record header is on this page, validate it immediately.
-	 * Otherwise validate it after reading the rest of the header from next
-	 * page.
+	 * Otherwise do just a basic sanity check on xl_tot_len, and validate the
+	 * rest of the header after reading it from the next page.  The xl_tot_len
+	 * check is necessary here to ensure that we enter the "Need to reassemble
+	 * record" code path below; otherwise we might fail to apply
+	 * ValidXLogRecordHeader at all.
 	 */
 	if (targetRecOff <= XLOG_BLCKSZ - SizeOfXLogRecord)
 	{
@@ -3889,7 +3922,16 @@ retry:
 		gotheader = true;
 	}
 	else
+	{
+		if (total_len < SizeOfXLogRecord)
+		{
+			ereport(emode_for_corrupt_record(emode, *RecPtr),
+					(errmsg("invalid record length at %X/%X",
+							(uint32) ((*RecPtr) >> 32), (uint32) *RecPtr)));
+			goto next_record_is_invalid;
+		}
 		gotheader = false;
+	}
 
 	/*
 	 * Allocate or enlarge readRecordBuf as needed.  To avoid useless small

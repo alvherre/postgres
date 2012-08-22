@@ -580,6 +580,14 @@ static const SchemaQuery Query_for_list_of_views = {
 "       and pg_catalog.pg_table_is_visible(c2.oid)"
 
 /* the silly-looking length condition is just to eat up the current word */
+#define Query_for_constraint_of_table \
+"SELECT pg_catalog.quote_ident(conname) "\
+"  FROM pg_catalog.pg_class c1, pg_catalog.pg_constraint con "\
+" WHERE c1.oid=conrelid and (%d = pg_catalog.length('%s'))"\
+"       and pg_catalog.quote_ident(c1.relname)='%s'"\
+"       and pg_catalog.pg_table_is_visible(c1.oid)"
+
+/* the silly-looking length condition is just to eat up the current word */
 #define Query_for_list_of_tables_for_trigger \
 "SELECT pg_catalog.quote_ident(relname) "\
 "  FROM pg_catalog.pg_class"\
@@ -1337,6 +1345,14 @@ psql_completion(char *text, int start, int end)
 			 pg_strcasecmp(prev2_wd, "DROP") == 0 &&
 			 pg_strcasecmp(prev_wd, "COLUMN") == 0)
 		COMPLETE_WITH_ATTR(prev3_wd, "");
+	/* If we have TABLE <sth> DROP CONSTRAINT, provide list of constraints */
+	else if (pg_strcasecmp(prev4_wd, "TABLE") == 0 &&
+			 pg_strcasecmp(prev2_wd, "DROP") == 0 &&
+			 pg_strcasecmp(prev_wd, "CONSTRAINT") == 0)
+	{
+		completion_info_charp = prev3_wd;
+		COMPLETE_WITH_QUERY(Query_for_constraint_of_table);
+	}
 	/* ALTER TABLE ALTER [COLUMN] <foo> */
 	else if ((pg_strcasecmp(prev3_wd, "ALTER") == 0 &&
 			  pg_strcasecmp(prev2_wd, "COLUMN") == 0) ||
@@ -1645,14 +1661,29 @@ psql_completion(char *text, int start, int end)
 /* CLUSTER */
 
 	/*
-	 * If the previous word is CLUSTER and not without produce list of tables
+	 * If the previous word is CLUSTER and not WITHOUT produce list of tables
 	 */
 	else if (pg_strcasecmp(prev_wd, "CLUSTER") == 0 &&
 			 pg_strcasecmp(prev2_wd, "WITHOUT") != 0)
+		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tables, "UNION SELECT 'VERBOSE'");
+
+	/*
+	 * If the previous words are CLUSTER VERBOSE produce list of tables
+	 */
+	else if (pg_strcasecmp(prev_wd, "VERBOSE") == 0 &&
+			 pg_strcasecmp(prev2_wd, "CLUSTER") == 0)
 		COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tables, NULL);
+
 	/* If we have CLUSTER <sth>, then add "USING" */
 	else if (pg_strcasecmp(prev2_wd, "CLUSTER") == 0 &&
-			 pg_strcasecmp(prev_wd, "ON") != 0)
+			 pg_strcasecmp(prev_wd, "ON") != 0 &&
+			 pg_strcasecmp(prev_wd, "VERBOSE") != 0)
+	{
+		COMPLETE_WITH_CONST("USING");
+	}
+	/* If we have CLUSTER VERBOSE <sth>, then add "USING" */
+	else if (pg_strcasecmp(prev3_wd, "CLUSTER") == 0 &&
+			 pg_strcasecmp(prev2_wd, "VERBOSE") == 0)
 	{
 		COMPLETE_WITH_CONST("USING");
 	}
@@ -1661,6 +1692,17 @@ psql_completion(char *text, int start, int end)
 	 * If we have CLUSTER <sth> USING, then add the index as well.
 	 */
 	else if (pg_strcasecmp(prev3_wd, "CLUSTER") == 0 &&
+			 pg_strcasecmp(prev_wd, "USING") == 0)
+	{
+		completion_info_charp = prev2_wd;
+		COMPLETE_WITH_QUERY(Query_for_index_of_table);
+	}
+
+	/*
+	 * If we have CLUSTER VERBOSE <sth> USING, then add the index as well.
+	 */
+	else if (pg_strcasecmp(prev4_wd, "CLUSTER") == 0 &&
+             pg_strcasecmp(prev3_wd, "VERBOSE") == 0 &&
 			 pg_strcasecmp(prev_wd, "USING") == 0)
 	{
 		completion_info_charp = prev2_wd;
