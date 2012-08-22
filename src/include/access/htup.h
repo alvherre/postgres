@@ -944,7 +944,6 @@ extern Datum fastgetattr(HeapTuple tup, int attnum, TupleDesc tupleDesc,
 	)
 
 /* Prototype for HeapTupleHeader accessors in heapam.c */
-extern bool HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple);
 extern TransactionId HeapTupleGetUpdateXid(HeapTupleHeader tuple);
 
 /* prototypes for functions in common/heaptuple.c */

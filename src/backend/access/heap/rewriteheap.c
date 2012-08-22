@@ -110,6 +110,7 @@
 #include "storage/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
+#include "utils/tqual.h"
 
 
 /*

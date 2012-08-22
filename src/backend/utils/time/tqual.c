@@ -1604,3 +1604,54 @@ XidInMVCCSnapshot(TransactionId xid, Snapshot snapshot)
 
 	return false;
 }
+
+/*
+ * Is the tuple really only locked?  That is, is it not updated?
+ *
+ * It's easy to check just infomask bits if the locker is not a multi; but
+ * otherwise we need to verify that the updating transaction has not aborted.
+ *
+ * This function is here because it follows the same time qualification rules
+ * laid out at the top of this file.
+ */
+bool
+HeapTupleHeaderIsOnlyLocked(HeapTupleHeader tuple)
+{
+	TransactionId	xmax;
+
+	/* if there's no valid Xmax, then there's obviously no update either */
+	if (tuple->t_infomask & HEAP_XMAX_INVALID)
+		return true;
+
+	if (tuple->t_infomask & HEAP_XMAX_LOCK_ONLY)
+		return true;
+
+	/* invalid xmax means no update */
+	if (!TransactionIdIsValid(HeapTupleHeaderGetRawXmax(tuple)))
+		return true;
+
+	/*
+	 * if HEAP_XMAX_LOCK_ONLY is not set and not a multi, then this
+	 * must necessarily have been updated
+	 */
+	if (!(tuple->t_infomask & HEAP_XMAX_IS_MULTI))
+		return false;
+
+	/* ... but if it's a multi, then perhaps the updating Xid aborted. */
+	xmax = HeapTupleGetUpdateXid(tuple);
+	if (!TransactionIdIsValid(xmax))	/* shouldn't happen .. */
+		return true;
+
+	if (TransactionIdIsCurrentTransactionId(xmax))
+		return false;
+	if (TransactionIdIsInProgress(xmax))
+		return false;
+	if (TransactionIdDidCommit(xmax))
+		return false;
+
+	/*
+	 * not current, not in progress, not committed -- must have aborted or
+	 * crashed
+	 */
+	return true;
+}
