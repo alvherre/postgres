@@ -364,14 +364,13 @@ copy_clog_xlog_xid(void)
 		 * we preserve all files and contents, so we must preserve both "next"
 		 * counters here and the oldest multi present on system.
 		 */
-		exec_prog(true, true, UTILITY_LOG_FILE, NULL,
-				  SYSTEMQUOTE
-				  "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\" >> \"%s\" 2>&1"
-				  SYSTEMQUOTE, new_cluster.bindir,
+		exec_prog(UTILITY_LOG_FILE, NULL, true,
+				  "\"%s/pg_resetxlog\" -O %u -m %u,%u \"%s\"",
+				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmxoff,
 				  old_cluster.controldata.chkpnt_nxtmulti,
 				  old_cluster.controldata.chkpnt_oldstMulti,
-				  new_cluster.pgdata, UTILITY_LOG_FILE);
+				  new_cluster.pgdata);
 		check_ok();
 	}
 	else if (new_cluster.controldata.cat_ver >= MULTIXACT_FORMATCHANGE_CAT_VER)
@@ -385,14 +384,12 @@ copy_clog_xlog_xid(void)
 		 * might end up wrapped around (i.e. 0) if the old cluster had
 		 * next=MaxMultiXactId, but multixact.c can cope with that just fine.
 		 */
-		exec_prog(true, true, UTILITY_LOG_FILE, NULL,
-				  SYSTEMQUOTE
-				  "\"%s/pg_resetxlog\" -m %u,%u \"%s\" >> \"%s\" 2>&1"
-				  SYSTEMQUOTE,
+		exec_prog(UTILITY_LOG_FILE, NULL, true,
+				  "\"%s/pg_resetxlog\" -m %u,%u \"%s\"",
 				  new_cluster.bindir,
 				  old_cluster.controldata.chkpnt_nxtmulti + 1,
 				  old_cluster.controldata.chkpnt_nxtmulti,
-				  new_cluster.pgdata, UTILITY_LOG_FILE);
+				  new_cluster.pgdata);
 		check_ok();
 	}
 
