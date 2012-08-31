@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "access/htup_details.h"
 #include "access/multixact.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
@@ -70,7 +71,7 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/relmapper.h"
-#include "utils/resowner.h"
+#include "utils/resowner_private.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 

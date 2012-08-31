@@ -29,6 +29,7 @@
 #include <utime.h>
 #endif
 
+#include "access/htup_details.h"
 #include "catalog/pg_authid.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
@@ -765,6 +766,14 @@ CreateLockFile(const char *filename, bool amPostmaster,
 					 errmsg("could not read lock file \"%s\": %m",
 							filename)));
 		close(fd);
+
+		if (len == 0)
+		{
+			ereport(FATAL,
+					(errcode(ERRCODE_LOCK_FILE_EXISTS),
+					 errmsg("lock file \"%s\" is empty", filename),
+					 errhint("Either another server is starting, or the lock file is the remnant of a previous server startup crash.")));
+		}
 
 		buffer[len] = '\0';
 		encoded_pid = atoi(buffer);

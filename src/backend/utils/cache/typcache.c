@@ -47,6 +47,7 @@
 
 #include "access/hash.h"
 #include "access/heapam.h"
+#include "access/htup_details.h"
 #include "access/nbtree.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_enum.h"
@@ -55,6 +56,7 @@
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
 #include "utils/fmgroids.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"

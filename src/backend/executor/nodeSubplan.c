@@ -18,8 +18,10 @@
  */
 #include "postgres.h"
 
+#include <limits.h>
 #include <math.h>
 
+#include "access/htup_details.h"
 #include "executor/executor.h"
 #include "executor/nodeSubplan.h"
 #include "nodes/makefuncs.h"

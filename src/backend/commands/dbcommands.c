@@ -26,6 +26,7 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
+#include "access/htup_details.h"
 #include "access/xact.h"
 #include "access/xlogutils.h"
 #include "catalog/catalog.h"
@@ -45,6 +46,7 @@
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
 #include "storage/copydir.h"
+#include "storage/fd.h"
 #include "storage/lmgr.h"
 #include "storage/ipc.h"
 #include "storage/procarray.h"

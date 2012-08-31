@@ -748,7 +748,6 @@ LCOV
 GCOV
 enable_debug
 enable_rpath
-enable_shared
 default_port
 WANTED_LANGUAGES
 enable_nls
@@ -810,7 +809,6 @@ with_libs
 enable_integer_datetimes
 enable_nls
 with_pgport
-enable_shared
 enable_rpath
 enable_spinlocks
 enable_debug
@@ -1490,7 +1488,6 @@ Optional Features:
                           disable 64-bit integer date/time support
   --enable-nls[=LANGUAGES]
                           enable Native Language Support
-  --disable-shared        do not build shared libraries
   --disable-rpath         do not embed shared library search path in
                           executables
   --disable-spinlocks     do not use spinlocks
@@ -2468,36 +2465,6 @@ _ACEOF
 cat >>confdefs.h <<_ACEOF
 #define DEF_PGPORT_STR "${default_port}"
 _ACEOF
-
-
-
-#
-# Option to disable shared libraries
-#
-
-
-# Check whether --enable-shared was given.
-if test "${enable_shared+set}" = set; then
-  enableval=$enable_shared;
-  case $enableval in
-    yes)
-      :
-      ;;
-    no)
-      :
-      ;;
-    *)
-      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-shared option" >&5
-$as_echo "$as_me: error: no argument expected for --enable-shared option" >&2;}
-   { (exit 1); exit 1; }; }
-      ;;
-  esac
-
-else
-  enable_shared=yes
-
-fi
-
 
 
 
@@ -7454,11 +7421,22 @@ $as_echo_n "checking Python configuration directory... " >&6; }
 python_majorversion=`${PYTHON} -c "import sys; print(sys.version[0])"`
 python_version=`${PYTHON} -c "import sys; print(sys.version[:3])"`
 python_configdir=`${PYTHON} -c "import distutils.sysconfig; print(' '.join(filter(None,distutils.sysconfig.get_config_vars('LIBPL'))))"`
-python_includespec=`${PYTHON} -c "import distutils.sysconfig; print('-I'+distutils.sysconfig.get_python_inc())"`
-
-# This should be enough of a message.
 { $as_echo "$as_me:$LINENO: result: $python_configdir" >&5
 $as_echo "$python_configdir" >&6; }
+
+{ $as_echo "$as_me:$LINENO: checking Python include directories" >&5
+$as_echo_n "checking Python include directories... " >&6; }
+python_includespec=`${PYTHON} -c "
+import distutils.sysconfig
+a = '-I' + distutils.sysconfig.get_python_inc(False)
+b = '-I' + distutils.sysconfig.get_python_inc(True)
+if a == b:
+    print(a)
+else:
+    print(a + ' ' + b)"`
+{ $as_echo "$as_me:$LINENO: result: $python_includespec" >&5
+$as_echo "$python_includespec" >&6; }
+
 
 
 { $as_echo "$as_me:$LINENO: checking how to link an embedded Python application" >&5

@@ -68,6 +68,7 @@
 #include <unistd.h>
 
 #include "access/heapam.h"
+#include "access/htup_details.h"
 #include "access/multixact.h"
 #include "access/reloptions.h"
 #include "access/transam.h"
@@ -77,6 +78,7 @@
 #include "catalog/pg_database.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
+#include "lib/dllist.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
