@@ -15,6 +15,8 @@ set -e
 : ${PGPORT=50432}
 export PGPORT
 
+testhost=`uname -o`
+
 temp_root=$PWD/tmp_check
 
 if [ "$1" = '--install' ]; then
@@ -65,7 +67,7 @@ set -x
 $oldbindir/initdb
 $oldbindir/pg_ctl start -l "$logdir/postmaster1.log" -w
 if "$MAKE" -C "$oldsrc" installcheck; then
-	pg_dumpall >"$temp_root"/dump1.sql || pg_dumpall1_status=$?
+	pg_dumpall -f "$temp_root"/dump1.sql || pg_dumpall1_status=$?
 	if [ "$newsrc" != "$oldsrc" ]; then
 		oldpgversion=`psql -A -t -d regression -c "SHOW server_version_num"`
 		fix_sql=""
@@ -107,15 +109,24 @@ initdb
 pg_upgrade -d "${PGDATA}.old" -D "${PGDATA}" -b "$oldbindir" -B "$bindir"
 
 pg_ctl start -l "$logdir/postmaster2.log" -w
-sh ./analyze_new_cluster.sh
-pg_dumpall >"$temp_root"/dump2.sql || pg_dumpall2_status=$?
+
+if [ $testhost = Msys ] ; then
+	cmd /c analyze_new_cluster.bat
+else
+	sh ./analyze_new_cluster.sh
+fi
+pg_dumpall -f "$temp_root"/dump2.sql || pg_dumpall2_status=$?
 pg_ctl -m fast stop
 if [ -n "$pg_dumpall2_status" ]; then
 	echo "pg_dumpall of post-upgrade database cluster failed"
 	exit 1
 fi
 
-sh ./delete_old_cluster.sh
+if [ $testhost = Msys ] ; then
+	cmd /c delete_old_cluster.bat
+else
+	sh ./delete_old_cluster.sh
+fi
 
 if diff -q "$temp_root"/dump1.sql "$temp_root"/dump2.sql; then
 	echo PASSED

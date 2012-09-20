@@ -407,7 +407,6 @@ typedef struct XLogCtlData
 	XLogRecPtr *xlblocks;		/* 1st byte ptr-s + XLOG_BLCKSZ */
 	int			XLogCacheBlck;	/* highest allocated xlog buffer index */
 	TimeLineID	ThisTimeLineID;
-	TimeLineID	RecoveryTargetTLI;
 
 	/*
 	 * archiveCleanupCommand is read from recovery.conf but needs to be in
@@ -456,14 +455,14 @@ typedef struct XLogCtlData
 	XLogRecPtr	recoveryLastRecPtr;
 	/* timestamp of last COMMIT/ABORT record replayed (or being replayed) */
 	TimestampTz recoveryLastXTime;
+	/* current effective recovery target timeline */
+	TimeLineID	RecoveryTargetTLI;
 
 	/*
 	 * timestamp of when we started replaying the current chunk of WAL data,
 	 * only relevant for replication or archive recovery
 	 */
 	TimestampTz currentChunkStartTime;
-	/* end of the last record restored from the archive */
-	XLogRecPtr	restoreLastRecPtr;
 	/* Are we requested to pause recovery? */
 	bool		recoveryPause;
 
@@ -2781,9 +2780,6 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 	 */
 	if (source == XLOG_FROM_ARCHIVE)
 	{
-		/* use volatile pointer to prevent code rearrangement */
-		volatile XLogCtlData *xlogctl = XLogCtl;
-		XLogRecPtr	endptr;
 		char		xlogfpath[MAXPGPATH];
 		bool		reload = false;
 		struct stat statbuf;
@@ -2791,7 +2787,33 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 		XLogFilePath(xlogfpath, tli, segno);
 		if (stat(xlogfpath, &statbuf) == 0)
 		{
-			if (unlink(xlogfpath) != 0)
+			char oldpath[MAXPGPATH];
+#ifdef WIN32
+			static unsigned int deletedcounter = 1;
+			/*
+			 * On Windows, if another process (e.g a walsender process) holds
+			 * the file open in FILE_SHARE_DELETE mode, unlink will succeed,
+			 * but the file will still show up in directory listing until the
+			 * last handle is closed, and we cannot rename the new file in its
+			 * place until that. To avoid that problem, rename the old file to
+			 * a temporary name first. Use a counter to create a unique
+			 * filename, because the same file might be restored from the
+			 * archive multiple times, and a walsender could still be holding
+			 * onto an old deleted version of it.
+			 */
+			snprintf(oldpath, MAXPGPATH, "%s.deleted%u",
+					 xlogfpath, deletedcounter++);
+			if (rename(xlogfpath, oldpath) != 0)
+			{
+				ereport(ERROR,
+						(errcode_for_file_access(),
+						 errmsg("could not rename file \"%s\" to \"%s\": %m",
+								xlogfpath, oldpath)));
+			}
+#else
+			strncpy(oldpath, xlogfpath, MAXPGPATH);
+#endif
+			if (unlink(oldpath) != 0)
 				ereport(FATAL,
 						(errcode_for_file_access(),
 						 errmsg("could not remove file \"%s\": %m",
@@ -2816,18 +2838,6 @@ XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli,
 		 */
 		if (reload)
 			WalSndRqstFileReload();
-
-		/*
-		 * Calculate the end location of the restored WAL file and save it in
-		 * shmem. It's used as current standby flush position, and cascading
-		 * walsenders try to send WAL records up to this location.
-		 */
-		XLogSegNoOffsetToRecPtr(segno, 0, endptr);
-		XLByteAdvance(endptr, XLogSegSize);
-
-		SpinLockAcquire(&xlogctl->info_lck);
-		xlogctl->restoreLastRecPtr = endptr;
-		SpinLockRelease(&xlogctl->info_lck);
 
 		/* Signal walsender that new WAL has arrived */
 		if (AllowCascadeReplication())
@@ -4470,12 +4480,17 @@ rescanLatestTimeLine(void)
 							ThisTimeLineID)));
 		else
 		{
+			/* use volatile pointer to prevent code rearrangement */
+			volatile XLogCtlData *xlogctl = XLogCtl;
+
 			/* Switch target */
 			recoveryTargetTLI = newtarget;
 			list_free(expectedTLIs);
 			expectedTLIs = newExpectedTLIs;
 
-			XLogCtl->RecoveryTargetTLI = recoveryTargetTLI;
+			SpinLockAcquire(&xlogctl->info_lck);
+			xlogctl->RecoveryTargetTLI = recoveryTargetTLI;
+			SpinLockRelease(&xlogctl->info_lck);
 
 			ereport(LOG,
 					(errmsg("new target timeline is %u",
@@ -6003,9 +6018,10 @@ GetXLogReceiptTime(TimestampTz *rtime, bool *fromStream)
  */
 #define RecoveryRequiresIntParameter(param_name, currValue, minValue) \
 do { \
-	if (currValue < minValue) \
+	if ((currValue) < (minValue)) \
 		ereport(ERROR, \
-				(errmsg("hot standby is not possible because " \
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
+				 errmsg("hot standby is not possible because " \
 						"%s = %d is a lower setting than on the master server " \
 						"(its value was %d)", \
 						param_name, \
@@ -6046,10 +6062,10 @@ CheckRequiredParameterValues(void)
 		RecoveryRequiresIntParameter("max_connections",
 									 MaxConnections,
 									 ControlFile->MaxConnections);
-		RecoveryRequiresIntParameter("max_prepared_xacts",
+		RecoveryRequiresIntParameter("max_prepared_transactions",
 									 max_prepared_xacts,
 									 ControlFile->max_prepared_xacts);
-		RecoveryRequiresIntParameter("max_locks_per_xact",
+		RecoveryRequiresIntParameter("max_locks_per_transaction",
 									 max_locks_per_xact,
 									 ControlFile->max_locks_per_xact);
 	}
@@ -7520,13 +7536,20 @@ GetNextXidAndEpoch(TransactionId *xid, uint32 *epoch)
 }
 
 /*
- * GetRecoveryTargetTLI - get the recovery target timeline ID
+ * GetRecoveryTargetTLI - get the current recovery target timeline ID
  */
 TimeLineID
 GetRecoveryTargetTLI(void)
 {
-	/* RecoveryTargetTLI doesn't change so we need no lock to copy it */
-	return XLogCtl->RecoveryTargetTLI;
+	/* use volatile pointer to prevent code rearrangement */
+	volatile XLogCtlData *xlogctl = XLogCtl;
+	TimeLineID result;
+
+	SpinLockAcquire(&xlogctl->info_lck);
+	result = xlogctl->RecoveryTargetTLI;
+	SpinLockRelease(&xlogctl->info_lck);
+
+	return result;
 }
 
 /*
@@ -8167,8 +8190,8 @@ RecoveryRestartPoint(const CheckPoint *checkPoint)
 	 * work out the next time it wants to perform a restartpoint.
 	 */
 	SpinLockAcquire(&xlogctl->info_lck);
-	XLogCtl->lastCheckPointRecPtr = ReadRecPtr;
-	memcpy(&XLogCtl->lastCheckPoint, checkPoint, sizeof(CheckPoint));
+	xlogctl->lastCheckPointRecPtr = ReadRecPtr;
+	xlogctl->lastCheckPoint = *checkPoint;
 	SpinLockRelease(&xlogctl->info_lck);
 }
 
@@ -8203,7 +8226,7 @@ CreateRestartPoint(int flags)
 	/* Get a local copy of the last safe checkpoint record. */
 	SpinLockAcquire(&xlogctl->info_lck);
 	lastCheckPointRecPtr = xlogctl->lastCheckPointRecPtr;
-	memcpy(&lastCheckPoint, &XLogCtl->lastCheckPoint, sizeof(CheckPoint));
+	lastCheckPoint = xlogctl->lastCheckPoint;
 	SpinLockRelease(&xlogctl->info_lck);
 
 	/*
@@ -8318,7 +8341,7 @@ CreateRestartPoint(int flags)
 		XLogRecPtr	endptr;
 
 		/* Get the current (or recent) end of xlog */
-		endptr = GetStandbyFlushRecPtr();
+		endptr = GetStandbyFlushRecPtr(NULL);
 
 		KeepLogSeg(endptr, &_logSegNo);
 		_logSegNo--;
@@ -9833,14 +9856,13 @@ do_pg_abort_backup(void)
 /*
  * Get latest redo apply position.
  *
- * Optionally, returns the end byte position of the last restored
- * WAL segment. Callers not interested in that value may pass
- * NULL for restoreLastRecPtr.
+ * Optionally, returns the current recovery target timeline. Callers not
+ * interested in that may pass NULL for targetTLI.
  *
  * Exported to allow WALReceiver to read the pointer directly.
  */
 XLogRecPtr
-GetXLogReplayRecPtr(XLogRecPtr *restoreLastRecPtr)
+GetXLogReplayRecPtr(TimeLineID *targetTLI)
 {
 	/* use volatile pointer to prevent code rearrangement */
 	volatile XLogCtlData *xlogctl = XLogCtl;
@@ -9848,8 +9870,8 @@ GetXLogReplayRecPtr(XLogRecPtr *restoreLastRecPtr)
 
 	SpinLockAcquire(&xlogctl->info_lck);
 	recptr = xlogctl->recoveryLastRecPtr;
-	if (restoreLastRecPtr)
-		*restoreLastRecPtr = xlogctl->restoreLastRecPtr;
+	if (targetTLI)
+		*targetTLI = xlogctl->RecoveryTargetTLI;
 	SpinLockRelease(&xlogctl->info_lck);
 
 	return recptr;
@@ -9858,21 +9880,23 @@ GetXLogReplayRecPtr(XLogRecPtr *restoreLastRecPtr)
 /*
  * Get current standby flush position, ie, the last WAL position
  * known to be fsync'd to disk in standby.
+ *
+ * If 'targetTLI' is not NULL, it's set to the current recovery target
+ * timeline.
  */
 XLogRecPtr
-GetStandbyFlushRecPtr(void)
+GetStandbyFlushRecPtr(TimeLineID *targetTLI)
 {
 	XLogRecPtr	receivePtr;
 	XLogRecPtr	replayPtr;
-	XLogRecPtr	restorePtr;
 
 	receivePtr = GetWalRcvWriteRecPtr(NULL);
-	replayPtr = GetXLogReplayRecPtr(&restorePtr);
+	replayPtr = GetXLogReplayRecPtr(targetTLI);
 
 	if (XLByteLT(receivePtr, replayPtr))
-		return XLByteLT(replayPtr, restorePtr) ? restorePtr : replayPtr;
+		return replayPtr;
 	else
-		return XLByteLT(receivePtr, restorePtr) ? restorePtr : receivePtr;
+		return receivePtr;
 }
 
 /*

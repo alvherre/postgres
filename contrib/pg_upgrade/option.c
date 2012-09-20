@@ -9,6 +9,8 @@
 
 #include "postgres.h"
 
+#include "miscadmin.h"
+
 #include "pg_upgrade.h"
 
 #include <getopt_long.h>
@@ -375,4 +377,81 @@ adjust_data_dir(ClusterInfo *cluster)
 	cluster->pgdata = pg_strdup(cmd_output);
 
 	check_ok();
+}
+
+
+/*
+ * get_sock_dir
+ *
+ * Identify the socket directory to use for this cluster.  If we're doing
+ * a live check (old cluster only), we need to find out where the postmaster
+ * is listening.  Otherwise, we're going to put the socket into the current
+ * directory.
+ */
+void
+get_sock_dir(ClusterInfo *cluster, bool live_check)
+{
+#ifdef HAVE_UNIX_SOCKETS
+	/*
+	 *	sockdir and port were added to postmaster.pid in PG 9.1.
+	 *	Pre-9.1 cannot process pg_ctl -w for sockets in non-default
+	 *	locations.
+	 */
+	if (GET_MAJOR_VERSION(cluster->major_version) >= 901)
+	{
+		if (!live_check)
+		{
+			/* Use the current directory for the socket */
+			cluster->sockdir = pg_malloc(MAXPGPATH);
+			if (!getcwd(cluster->sockdir, MAXPGPATH))
+				pg_log(PG_FATAL, "cannot find current directory\n");
+		}
+		else
+		{
+			/*
+			 *	If we are doing a live check, we will use the old cluster's Unix
+			 *	domain socket directory so we can connect to the live server.
+			 */
+			unsigned short orig_port = cluster->port;
+			char		filename[MAXPGPATH], line[MAXPGPATH];
+			FILE		*fp;
+			int			lineno;
+	
+			snprintf(filename, sizeof(filename), "%s/postmaster.pid",
+					 cluster->pgdata);
+			if ((fp = fopen(filename, "r")) == NULL)
+				pg_log(PG_FATAL, "Cannot open file %s: %m\n", filename);
+	
+			for (lineno = 1;
+				 lineno <= Max(LOCK_FILE_LINE_PORT, LOCK_FILE_LINE_SOCKET_DIR);
+				 lineno++)
+			{
+				if (fgets(line, sizeof(line), fp) == NULL)
+					pg_log(PG_FATAL, "Cannot read line %d from %s: %m\n", lineno, filename);
+	
+				/* potentially overwrite user-supplied value */
+				if (lineno == LOCK_FILE_LINE_PORT)
+					sscanf(line, "%hu", &old_cluster.port);
+				if (lineno == LOCK_FILE_LINE_SOCKET_DIR)
+				{
+					cluster->sockdir = pg_malloc(MAXPGPATH);
+					/* strip off newline */
+					sscanf(line, "%s\n", cluster->sockdir);
+				}
+			}
+			fclose(fp);
+	
+			/* warn of port number correction */
+			if (orig_port != DEF_PGUPORT && old_cluster.port != orig_port)
+				pg_log(PG_WARNING, "User-supplied old port number %hu corrected to %hu\n",
+				orig_port, cluster->port);
+		}
+	}
+	else
+		/* Can't get sockdir and pg_ctl -w can't use a non-default, use default */
+		cluster->sockdir = NULL;
+
+#else /* !HAVE_UNIX_SOCKETS */
+	cluster->sockdir = NULL;
+#endif
 }

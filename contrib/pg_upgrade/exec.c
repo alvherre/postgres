@@ -52,7 +52,7 @@ exec_prog(const char *log_file, const char *opt_log_file,
 
 	old_umask = umask(S_IRWXG | S_IRWXO);
 
-	written = strlcpy(cmd, SYSTEMQUOTE, strlen(SYSTEMQUOTE));
+	written = strlcpy(cmd, SYSTEMQUOTE, sizeof(cmd));
 	va_start(ap, fmt);
 	written += vsnprintf(cmd + written, MAXCMDLEN - written, fmt, ap);
 	va_end(ap);
@@ -63,8 +63,32 @@ exec_prog(const char *log_file, const char *opt_log_file,
 	if (written >= MAXCMDLEN)
 		pg_log(PG_FATAL, "command too long\n");
 
-	if ((log = fopen_priv(log_file, "a+")) == NULL)
+	log = fopen_priv(log_file, "a");
+
+#ifdef WIN32
+	{
+		/* 
+		 * "pg_ctl -w stop" might have reported that the server has
+		 * stopped because the postmaster.pid file has been removed,
+		 * but "pg_ctl -w start" might still be in the process of
+		 * closing and might still be holding its stdout and -l log
+		 * file descriptors open.  Therefore, try to open the log 
+		 * file a few more times.
+		 */
+		int iter;
+		for (iter = 0; iter < 4 && log == NULL; iter++)
+		{
+			sleep(1);
+			log = fopen_priv(log_file, "a");
+		}
+	}
+#endif
+
+	if (log == NULL)
 		pg_log(PG_FATAL, "cannot write to log file %s\n", log_file);
+#ifdef WIN32
+	fprintf(log, "\n\n");
+#endif
 	pg_log(PG_VERBOSE, "%s\n", cmd);
 	fprintf(log, "command: %s\n", cmd);
 
@@ -95,10 +119,19 @@ exec_prog(const char *log_file, const char *opt_log_file,
 				   log_file);
 	}
 
-	if ((log = fopen_priv(log_file, "a+")) == NULL)
+#ifndef WIN32
+	/* 
+	 *	We can't do this on Windows because it will keep the "pg_ctl start"
+	 *	output filename open until the server stops, so we do the \n\n above
+	 *	on that platform.  We use a unique filename for "pg_ctl start" that is
+	 *	never reused while the server is running, so it works fine.  We could
+	 *	log these commands to a third file, but that just adds complexity.
+	 */
+	if ((log = fopen_priv(log_file, "a")) == NULL)
 		pg_log(PG_FATAL, "cannot write to log file %s\n", log_file);
 	fprintf(log, "\n\n");
 	fclose(log);
+#endif
 
 	return result == 0;
 }
@@ -257,7 +290,6 @@ check_bin_dir(ClusterInfo *cluster)
 	if (cluster == &new_cluster)
 	{
 		/* these are only needed in the new cluster */
-		validate_exec(cluster->bindir, "pg_config");
 		validate_exec(cluster->bindir, "psql");
 		validate_exec(cluster->bindir, "pg_dumpall");
 	}

@@ -23,18 +23,42 @@ static void check_for_reg_data_type_usage(ClusterInfo *cluster);
 static void get_bin_version(ClusterInfo *cluster);
 
 
+/*
+ * fix_path_separator
+ * For non-Windows, just return the argument.
+ * For Windows convert any forward slash to a backslash
+ * such as is suitable for arguments to builtin commands 
+ * like RMDIR and DEL.
+ */
+static char *
+fix_path_separator(char *path)
+{
+#ifdef WIN32
+
+	char *result;
+	char *c;
+
+	result = pg_strdup(path);
+
+	for (c = result; *c != '\0'; c++)
+		if (*c == '/')
+			*c = '\\';
+
+	return result;
+
+#else
+
+	return path;
+
+#endif
+}
+
 void
 output_check_banner(bool *live_check)
 {
 	if (user_opts.check && is_server_running(old_cluster.pgdata))
 	{
 		*live_check = true;
-		if (old_cluster.port == DEF_PGUPORT)
-			pg_log(PG_FATAL, "When checking a live old server, "
-				   "you must specify the old server's port number.\n");
-		if (old_cluster.port == new_cluster.port)
-			pg_log(PG_FATAL, "When checking a live server, "
-				   "the old and new port numbers must be different.\n");
 		pg_log(PG_REPORT, "Performing Consistency Checks on Old Live Server\n");
 		pg_log(PG_REPORT, "------------------------------------------------\n");
 	}
@@ -184,8 +208,8 @@ issue_warnings(char *sequence_script_file_name)
 		{
 			prep_status("Adjusting sequences");
 			exec_prog(UTILITY_LOG_FILE, NULL, true,
-					  "\"%s/psql\" " EXEC_PSQL_ARGS " --port %d --username \"%s\" -f \"%s\"",
-					  new_cluster.bindir, new_cluster.port, os_info.user,
+					  "\"%s/psql\" " EXEC_PSQL_ARGS " %s -f \"%s\"",
+					  new_cluster.bindir, cluster_conn_opts(&new_cluster),
 					  sequence_script_file_name);
 			unlink(sequence_script_file_name);
 			check_ok();
@@ -291,6 +315,16 @@ check_cluster_compatibility(bool live_check)
 		new_cluster.controldata.cat_ver < TABLE_SPACE_SUBDIRS_CAT_VER)
 		pg_log(PG_FATAL, "This utility can only upgrade to PostgreSQL version 9.0 after 2010-01-11\n"
 			   "because of backend API changes made during development.\n");
+
+	/* We read the real port number for PG >= 9.1 */
+	if (live_check && GET_MAJOR_VERSION(old_cluster.major_version) < 901 &&
+		old_cluster.port == DEF_PGUPORT)
+			pg_log(PG_FATAL, "When checking a pre-PG 9.1 live old server, "
+				   "you must specify the old server's port number.\n");
+
+	if (live_check && old_cluster.port == new_cluster.port)
+		pg_log(PG_FATAL, "When checking a live server, "
+			   "the old and new port numbers must be different.\n");
 }
 
 
@@ -416,6 +450,9 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 #ifndef WIN32
 	/* add shebang header */
 	fprintf(script, "#!/bin/sh\n\n");
+#else
+	/* suppress command echoing */
+	fprintf(script, "@echo off\n");
 #endif
 
 	fprintf(script, "echo %sThis script will generate minimal optimizer statistics rapidly%s\n",
@@ -426,7 +463,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %shave the default level of optimizer statistics.%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "echo\n\n");
+	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 
 	fprintf(script, "echo %sIf you have used ALTER TABLE to modify the statistics target for%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
@@ -434,7 +471,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %srunning this script because they will delay fast statistics generation.%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "echo\n\n");
+	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 
 	fprintf(script, "echo %sIf you would like default statistics as quickly as possible, cancel%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
@@ -444,7 +481,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 	/* Did we copy the free space files? */
 			(GET_MAJOR_VERSION(old_cluster.major_version) >= 804) ?
 			"--analyze-only" : "--analyze", ECHO_QUOTE);
-	fprintf(script, "echo\n\n");
+	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 
 #ifndef WIN32
 	fprintf(script, "sleep 2\n");
@@ -462,12 +499,12 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 	fprintf(script, "echo %s--------------------------------------------------%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "vacuumdb --all --analyze-only\n");
-	fprintf(script, "echo\n");
+	fprintf(script, "echo%s\n", ECHO_BLANK);
 	fprintf(script, "echo %sThe server is now available with minimal optimizer statistics.%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %sQuery performance will be optimal once this script completes.%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "echo\n\n");
+	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 
 #ifndef WIN32
 	fprintf(script, "sleep 2\n");
@@ -483,7 +520,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 	fprintf(script, "echo %s---------------------------------------------------%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "vacuumdb --all --analyze-only\n");
-	fprintf(script, "echo\n\n");
+	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 
 #ifndef WIN32
 	fprintf(script, "unset PGOPTIONS\n");
@@ -500,7 +537,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			(GET_MAJOR_VERSION(old_cluster.major_version) >= 804) ?
 			"--analyze-only" : "--analyze");
 
-	fprintf(script, "echo\n\n");
+	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 	fprintf(script, "echo %sDone%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
 
@@ -544,7 +581,7 @@ create_script_for_old_cluster_deletion(char **deletion_script_file_name)
 #endif
 
 	/* delete old cluster's default tablespace */
-	fprintf(script, RMDIR_CMD " %s\n", old_cluster.pgdata);
+	fprintf(script, RMDIR_CMD " %s\n", fix_path_separator(old_cluster.pgdata));
 
 	/* delete old cluster's alternate tablespaces */
 	for (tblnum = 0; tblnum < os_info.num_tablespaces; tblnum++)
@@ -561,14 +598,17 @@ create_script_for_old_cluster_deletion(char **deletion_script_file_name)
 			fprintf(script, "\n");
 			/* remove PG_VERSION? */
 			if (GET_MAJOR_VERSION(old_cluster.major_version) <= 804)
-				fprintf(script, RM_CMD " %s%s/PG_VERSION\n",
-				 os_info.tablespaces[tblnum], old_cluster.tablespace_suffix);
+				fprintf(script, RM_CMD " %s%s%cPG_VERSION\n",
+						fix_path_separator(os_info.tablespaces[tblnum]), 
+						fix_path_separator(old_cluster.tablespace_suffix),
+						PATH_SEPARATOR);
 
 			for (dbnum = 0; dbnum < old_cluster.dbarr.ndbs; dbnum++)
 			{
-				fprintf(script, RMDIR_CMD " %s%s/%d\n",
-				  os_info.tablespaces[tblnum], old_cluster.tablespace_suffix,
-						old_cluster.dbarr.dbs[dbnum].db_oid);
+				fprintf(script, RMDIR_CMD " %s%s%c%d\n",
+						fix_path_separator(os_info.tablespaces[tblnum]),
+						fix_path_separator(old_cluster.tablespace_suffix),
+						PATH_SEPARATOR, old_cluster.dbarr.dbs[dbnum].db_oid);
 			}
 		}
 		else
@@ -578,7 +618,8 @@ create_script_for_old_cluster_deletion(char **deletion_script_file_name)
 			 * or a version-specific subdirectory.
 			 */
 			fprintf(script, RMDIR_CMD " %s%s\n",
-				 os_info.tablespaces[tblnum], old_cluster.tablespace_suffix);
+					fix_path_separator(os_info.tablespaces[tblnum]), 
+					fix_path_separator(old_cluster.tablespace_suffix));
 	}
 
 	fclose(script);

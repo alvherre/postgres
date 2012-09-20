@@ -1,13 +1,183 @@
 <!-- doc/src/sgml/release-9.2.sgml -->
 <!-- See header comment in release.sgml about typical markup -->
 
+ <sect1 id="release-9-2-1">
+  <title>Release 9.2.1</title>
+
+  <note>
+  <title>Release Date</title>
+  <simpara>2012-09-24</simpara>
+  </note>
+
+  <para>
+   This release contains a variety of fixes from 9.2.0.
+   For information about new features in the 9.2 major release, see
+   <xref linkend="release-9-2">.
+  </para>
+
+  <sect2>
+   <title>Migration to Version 9.2.1</title>
+
+   <para>
+    A dump/restore is not required for those running 9.2.X.
+   </para>
+
+   <para>
+    However, you may need to perform <command>REINDEX</> and/or
+    <command>VACUUM</> operations to recover from the effects of the data
+    corruption bug described in the first changelog item below.
+   </para>
+
+  </sect2>
+
+  <sect2>
+   <title>Changes</title>
+
+   <itemizedlist>
+
+    <listitem>
+     <para>
+      Fix persistence marking of shared buffers during WAL replay
+      (Jeff Davis)
+     </para>
+
+     <para>
+      This mistake can result in buffers not being written out during
+      checkpoints, resulting in data corruption if the server later crashes
+      without ever having written those buffers.  Corruption can occur on
+      any server following crash recovery, but it is significantly more
+      likely to occur on standby slave servers since those perform much
+      more WAL replay.  There is a low probability of corruption of btree
+      and GIN indexes.  There is a much higher probability of corruption
+      of table <quote>visibility maps</>, which might lead to wrong answers
+      from index-only scans.  Table data proper cannot be corrupted by this
+      bug.
+     </para>
+
+     <para>
+      While no index corruption due to this bug is known to have occurred
+      in the field, as a precautionary measure it is recommended that
+      production installations <command>REINDEX</> all btree and GIN
+      indexes at a convenient time after upgrading to 9.2.1.
+     </para>
+
+     <para>
+      Also, it is recommended to perform a <command>VACUUM</> of all tables
+      while having <link
+      linkend="guc-vacuum-freeze-table-age"><varname>vacuum_freeze_table_age</></link>
+      set to zero.  This will fix any incorrect visibility map data.  <link
+      linkend="guc-vacuum-cost-delay"><varname>vacuum_cost_delay</></link>
+      can be adjusted to reduce the performance impact of vacuuming, while
+      causing it to take longer to finish.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Fix possible incorrect sorting of output from queries involving
+      <literal>WHERE <replaceable>indexed_column</> IN
+      (<replaceable>list_of_values</>)</literal> (Tom Lane)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Fix planner failure for queries involving <literal>GROUP BY</>
+      expressions along with window functions and aggregates (Tom Lane)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Fix planner's assignment of executor parameters (Tom Lane)
+     </para>
+
+     <para>
+      This error could result in wrong answers from queries that scan the
+      same <literal>WITH</> subquery multiple times.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Improve planner's handling of join conditions in index scans (Tom Lane)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Improve selectivity estimation for text search queries involving
+      prefixes, i.e. <replaceable>word</><literal>:*</> patterns  (Tom Lane)
+     </para>
+
+     <para>
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Fix delayed recognition of permissions changes (Tom Lane)
+     </para>
+
+     <para>
+      A command that needed no locks other than ones its transaction already
+      had might fail to notice a concurrent <command>GRANT</> or
+      <command>REVOKE</> that committed since the start of its transaction.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Fix <command>ANALYZE</> to not fail when a column is a domain over an
+      array type (Tom Lane)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Prevent PL/Perl from crashing if a recursive PL/Perl function is
+      redefined while being executed (Tom Lane)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Work around possible misoptimization in PL/Perl (Tom Lane)
+     </para>
+
+     <para>
+      Some Linux distributions contain an incorrect version of
+      <filename>pthread.h</> that results in incorrect compiled code in
+      PL/Perl, leading to crashes if a PL/Perl function calls another one
+      that throws an error.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Remove unnecessary dependency on <application>pg_config</> from
+      <application>pg_upgrade</> (Peter Eisentraut)
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      Update time zone data files to <application>tzdata</> release 2012f
+      for DST law changes in Fiji
+     </para>
+    </listitem>
+
+   </itemizedlist>
+
+  </sect2>
+ </sect1>
+
  <sect1 id="release-9-2">
   <title>Release 9.2</title>
 
   <note>
    <title>Release Date</title>
-   <simpara>2012-??-??</simpara>
-   <simpara>CURRENT AS OF 2012-08-21</simpara>
+   <simpara>2012-09-10</simpara>
   </note>
 
   <sect2>
@@ -49,6 +219,14 @@
         Allow streaming replication slaves to forward data to other slaves
         (<link linkend="cascading-replication"><firstterm>cascading
         replication</></link>)
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        Allow <link
+        linkend="app-pgbasebackup"><application>pg_basebackup</></link>
+        to make base backups from standby servers
        </para>
       </listitem>
 
@@ -284,7 +462,9 @@
 
       <listitem>
        <para>
-        No longer forcibly lowercase procedural language names (Robert Haas)
+        No longer forcibly lowercase procedural language names in <link
+        linkend="SQL-CREATEFUNCTION"><command>CREATE FUNCTION</></link>
+        (Robert Haas)
        </para>
 
        <para>
@@ -559,7 +739,7 @@
 
       <listitem>
        <para>
-        Reduce overhead of creating virtual transaction id locks (Robert
+        Reduce overhead of creating virtual transaction ID locks (Robert
         Haas)
        </para>
       </listitem>
@@ -665,7 +845,8 @@
        </para>
 
        <para>
-        This allows Windows sessions to use more open file descriptors.
+        This allows Windows sessions to use more open file descriptors than
+        before.
        </para>
       </listitem>
 
@@ -783,7 +964,7 @@
        </para>
 
        <para>
-        This is only enabled when <link
+        This check is only performed when <link
         linkend="guc-constraint-exclusion"><varname>constraint_exclusion</></link>
         is <literal>on</literal>.
        </para>
@@ -830,7 +1011,7 @@
        <para>
         This change improves selectivity estimation for the array
         <literal>&lt;@</literal>, <literal>&amp;&amp;</literal>, and
-        <literal>@&gt;</literal> (containment and overlaps) array operators.
+        <literal>@&gt;</literal> operators (array containment and overlaps).
        </para>
       </listitem>
 
@@ -981,6 +1162,11 @@
         Change <quote>unexpected EOF</> messages to <literal>DEBUG1</> level,
         except when there is an open transaction (Magnus Hagander)
        </para>
+
+       <para>
+        This change reduces log chatter caused by applications that close
+        database connections ungracefully.
+       </para>
       </listitem>
 
      </itemizedlist>
@@ -1037,6 +1223,11 @@
         Silently ignore nonexistent schemas specified in <link
         linkend="guc-search-path"><varname>search_path</></link> (Tom Lane)
        </para>
+
+       <para>
+        This makes it more convenient to use generic path settings, which
+        might include some schemas that don't exist in all databases.
+       </para>
       </listitem>
 
       <listitem>
@@ -1072,7 +1263,8 @@
 
        <para>
         The system now remembers whether a <command>SET</command> was
-        performed by a superuser.
+        performed by a superuser, so that proper privilege checking can be
+        done when the extension is loaded.
        </para>
       </listitem>
 
@@ -1218,20 +1410,26 @@
 
       <listitem>
        <para>
-        Allow streaming of WAL files while <link linkend="app-pgbasebackup"><application>pg_basebackup</></link>
+        Allow <link
+        linkend="app-pgbasebackup"><application>pg_basebackup</></link>
+        to make base backups from standby servers (Jun Ishizuka, Fujii Masao)
+       </para>
+
+       <para>
+        This feature lets the work of making new base backups be off-loaded
+        from the primary server.
+       </para>
+      </listitem>
+
+      <listitem>
+       <para>
+        Allow streaming of WAL files while <application>pg_basebackup</>
         is performing a backup (Magnus Hagander)
        </para>
 
        <para>
         This allows passing of WAL files to the standby before they are
         discarded on the primary.
-       </para>
-      </listitem>
-
-      <listitem>
-       <para>
-        Allow <application>pg_basebackup</> to pull from standby servers
-        (Jun Ishizuka, Fujii Masao)
        </para>
       </listitem>
 
@@ -1246,7 +1444,13 @@
 
       <listitem>
        <para>
-        Cancel queries if clients get disconnected (Florian Pflug)
+        Cancel the running query if the client gets disconnected
+        (Florian Pflug)
+       </para>
+
+       <para>
+        If the backend detects loss of client connection during a query, it
+        will now cancel the query rather than attempting to finish it.
        </para>
       </listitem>
 
@@ -1290,7 +1494,7 @@
 
       <listitem>
        <para>
-        Warn about casts to and from domain types (Robert Haas)
+        Warn about creating casts to or from domain types (Robert Haas)
        </para>
 
        <para>
@@ -1354,7 +1558,7 @@
 
       <listitem>
        <para>
-        Improve pretty printing of view definitions (Andrew Dunstan)
+        Improve pretty-printing of view definitions (Andrew Dunstan)
        </para>
       </listitem>
 
@@ -1419,12 +1623,12 @@
        <para>
         Reduce need to rebuild tables and indexes for certain <link
         linkend="SQL-ALTERTABLE"><command>ALTER TABLE</command></link>
-        operations (Noah Misch)
+        ... <literal>ALTER COLUMN TYPE</> operations (Noah Misch)
        </para>
 
        <para>
         Increasing the length limit for a <type>varchar</> or <type>varbit</>
-        column, or removing it altogether, no longer requires a table
+        column, or removing the limit altogether, no longer requires a table
         rewrite.  Similarly, increasing the allowable precision of a
         <type>numeric</> column, or changing a column from constrained
         <type>numeric</> to unconstrained <type>numeric</>, no longer
@@ -1444,7 +1648,7 @@
 
       <listitem>
        <para>
-        Add <literal>IF EXISTS</> clause to some <command>ALTER</command>
+        Add <literal>IF EXISTS</> options to some <command>ALTER</command>
         commands (Pavel Stehule)
        </para>
 
@@ -1598,13 +1802,13 @@
 
       <listitem>
        <para>
-        Allow vacuum to more easily skip pages that cannot be locked
-        (Simon Riggs, Robert Haas)
+        Allow <link linkend="SQL-VACUUM"><command>VACUUM</></link> to more
+        easily skip pages that cannot be locked (Simon Riggs, Robert Haas)
        </para>
 
        <para>
-        This change should greatly reduce the incidence of vacuum getting
-        <quote>stuck</>.
+        This change should greatly reduce the incidence of <command>VACUUM</>
+        getting <quote>stuck</> waiting for other sessions.
        </para>
       </listitem>
 
@@ -1765,7 +1969,7 @@
        </para>
 
        <para>
-        Previously only superusers could use these functions.
+        Previously only superusers were allowed to use these functions.
        </para>
       </listitem>
 
@@ -2094,8 +2298,8 @@
 
       <listitem>
        <para>
-        Allow inclusion of a script file relative to the directory of the
-        file from which it was invoked (Gurjeet Singh)
+        Allow inclusion of a script file that is named relative to the
+        directory of the file from which it was invoked (Gurjeet Singh)
        </para>
 
        <para>
@@ -2129,8 +2333,8 @@
        </para>
 
        <para>
-        Specifically, <envar>PSQL_HISTORY</envar> and
-        <envar>PSQLRC</envar> determine these file names if set.
+        <envar>PSQL_HISTORY</envar> and <envar>PSQLRC</envar> now
+        determine these file names if set.
        </para>
       </listitem>
 
@@ -2143,7 +2347,7 @@
 
       <listitem>
        <para>
-        Make <application>psql</>'s temporary editor files use a
+        Name <application>psql</>'s temporary editor files with a
         <filename>.sql</> extension (Peter Eisentraut)
        </para>
 
@@ -2159,7 +2363,8 @@
        </para>
 
        <para>
-        Various shell tools use zero-byte (NUL) separators, e.g. find.
+        Various shell tools use zero-byte (NUL) separators,
+        e.g. <application>find</>.
        </para>
       </listitem>
 

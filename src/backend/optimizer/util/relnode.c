@@ -99,6 +99,8 @@ build_simple_rel(PlannerInfo *root, int relid, RelOptKind reloptkind)
 	rel->relids = bms_make_singleton(relid);
 	rel->rows = 0;
 	rel->width = 0;
+	/* cheap startup cost is interesting iff not all tuples to be retrieved */
+	rel->consider_startup = (root->tuple_fraction > 0);
 	rel->reltargetlist = NIL;
 	rel->pathlist = NIL;
 	rel->ppilist = NIL;
@@ -117,6 +119,7 @@ build_simple_rel(PlannerInfo *root, int relid, RelOptKind reloptkind)
 	rel->allvisfrac = 0;
 	rel->subplan = NULL;
 	rel->subroot = NULL;
+	rel->subplan_params = NIL;
 	rel->fdwroutine = NULL;
 	rel->fdw_private = NULL;
 	rel->baserestrictinfo = NIL;
@@ -354,6 +357,8 @@ build_join_rel(PlannerInfo *root,
 	joinrel->relids = bms_copy(joinrelids);
 	joinrel->rows = 0;
 	joinrel->width = 0;
+	/* cheap startup cost is interesting iff not all tuples to be retrieved */
+	joinrel->consider_startup = (root->tuple_fraction > 0);
 	joinrel->reltargetlist = NIL;
 	joinrel->pathlist = NIL;
 	joinrel->ppilist = NIL;
@@ -375,6 +380,7 @@ build_join_rel(PlannerInfo *root,
 	joinrel->allvisfrac = 0;
 	joinrel->subplan = NULL;
 	joinrel->subroot = NULL;
+	joinrel->subplan_params = NIL;
 	joinrel->fdwroutine = NULL;
 	joinrel->fdw_private = NULL;
 	joinrel->baserestrictinfo = NIL;
