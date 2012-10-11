@@ -99,7 +99,8 @@ static HTSU_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple,
 						LockTupleMode mode);
 static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 					   uint16 *new_infomask2);
-static TransactionId XmaxGetUpdateXid(TransactionId xmax, uint16 t_infomask);
+static TransactionId MultiXactIdGetUpdateXid(TransactionId xmax,
+						uint16 t_infomask);
 static void MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 				int *remaining, uint16 infomask);
 static bool ConditionalMultiXactIdWait(MultiXactId multi,
@@ -4430,7 +4431,8 @@ l5:
 		if (!MultiXactIdIsRunning(xmax))
 		{
 			if ((old_infomask & HEAP_XMAX_LOCK_ONLY) ||
-				TransactionIdDidAbort(XmaxGetUpdateXid(xmax, old_infomask)))
+				TransactionIdDidAbort(MultiXactIdGetUpdateXid(xmax,
+															  old_infomask)))
 			{
 				/*
 				 * Reset these bits and let the conditional block above handle
@@ -5035,14 +5037,14 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 }
 
 /*
- * XmaxGetUpdateXid
+ * MultiXactIdGetUpdateXid
  *
  * Given a multixact Xmax and corresponding infomask, which does not have the
  * HEAP_XMAX_LOCK_ONLY bit set, obtain and return the Xid of the updating
  * transaction.
  */
 static TransactionId
-XmaxGetUpdateXid(TransactionId xmax, uint16 t_infomask)
+MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask)
 {
 	TransactionId	update_xact = InvalidTransactionId;
 	MultiXactMember	*members;
@@ -5103,8 +5105,8 @@ XmaxGetUpdateXid(TransactionId xmax, uint16 t_infomask)
 TransactionId
 HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 {
-	return XmaxGetUpdateXid(HeapTupleHeaderGetRawXmax(tuple),
-							tuple->t_infomask);
+	return MultiXactIdGetUpdateXid(HeapTupleHeaderGetRawXmax(tuple),
+						   		   tuple->t_infomask);
 }
 
 /*
