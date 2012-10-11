@@ -781,6 +781,13 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 		if (TransactionIdDidCommit(xmax))
 		{
 #if 0
+			/*
+			 * The idea here is to remove the IS_MULTI bit, and replace the
+			 * xmax with the updater's Xid.  However, we can't really do it:
+			 * modifying the Xmax is not allowed under our buffer locking
+			 * rules, unless we have an exclusive lock; but we don't know that
+			 * we have it.  So the multi needs to remain in place :-(
+			 */
 			ResetMultiHintBit(tuple, buffer, xmax, true);
 #endif
 			return HeapTupleUpdated;
@@ -1386,6 +1393,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 			if (!TransactionIdPrecedes(xmax, OldestXmin))
 			{
 #if 0
+				/* See comments above about why this is unsafe */
 				ResetMultiHintBit(tuple, buffer, xmax, true);
 #endif
 				return HEAPTUPLE_RECENTLY_DEAD;
