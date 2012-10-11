@@ -2449,7 +2449,7 @@ compute_infobits(uint16 infomask, uint16 infomask2)
 		((infomask & HEAP_XMAX_LOCK_ONLY) != 0 ? XLHL_XMAX_LOCK_ONLY : 0) |
 		((infomask & HEAP_XMAX_EXCL_LOCK) != 0 ? XLHL_XMAX_EXCL_LOCK : 0) |
 		((infomask & HEAP_XMAX_KEYSHR_LOCK) != 0 ? XLHL_XMAX_KEYSHR_LOCK : 0) |
-		((infomask2 & HEAP_UPDATE_KEY_REVOKED) != 0 ?
+		((infomask2 & HEAP_KEYS_UPDATED) != 0 ?
 		 XLHL_UPDATE_KEY_REVOKED : 0);
 }
 
@@ -2703,7 +2703,7 @@ l1:
 
 	/* store transaction information of xact deleting the tuple */
 	tp.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
-	tp.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+	tp.t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 	tp.t_data->t_infomask |= new_infomask;
 	tp.t_data->t_infomask2 |= new_infomask2;
 	HeapTupleHeaderClearHotUpdated(tp.t_data);
@@ -3293,7 +3293,7 @@ l2:
 	{
 		/* Clear obsolete visibility flags ... */
 		oldtup.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
-		oldtup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+		oldtup.t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 		HeapTupleClearHotUpdated(&oldtup);
 		/* ... and store info about transaction updating this tuple */
 		Assert(TransactionIdIsValid(xmax_old_tuple));
@@ -3451,7 +3451,7 @@ l2:
 	{
 		/* Clear obsolete visibility flags ... */
 		oldtup.t_data->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
-		oldtup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+		oldtup.t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 		/* ... and store info about transaction updating this tuple */
 		Assert(TransactionIdIsValid(xmax_old_tuple));
 		HeapTupleHeaderSetXmax(oldtup.t_data, xmax_old_tuple);
@@ -3896,7 +3896,7 @@ l3:
 		 * which case we would restart this loop above.
 		 */
 		if ((mode == LockTupleKeyShare) &&
-			!(infomask2 & HEAP_UPDATE_KEY_REVOKED))
+			!(infomask2 & HEAP_KEYS_UPDATED))
 		{
 			bool	updated;
 
@@ -3928,7 +3928,7 @@ l3:
 			 * need to follow the update chain to lock the new versions.
 			 */
 			if (!HeapTupleHeaderIsOnlyLocked(tuple->t_data) &&
-				((tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED) ||
+				((tuple->t_data->t_infomask2 & HEAP_KEYS_UPDATED) ||
 				 !updated))
 				goto l3;
 			require_sleep = false;
@@ -4251,7 +4251,7 @@ failed:
 	 * we would break the HOT chain.
 	 */
 	tuple->t_data->t_infomask &= ~HEAP_XMAX_BITS;
-	tuple->t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+	tuple->t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 	tuple->t_data->t_infomask |= new_infomask;
 	tuple->t_data->t_infomask2 |= new_infomask2;
 	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
@@ -4371,7 +4371,7 @@ l5:
 		{
 			new_xmax = add_to_xmax;
 			if (mode == LockTupleKeyUpdate)
-				new_infomask2 |= HEAP_UPDATE_KEY_REVOKED;
+				new_infomask2 |= HEAP_KEYS_UPDATED;
 		}
 		else
 		{
@@ -4395,7 +4395,7 @@ l5:
 				case LockTupleKeyUpdate:
 					new_xmax = add_to_xmax;
 					new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
-					new_infomask2 |= HEAP_UPDATE_KEY_REVOKED;
+					new_infomask2 |= HEAP_KEYS_UPDATED;
 					break;
 				default:
 					new_xmax = InvalidTransactionId;	/* silence compiler */
@@ -4459,7 +4459,7 @@ l5:
 		MultiXactStatus		status;
 		MultiXactStatus		new_status;
 
-		if (old_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+		if (old_infomask2 & HEAP_KEYS_UPDATED)
 			status = MultiXactStatusKeyUpdate;
 		else
 			status = MultiXactStatusUpdate;
@@ -4489,7 +4489,7 @@ l5:
 				status = MultiXactStatusForKeyShare;
 			else if (old_infomask & HEAP_XMAX_EXCL_LOCK)
 			{
-				if (old_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+				if (old_infomask2 & HEAP_KEYS_UPDATED)
 					status = MultiXactStatusForKeyUpdate;
 				else
 					status = MultiXactStatusForUpdate;
@@ -4511,7 +4511,7 @@ l5:
 		else
 		{
 			/* it's an update, but which kind? */
-			if (old_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+			if (old_infomask2 & HEAP_KEYS_UPDATED)
 				status = MultiXactStatusKeyUpdate;
 			else
 				status = MultiXactStatusUpdate;
@@ -4554,7 +4554,7 @@ l5:
 		MultiXactStatus		status;
 		MultiXactStatus		new_status;
 
-		if (old_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+		if (old_infomask2 & HEAP_KEYS_UPDATED)
 			status = MultiXactStatusKeyUpdate;
 		else
 			status = MultiXactStatusUpdate;
@@ -4637,7 +4637,7 @@ l4:
 	 * updates that didn't touch the key, we can just plough ahead.
 	 */
 	if (!(old_infomask & HEAP_XMAX_INVALID) &&
-		(mytup.t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED))
+		(mytup.t_data->t_infomask2 & HEAP_KEYS_UPDATED))
 	{
 		TransactionId	update_xid;
 
@@ -4677,7 +4677,7 @@ l4:
 	/* ... and set them */
 	HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
 	mytup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
-	mytup.t_data->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+	mytup.t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 	mytup.t_data->t_infomask |= new_infomask;
 	mytup.t_data->t_infomask2 |= new_infomask2;
 
@@ -4932,12 +4932,12 @@ heap_freeze_tuple(HeapTupleHeader tuple, TransactionId cutoff_xid,
 		/*
 		 * The tuple might be marked either XMAX_INVALID or XMAX_COMMITTED
 		 * + LOCKED.  Normalize to INVALID just to be sure no one gets
-		 * confused.  Also get rid of the HEAP_UPDATE_KEY_REVOKED bit.
+		 * confused.  Also get rid of the HEAP_KEYS_UPDATED bit.
 		 */
 		tuple->t_infomask &= ~HEAP_XMAX_BITS;
 		tuple->t_infomask |= HEAP_XMAX_INVALID;
 		HeapTupleHeaderClearHotUpdated(tuple);
-		tuple->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+		tuple->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 		changed = true;
 	}
 
@@ -5013,7 +5013,7 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 				break;
 			case MultiXactStatusForKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
-				bits2 |= HEAP_UPDATE_KEY_REVOKED;
+				bits2 |= HEAP_KEYS_UPDATED;
 				break;
 			case MultiXactStatusUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
@@ -5021,7 +5021,7 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 				break;
 			case MultiXactStatusKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
-				bits2 |= HEAP_UPDATE_KEY_REVOKED;
+				bits2 |= HEAP_KEYS_UPDATED;
 				has_update = true;
 				break;
 		}
@@ -6070,7 +6070,7 @@ fix_infomask_from_infobits(uint8 infobits, uint16 *infomask, uint16 *infomask2)
 {
 	*infomask &= ~(HEAP_XMAX_IS_MULTI | HEAP_XMAX_LOCK_ONLY |
 				   HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_EXCL_LOCK);
-	*infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+	*infomask2 &= ~HEAP_KEYS_UPDATED;
 
 	if (infobits & XLHL_XMAX_IS_MULTI)
 		*infomask |= HEAP_XMAX_IS_MULTI;
@@ -6082,7 +6082,7 @@ fix_infomask_from_infobits(uint8 infobits, uint16 *infomask, uint16 *infomask2)
 		*infomask |= HEAP_XMAX_KEYSHR_LOCK;
 
 	if (infobits & XLHL_UPDATE_KEY_REVOKED)
-		*infomask2 |= HEAP_UPDATE_KEY_REVOKED;
+		*infomask2 |= HEAP_KEYS_UPDATED;
 }
 
 static void
@@ -6137,7 +6137,7 @@ heap_xlog_delete(XLogRecPtr lsn, XLogRecord *record)
 	htup = (HeapTupleHeader) PageGetItem(page, lp);
 
 	htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
-	htup->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+	htup->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 	HeapTupleHeaderClearHotUpdated(htup);
 	fix_infomask_from_infobits(xlrec->infobits_set,
 							   &htup->t_infomask, &htup->t_infomask2);
@@ -6488,7 +6488,7 @@ heap_xlog_update(XLogRecPtr lsn, XLogRecord *record, bool hot_update)
 	htup = (HeapTupleHeader) PageGetItem(page, lp);
 
 	htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
-	htup->t_infomask2 &= ~HEAP_UPDATE_KEY_REVOKED;
+	htup->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 	if (hot_update)
 		HeapTupleHeaderSetHotUpdated(htup);
 	else

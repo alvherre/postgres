@@ -206,8 +206,8 @@ struct HeapTupleHeaderData
  */
 #define HEAP_NATTS_MASK			0x07FF	/* 11 bits for number of attributes */
 /* bits 0x1800 are available */
-#define HEAP_UPDATE_KEY_REVOKED	0x2000	/* tuple was updated and key cols modified,
-										 * or tuple deleted */
+#define HEAP_KEYS_UPDATED		0x2000	/* tuple was updated and key cols
+										 * modified, or tuple deleted */
 #define HEAP_HOT_UPDATED		0x4000	/* tuple was HOT-updated */
 #define HEAP_ONLY_TUPLE			0x8000	/* this is heap-only tuple */
 

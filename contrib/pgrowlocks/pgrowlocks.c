@@ -260,7 +260,7 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				}
 				else
 				{
-					if (tuple->t_data->t_infomask2 & HEAP_UPDATE_KEY_REVOKED)
+					if (tuple->t_data->t_infomask2 & HEAP_KEYS_UPDATED)
 						snprintf(values[Atnum_modes], NCHARS, "{Key Update}");
 					else
 						snprintf(values[Atnum_modes], NCHARS, "{Update}");
