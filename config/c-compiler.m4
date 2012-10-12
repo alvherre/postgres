@@ -20,7 +20,7 @@ fi])# PGAC_C_SIGNED
 # PGAC_C_INLINE
 # -------------
 # Check if the C compiler understands inline functions.
-# Defines: inline, USE_INLINE
+# Defines: inline, PG_USE_INLINE
 AC_DEFUN([PGAC_C_INLINE],
 [AC_C_INLINE
 AC_CACHE_CHECK([for quiet inline (no complaint if unreferenced)], pgac_cv_c_inline_quietly,
@@ -33,7 +33,7 @@ AC_CACHE_CHECK([for quiet inline (no complaint if unreferenced)], pgac_cv_c_inli
     ac_c_werror_flag=$pgac_c_inline_save_werror
   fi])
 if test "$pgac_cv_c_inline_quietly" != no; then
-  AC_DEFINE_UNQUOTED([USE_INLINE], 1,
+  AC_DEFINE_UNQUOTED([PG_USE_INLINE], 1,
     [Define to 1 if "static inline" works without unwanted warnings from ]
     [compilations where static inline functions are defined but not called.])
 fi
@@ -118,6 +118,46 @@ AC_DEFINE(HAVE_FUNCNAME__FUNCTION, 1,
           [Define to 1 if your compiler understands __FUNCTION__.])
 fi
 fi])# PGAC_C_FUNCNAME_SUPPORT
+
+
+
+# PGAC_C_STATIC_ASSERT
+# -----------------------
+# Check if the C compiler understands _Static_assert(),
+# and define HAVE__STATIC_ASSERT if so.
+#
+# We actually check the syntax ({ _Static_assert(...) }), because we need
+# gcc-style compound expressions to be able to wrap the thing into macros.
+AC_DEFUN([PGAC_C_STATIC_ASSERT],
+[AC_CACHE_CHECK(for _Static_assert, pgac_cv__static_assert,
+[AC_TRY_LINK([],
+[({ _Static_assert(1, "foo"); })],
+[pgac_cv__static_assert=yes],
+[pgac_cv__static_assert=no])])
+if test x"$pgac_cv__static_assert" = xyes ; then
+AC_DEFINE(HAVE__STATIC_ASSERT, 1,
+          [Define to 1 if your compiler understands _Static_assert.])
+fi])# PGAC_C_STATIC_ASSERT
+
+
+
+# PGAC_C_TYPES_COMPATIBLE
+# -----------------------
+# Check if the C compiler understands __builtin_types_compatible_p,
+# and define HAVE__BUILTIN_TYPES_COMPATIBLE_P if so.
+#
+# We check usage with __typeof__, though it's unlikely any compiler would
+# have the former and not the latter.
+AC_DEFUN([PGAC_C_TYPES_COMPATIBLE],
+[AC_CACHE_CHECK(for __builtin_types_compatible_p, pgac_cv__types_compatible,
+[AC_TRY_COMPILE([],
+[ int x; static int y[__builtin_types_compatible_p(__typeof__(x), int)]; ],
+[pgac_cv__types_compatible=yes],
+[pgac_cv__types_compatible=no])])
+if test x"$pgac_cv__types_compatible" = xyes ; then
+AC_DEFINE(HAVE__BUILTIN_TYPES_COMPATIBLE_P, 1,
+          [Define to 1 if your compiler understands __builtin_types_compatible_p.])
+fi])# PGAC_C_TYPES_COMPATIBLE
 
 
 

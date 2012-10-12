@@ -130,6 +130,11 @@ int			foreign_keys = 0;
 int			unlogged_tables = 0;
 
 /*
+ * log sampling rate (1.0 = log everything, 0.0 = option not given)
+ */
+double		sample_rate = 0.0;
+
+/*
  * tablespace selection
  */
 char	   *tablespace = NULL;
@@ -295,10 +300,13 @@ static void *threadRun(void *arg);
  * routines to check mem allocations and fail noisily.
  */
 static void *
-xmalloc(size_t size)
+pg_malloc(size_t size)
 {
 	void	   *result;
 
+	/* Avoid unportable behavior of malloc(0) */
+	if (size == 0)
+		size = 1;
 	result = malloc(size);
 	if (!result)
 	{
@@ -309,10 +317,13 @@ xmalloc(size_t size)
 }
 
 static void *
-xrealloc(void *ptr, size_t size)
+pg_realloc(void *ptr, size_t size)
 {
 	void	   *result;
 
+	/* Avoid unportable behavior of realloc(NULL, 0) */
+	if (ptr == NULL && size == 0)
+		size = 1;
 	result = realloc(ptr, size);
 	if (!result)
 	{
@@ -323,7 +334,7 @@ xrealloc(void *ptr, size_t size)
 }
 
 static char *
-xstrdup(const char *s)
+pg_strdup(const char *s)
 {
 	char	   *result;
 
@@ -364,6 +375,8 @@ usage(void)
 		   "  -f FILENAME  read transaction script from FILENAME\n"
 		   "  -j NUM       number of threads (default: 1)\n"
 		   "  -l           write transaction times to log file\n"
+		   "  --sampling-rate NUM\n"
+		   "               fraction of transactions to log (e.g. 0.01 for 1%% sample)\n"
 		   "  -M simple|extended|prepared\n"
 		   "               protocol for submitting queries to server (default: simple)\n"
 		   "  -n           do not run VACUUM before tests\n"
@@ -574,17 +587,17 @@ putVariable(CState *st, const char *context, char *name, char *value)
 		}
 
 		if (st->variables)
-			newvars = (Variable *) xrealloc(st->variables,
+			newvars = (Variable *) pg_realloc(st->variables,
 									(st->nvariables + 1) * sizeof(Variable));
 		else
-			newvars = (Variable *) xmalloc(sizeof(Variable));
+			newvars = (Variable *) pg_malloc(sizeof(Variable));
 
 		st->variables = newvars;
 
 		var = &newvars[st->nvariables];
 
-		var->name = xstrdup(name);
-		var->value = xstrdup(value);
+		var->name = pg_strdup(name);
+		var->value = pg_strdup(value);
 
 		st->nvariables++;
 
@@ -596,7 +609,7 @@ putVariable(CState *st, const char *context, char *name, char *value)
 		char	   *val;
 
 		/* dup then free, in case value is pointing at this variable */
-		val = xstrdup(value);
+		val = pg_strdup(value);
 
 		free(var->value);
 		var->value = val;
@@ -618,7 +631,7 @@ parseVariable(const char *sql, int *eaten)
 	if (i == 1)
 		return NULL;
 
-	name = xmalloc(i);
+	name = pg_malloc(i);
 	memcpy(name, &sql[1], i - 1);
 	name[i - 1] = '\0';
 
@@ -635,7 +648,7 @@ replaceVariable(char **sql, char *param, int len, char *value)
 	{
 		size_t		offset = param - *sql;
 
-		*sql = xrealloc(*sql, strlen(*sql) - len + valueln + 1);
+		*sql = pg_realloc(*sql, strlen(*sql) - len + valueln + 1);
 		param = *sql + offset;
 	}
 
@@ -877,21 +890,30 @@ top:
 			instr_time	diff;
 			double		usec;
 
-			INSTR_TIME_SET_CURRENT(now);
-			diff = now;
-			INSTR_TIME_SUBTRACT(diff, st->txn_begin);
-			usec = (double) INSTR_TIME_GET_MICROSEC(diff);
+			/*
+			 * write the log entry if this row belongs to the random sample,
+			 * or no sampling rate was given which means log everything.
+			 */
+			if (sample_rate == 0.0 ||
+				pg_erand48(thread->random_state) <= sample_rate)
+			{
+
+				INSTR_TIME_SET_CURRENT(now);
+				diff = now;
+				INSTR_TIME_SUBTRACT(diff, st->txn_begin);
+				usec = (double) INSTR_TIME_GET_MICROSEC(diff);
 
 #ifndef WIN32
-			/* This is more than we really ought to know about instr_time */
-			fprintf(logfile, "%d %d %.0f %d %ld %ld\n",
-					st->id, st->cnt, usec, st->use_file,
-					(long) now.tv_sec, (long) now.tv_usec);
+				/* This is more than we really ought to know about instr_time */
+				fprintf(logfile, "%d %d %.0f %d %ld %ld\n",
+						st->id, st->cnt, usec, st->use_file,
+						(long) now.tv_sec, (long) now.tv_usec);
 #else
-			/* On Windows, instr_time doesn't provide a timestamp anyway */
-			fprintf(logfile, "%d %d %.0f %d 0 0\n",
-					st->id, st->cnt, usec, st->use_file);
+				/* On Windows, instr_time doesn't provide a timestamp anyway */
+				fprintf(logfile, "%d %d %.0f %d 0 0\n",
+						st->id, st->cnt, usec, st->use_file);
 #endif
+			}
 		}
 
 		if (commands[st->state]->type == SQL_COMMAND)
@@ -971,7 +993,7 @@ top:
 		{
 			char	   *sql;
 
-			sql = xstrdup(command->argv[0]);
+			sql = pg_strdup(command->argv[0]);
 			sql = assignVariables(st, sql);
 
 			if (debug)
@@ -1496,7 +1518,7 @@ parseQuery(Command *cmd, const char *raw_sql)
 	char	   *sql,
 			   *p;
 
-	sql = xstrdup(raw_sql);
+	sql = pg_strdup(raw_sql);
 	cmd->argc = 1;
 
 	p = sql;
@@ -1558,8 +1580,8 @@ process_commands(char *buf)
 		return NULL;
 
 	/* Allocate and initialize Command structure */
-	my_commands = (Command *) xmalloc(sizeof(Command));
-	my_commands->line = xstrdup(buf);
+	my_commands = (Command *) pg_malloc(sizeof(Command));
+	my_commands->line = pg_strdup(buf);
 	my_commands->command_num = num_commands++;
 	my_commands->type = 0;		/* until set */
 	my_commands->argc = 0;
@@ -1573,7 +1595,7 @@ process_commands(char *buf)
 
 		while (tok != NULL)
 		{
-			my_commands->argv[j++] = xstrdup(tok);
+			my_commands->argv[j++] = pg_strdup(tok);
 			my_commands->argc++;
 			tok = strtok(NULL, delim);
 		}
@@ -1675,7 +1697,7 @@ process_commands(char *buf)
 		switch (querymode)
 		{
 			case QUERY_SIMPLE:
-				my_commands->argv[0] = xstrdup(p);
+				my_commands->argv[0] = pg_strdup(p);
 				my_commands->argc++;
 				break;
 			case QUERY_EXTENDED:
@@ -1709,7 +1731,7 @@ process_file(char *filename)
 	}
 
 	alloc_num = COMMANDS_ALLOC_NUM;
-	my_commands = (Command **) xmalloc(sizeof(Command *) * alloc_num);
+	my_commands = (Command **) pg_malloc(sizeof(Command *) * alloc_num);
 
 	if (strcmp(filename, "-") == 0)
 		fd = stdin;
@@ -1735,7 +1757,7 @@ process_file(char *filename)
 		if (lineno >= alloc_num)
 		{
 			alloc_num += COMMANDS_ALLOC_NUM;
-			my_commands = xrealloc(my_commands, sizeof(Command *) * alloc_num);
+			my_commands = pg_realloc(my_commands, sizeof(Command *) * alloc_num);
 		}
 	}
 	fclose(fd);
@@ -1758,7 +1780,7 @@ process_builtin(char *tb)
 	int			alloc_num;
 
 	alloc_num = COMMANDS_ALLOC_NUM;
-	my_commands = (Command **) xmalloc(sizeof(Command *) * alloc_num);
+	my_commands = (Command **) pg_malloc(sizeof(Command *) * alloc_num);
 
 	lineno = 0;
 
@@ -1789,7 +1811,7 @@ process_builtin(char *tb)
 		if (lineno >= alloc_num)
 		{
 			alloc_num += COMMANDS_ALLOC_NUM;
-			my_commands = xrealloc(my_commands, sizeof(Command *) * alloc_num);
+			my_commands = pg_realloc(my_commands, sizeof(Command *) * alloc_num);
 		}
 	}
 
@@ -1920,6 +1942,7 @@ main(int argc, char **argv)
 		{"index-tablespace", required_argument, NULL, 3},
 		{"tablespace", required_argument, NULL, 2},
 		{"unlogged-tables", no_argument, &unlogged_tables, 1},
+		{"sampling-rate", required_argument, NULL, 4},
 		{NULL, 0, NULL, 0}
 	};
 
@@ -1961,7 +1984,7 @@ main(int argc, char **argv)
 	else if ((env = getenv("PGUSER")) != NULL && *env != '\0')
 		login = env;
 
-	state = (CState *) xmalloc(sizeof(CState));
+	state = (CState *) pg_malloc(sizeof(CState));
 	memset(state, 0, sizeof(CState));
 
 	while ((c = getopt_long(argc, argv, "ih:nvp:dSNc:j:Crs:t:T:U:lf:D:F:M:", long_options, &optindex)) != -1)
@@ -2125,6 +2148,14 @@ main(int argc, char **argv)
 			case 3:				/* index-tablespace */
 				index_tablespace = optarg;
 				break;
+			case 4:
+				sample_rate = atof(optarg);
+				if (sample_rate <= 0.0 || sample_rate > 1.0)
+				{
+					fprintf(stderr, "invalid sampling rate: %f\n", sample_rate);
+					exit(1);
+				}
+				break;
 			default:
 				fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
 				exit(1);
@@ -2160,6 +2191,13 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
+	/* --sampling-rate may be used only with -l */
+	if (sample_rate > 0.0 && !use_log)
+	{
+		fprintf(stderr, "log sampling rate is allowed only when logging transactions (-l) \n");
+		exit(1);
+	}
+
 	/*
 	 * is_latencies only works with multiple threads in thread-based
 	 * implementations, not fork-based ones, because it supposes that the
@@ -2184,7 +2222,7 @@ main(int argc, char **argv)
 
 	if (nclients > 1)
 	{
-		state = (CState *) xrealloc(state, sizeof(CState) * nclients);
+		state = (CState *) pg_realloc(state, sizeof(CState) * nclients);
 		memset(state + 1, 0, sizeof(CState) * (nclients - 1));
 
 		/* copy any -D switch values to all clients */
@@ -2308,7 +2346,7 @@ main(int argc, char **argv)
 	}
 
 	/* set up thread data structures */
-	threads = (TState *) xmalloc(sizeof(TState) * nthreads);
+	threads = (TState *) pg_malloc(sizeof(TState) * nthreads);
 	for (i = 0; i < nthreads; i++)
 	{
 		TState	   *thread = &threads[i];
@@ -2326,9 +2364,9 @@ main(int argc, char **argv)
 			int			t;
 
 			thread->exec_elapsed = (instr_time *)
-				xmalloc(sizeof(instr_time) * num_commands);
+				pg_malloc(sizeof(instr_time) * num_commands);
 			thread->exec_count = (int *)
-				xmalloc(sizeof(int) * num_commands);
+				pg_malloc(sizeof(int) * num_commands);
 
 			for (t = 0; t < num_commands; t++)
 			{
@@ -2419,7 +2457,7 @@ threadRun(void *arg)
 	int			remains = nstate;		/* number of remaining clients */
 	int			i;
 
-	result = xmalloc(sizeof(TResult));
+	result = pg_malloc(sizeof(TResult));
 	INSTR_TIME_SET_ZERO(result->conn_time);
 
 	/* open log file if requested */
@@ -2632,7 +2670,7 @@ pthread_create(pthread_t *thread,
 	fork_pthread *th;
 	void	   *ret;
 
-	th = (fork_pthread *) xmalloc(sizeof(fork_pthread));
+	th = (fork_pthread *) pg_malloc(sizeof(fork_pthread));
 	if (pipe(th->pipes) < 0)
 	{
 		free(th);
@@ -2680,7 +2718,7 @@ pthread_join(pthread_t th, void **thread_return)
 	if (thread_return != NULL)
 	{
 		/* assume result is TResult */
-		*thread_return = xmalloc(sizeof(TResult));
+		*thread_return = pg_malloc(sizeof(TResult));
 		if (read(th->pipes[0], *thread_return, sizeof(TResult)) != sizeof(TResult))
 		{
 			free(*thread_return);
@@ -2748,7 +2786,7 @@ pthread_create(pthread_t *thread,
 	int			save_errno;
 	win32_pthread *th;
 
-	th = (win32_pthread *) xmalloc(sizeof(win32_pthread));
+	th = (win32_pthread *) pg_malloc(sizeof(win32_pthread));
 	th->routine = start_routine;
 	th->arg = arg;
 	th->result = NULL;

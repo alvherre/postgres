@@ -21,6 +21,7 @@ static void check_for_prepared_transactions(ClusterInfo *cluster);
 static void check_for_isn_and_int8_passing_mismatch(ClusterInfo *cluster);
 static void check_for_reg_data_type_usage(ClusterInfo *cluster);
 static void get_bin_version(ClusterInfo *cluster);
+static char *get_canonical_locale_name(int category, const char *locale);
 
 
 /*
@@ -359,8 +360,23 @@ set_locale_and_encoding(ClusterInfo *cluster)
 		i_datcollate = PQfnumber(res, "datcollate");
 		i_datctype = PQfnumber(res, "datctype");
 
-		ctrl->lc_collate = pg_strdup(PQgetvalue(res, 0, i_datcollate));
-		ctrl->lc_ctype = pg_strdup(PQgetvalue(res, 0, i_datctype));
+		if (GET_MAJOR_VERSION(cluster->major_version) < 902)
+		{
+			/*
+			 *	Pre-9.2 did not canonicalize the supplied locale names
+			 *	to match what the system returns, while 9.2+ does, so
+			 *	convert pre-9.2 to match.
+			 */
+			ctrl->lc_collate = get_canonical_locale_name(LC_COLLATE,
+							   pg_strdup(PQgetvalue(res, 0, i_datcollate)));
+			ctrl->lc_ctype = get_canonical_locale_name(LC_CTYPE,
+							   pg_strdup(PQgetvalue(res, 0, i_datctype)));
+ 		}
+		else
+		{
+	 		ctrl->lc_collate = pg_strdup(PQgetvalue(res, 0, i_datcollate));
+			ctrl->lc_ctype = pg_strdup(PQgetvalue(res, 0, i_datctype));
+		}
 
 		PQclear(res);
 	}
@@ -390,16 +406,23 @@ static void
 check_locale_and_encoding(ControlData *oldctrl,
 						  ControlData *newctrl)
 {
-	/* These are often defined with inconsistent case, so use pg_strcasecmp(). */
+	/*
+	 *	These are often defined with inconsistent case, so use pg_strcasecmp().
+	 *	They also often use inconsistent hyphenation, which we cannot fix, e.g.
+	 *	UTF-8 vs. UTF8, so at least we display the mismatching values.
+	 */
 	if (pg_strcasecmp(oldctrl->lc_collate, newctrl->lc_collate) != 0)
 		pg_log(PG_FATAL,
-			   "old and new cluster lc_collate values do not match\n");
+			   "lc_collate cluster values do not match:  old \"%s\", new \"%s\"\n",
+			   oldctrl->lc_collate, newctrl->lc_collate);
 	if (pg_strcasecmp(oldctrl->lc_ctype, newctrl->lc_ctype) != 0)
 		pg_log(PG_FATAL,
-			   "old and new cluster lc_ctype values do not match\n");
+			   "lc_ctype cluster values do not match:  old \"%s\", new \"%s\"\n",
+			   oldctrl->lc_ctype, newctrl->lc_ctype);
 	if (pg_strcasecmp(oldctrl->encoding, newctrl->encoding) != 0)
 		pg_log(PG_FATAL,
-			   "old and new cluster encoding values do not match\n");
+			   "encoding cluster values do not match:  old \"%s\", new \"%s\"\n",
+			   oldctrl->encoding, newctrl->encoding);
 }
 
 
@@ -477,7 +500,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %sthis script and run:%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "echo %s    vacuumdb --all %s%s\n", ECHO_QUOTE,
+	fprintf(script, "echo %s    \"%s/vacuumdb\" --all %s%s\n", ECHO_QUOTE, new_cluster.bindir,
 	/* Did we copy the free space files? */
 			(GET_MAJOR_VERSION(old_cluster.major_version) >= 804) ?
 			"--analyze-only" : "--analyze", ECHO_QUOTE);
@@ -498,7 +521,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %s--------------------------------------------------%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "vacuumdb --all --analyze-only\n");
+	fprintf(script, "\"%s/vacuumdb\" --all --analyze-only\n", new_cluster.bindir);
 	fprintf(script, "echo%s\n", ECHO_BLANK);
 	fprintf(script, "echo %sThe server is now available with minimal optimizer statistics.%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
@@ -519,7 +542,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %s---------------------------------------------------%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "vacuumdb --all --analyze-only\n");
+	fprintf(script, "\"%s/vacuumdb\" --all --analyze-only\n", new_cluster.bindir);
 	fprintf(script, "echo%s\n\n", ECHO_BLANK);
 
 #ifndef WIN32
@@ -532,7 +555,7 @@ create_script_for_cluster_analyze(char **analyze_script_file_name)
 			ECHO_QUOTE, ECHO_QUOTE);
 	fprintf(script, "echo %s-------------------------------------------------------------%s\n",
 			ECHO_QUOTE, ECHO_QUOTE);
-	fprintf(script, "vacuumdb --all %s\n",
+	fprintf(script, "\"%s/vacuumdb\" --all %s\n", new_cluster.bindir,
 	/* Did we copy the free space files? */
 			(GET_MAJOR_VERSION(old_cluster.major_version) >= 804) ?
 			"--analyze-only" : "--analyze");
@@ -930,4 +953,41 @@ get_bin_version(ClusterInfo *cluster)
 		pg_log(PG_FATAL, "could not get version from %s\n", cmd);
 
 	cluster->bin_version = (pre_dot * 100 + post_dot) * 100;
+}
+
+
+/*
+ * get_canonical_locale_name
+ *
+ * Send the locale name to the system, and hope we get back a canonical
+ * version.  This should match the backend's check_locale() function.
+ */
+static char *
+get_canonical_locale_name(int category, const char *locale)
+{
+	char	   *save;
+	char	   *res;
+
+	save = setlocale(category, NULL);
+	if (!save)
+        pg_log(PG_FATAL, "failed to get the current locale\n");
+
+	/* 'save' may be pointing at a modifiable scratch variable, so copy it. */
+	save = pg_strdup(save);
+
+	/* set the locale with setlocale, to see if it accepts it. */
+	res = setlocale(category, locale);
+
+	if (!res)
+        pg_log(PG_FATAL, "failed to get system local name for \"%s\"\n", res);
+
+	res = pg_strdup(res);
+
+	/* restore old value. */
+	if (!setlocale(category, save))
+        pg_log(PG_FATAL, "failed to restore old locale \"%s\"\n", save);
+
+	free(save);
+
+	return res;
 }

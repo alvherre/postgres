@@ -23,6 +23,8 @@
 #ifndef POSTGRES_EXT_H
 #define POSTGRES_EXT_H
 
+#include "pg_config_ext.h"
+
 /*
  * Object ID is a fundamental type in Postgres.
  */
@@ -36,6 +38,9 @@ typedef unsigned int Oid;
 
 #define OID_MAX  UINT_MAX
 /* you will need to include <limits.h> to use the above #define */
+
+/* Define a signed 64-bit integer type for use in client API declarations. */
+typedef PG_INT64_TYPE pg_int64;
 
 
 /*
@@ -56,4 +61,4 @@ typedef unsigned int Oid;
 #define PG_DIAG_SOURCE_LINE		'L'
 #define PG_DIAG_SOURCE_FUNCTION 'R'
 
-#endif
+#endif   /* POSTGRES_EXT_H */

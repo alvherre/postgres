@@ -40,7 +40,7 @@ IdentifierLookup plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
  *
  * In certain contexts it is desirable to prefer recognizing an unreserved
  * keyword over recognizing a variable name.  Those cases are handled in
- * gram.y using tok_is_keyword().
+ * pl_gram.y using tok_is_keyword().
  *
  * For the most part, the reserved keywords are those that start a PL/pgSQL
  * statement (and so would conflict with an assignment to a variable of the
@@ -55,7 +55,7 @@ IdentifierLookup plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
  *		 search is used to locate entries.
  *
  * Be careful not to put the same word in both lists.  Also be sure that
- * gram.y's unreserved_keyword production agrees with the second list.
+ * pl_gram.y's unreserved_keyword production agrees with the second list.
  */
 
 static const ScanKeyword reserved_keywords[] = {
@@ -408,6 +408,25 @@ plpgsql_push_back_token(int token)
 	auxdata.lloc = plpgsql_yylloc;
 	auxdata.leng = plpgsql_yyleng;
 	push_back_token(token, &auxdata);
+}
+
+/*
+ * Tell whether a token is an unreserved keyword.
+ *
+ * (If it is, its lowercased form was returned as the token value, so we
+ * do not need to offer that data here.)
+ */
+bool
+plpgsql_token_is_unreserved_keyword(int token)
+{
+	int			i;
+
+	for (i = 0; i < num_unreserved_keywords; i++)
+	{
+		if (unreserved_keywords[i].value == token)
+			return true;
+	}
+	return false;
 }
 
 /*

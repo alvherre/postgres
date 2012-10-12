@@ -183,9 +183,7 @@ PerformAuthentication(Port *port)
 
 	/*
 	 * In EXEC_BACKEND case, we didn't inherit the contents of pg_hba.conf
-	 * etcetera from the postmaster, and have to load them ourselves.  Note we
-	 * are loading them into the startup transaction's memory context, not
-	 * PostmasterContext, but that shouldn't matter.
+	 * etcetera from the postmaster, and have to load them ourselves.
 	 *
 	 * FIXME: [fork/exec] Ugh.	Is there a way around this overhead?
 	 */
@@ -199,7 +197,16 @@ PerformAuthentication(Port *port)
 		ereport(FATAL,
 				(errmsg("could not load pg_hba.conf")));
 	}
-	load_ident();
+
+	if (!load_ident())
+	{
+		/*
+		 * It is ok to continue if we fail to load the IDENT file, although it
+		 * means that you cannot log in using any of the authentication methods
+		 * that need a user name mapping. load_ident() already logged the
+		 * details of error to the log.
+		 */
+	}
 #endif
 
 	/*

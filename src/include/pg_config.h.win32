@@ -7,7 +7,7 @@
  * HAVE_CBRT, HAVE_FUNCNAME_FUNC, HAVE_GETOPT, HAVE_GETOPT_H, HAVE_INTTYPES_H,
  * HAVE_GETOPT_LONG, HAVE_LOCALE_T, HAVE_RINT, HAVE_STRINGS_H, HAVE_STRTOLL,
  * HAVE_STRTOULL, HAVE_STRUCT_OPTION, ENABLE_THREAD_SAFETY,
- * USE_INLINE, inline
+ * PG_USE_INLINE, inline
  */
 
 /* Define to the type of arg 1 of 'accept' */
@@ -526,6 +526,12 @@
 /* Define to 1 if you have the <winldap.h> header file. */
 /* #undef HAVE_WINLDAP_H */
 
+/* Define to 1 if your compiler understands __builtin_types_compatible_p. */
+/* #undef HAVE__BUILTIN_TYPES_COMPATIBLE_P */
+
+/* Define to 1 if your compiler understands _Static_assert. */
+/* #undef HAVE__STATIC_ASSERT */
+
 /* Define to the appropriate snprintf format for 64-bit ints, if any. */
 #define INT64_FORMAT "%lld"
 
@@ -555,6 +561,9 @@
 
 /* Define to the version of this package. */
 #define PACKAGE_VERSION "9.3devel"
+
+/* Define to the name of a signed 64-bit integer type. */
+#define PG_INT64_TYPE long long int
 
 /* PostgreSQL version as a string */
 #define PG_VERSION "9.3devel"
@@ -614,7 +623,7 @@
 
 /* Define to 1 if "static inline" works without unwanted warnings from
    compilations where static inline functions are defined but not called. */
-#define USE_INLINE 1
+#define PG_USE_INLINE 1
 
 /* Define to 1 if you want 64-bit integer timestamp and interval support.
    (--enable-integer-datetimes) */

@@ -44,25 +44,29 @@
 #ifndef C_H
 #define C_H
 
-/*
- * We have to include stdlib.h here because it defines many of these macros
- * on some platforms, and we only want our definitions used if stdlib.h doesn't
- * have its own.  The same goes for stddef and stdarg if present.
- */
+#include "postgres_ext.h"
+
+/* Must undef pg_config_ext.h symbols before including pg_config.h */
+#undef PG_INT64_TYPE
 
 #include "pg_config.h"
 #include "pg_config_manual.h"	/* must be after pg_config.h */
-#if !defined(WIN32) && !defined(__CYGWIN__)		/* win32 will include further
-												 * down */
+
+#if !defined(WIN32) && !defined(__CYGWIN__)	/* win32 includes further down */
 #include "pg_config_os.h"		/* must be before any system header files */
 #endif
-#include "postgres_ext.h"
 
 #if _MSC_VER >= 1400 || defined(HAVE_CRTDEFS_H)
 #define errcode __msvc_errcode
 #include <crtdefs.h>
 #undef errcode
 #endif
+
+/*
+ * We have to include stdlib.h here because it defines many of these macros
+ * on some platforms, and we only want our definitions used if stdlib.h doesn't
+ * have its own.  The same goes for stddef and stdarg if present.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -688,6 +692,79 @@ typedef NameData *Name;
 			*_start++ = 0; \
 	} while (0)
 
+
+/*
+ * Macros to support compile-time assertion checks.
+ *
+ * If the "condition" (a compile-time-constant expression) evaluates to false,
+ * throw a compile error using the "errmessage" (a string literal).
+ *
+ * gcc 4.6 and up supports _Static_assert(), but there are bizarre syntactic
+ * placement restrictions.  These macros make it safe to use as a statement
+ * or in an expression, respectively.
+ *
+ * Otherwise we fall back on a kluge that assumes the compiler will complain
+ * about a negative width for a struct bit-field.  This will not include a
+ * helpful error message, but it beats not getting an error at all.
+ */
+#ifdef HAVE__STATIC_ASSERT
+#define StaticAssertStmt(condition, errmessage) \
+	do { _Static_assert(condition, errmessage); } while(0)
+#define StaticAssertExpr(condition, errmessage) \
+	({ StaticAssertStmt(condition, errmessage); true; })
+#else /* !HAVE__STATIC_ASSERT */
+#define StaticAssertStmt(condition, errmessage) \
+	((void) sizeof(struct { int static_assert_failure : (condition) ? 1 : -1; }))
+#define StaticAssertExpr(condition, errmessage) \
+	StaticAssertStmt(condition, errmessage)
+#endif /* HAVE__STATIC_ASSERT */
+
+
+/*
+ * Compile-time checks that a variable (or expression) has the specified type.
+ *
+ * AssertVariableIsOfType() can be used as a statement.
+ * AssertVariableIsOfTypeMacro() is intended for use in macros, eg
+ *		#define foo(x) (AssertVariableIsOfTypeMacro(x, int), bar(x))
+ *
+ * If we don't have __builtin_types_compatible_p, we can still assert that
+ * the types have the same size.  This is far from ideal (especially on 32-bit
+ * platforms) but it provides at least some coverage.
+ */
+#ifdef HAVE__BUILTIN_TYPES_COMPATIBLE_P
+#define AssertVariableIsOfType(varname, typename) \
+	StaticAssertStmt(__builtin_types_compatible_p(__typeof__(varname), typename), \
+	CppAsString(varname) " does not have type " CppAsString(typename))
+#define AssertVariableIsOfTypeMacro(varname, typename) \
+	StaticAssertExpr(__builtin_types_compatible_p(__typeof__(varname), typename), \
+	CppAsString(varname) " does not have type " CppAsString(typename))
+#else /* !HAVE__BUILTIN_TYPES_COMPATIBLE_P */
+#define AssertVariableIsOfType(varname, typename) \
+	StaticAssertStmt(sizeof(varname) == sizeof(typename), \
+	CppAsString(varname) " does not have type " CppAsString(typename))
+#define AssertVariableIsOfTypeMacro(varname, typename) \
+	StaticAssertExpr(sizeof(varname) == sizeof(typename), \
+	CppAsString(varname) " does not have type " CppAsString(typename))
+#endif /* HAVE__BUILTIN_TYPES_COMPATIBLE_P */
+
+
+/*
+ * Function inlining support -- Allow modules to define functions that may be
+ * inlined, if the compiler supports it.
+ *
+ * The function bodies must be defined in the module header prefixed by
+ * STATIC_IF_INLINE, protected by a cpp symbol that the module's .c file must
+ * define.  If the compiler doesn't support inline functions, the function
+ * definitions are pulled in by the .c file as regular (not inline) symbols.
+ *
+ * The header must also declare the functions' prototypes, protected by
+ * !PG_USE_INLINE.
+ */
+#ifdef PG_USE_INLINE
+#define STATIC_IF_INLINE static inline
+#else
+#define STATIC_IF_INLINE
+#endif	/* PG_USE_INLINE */
 
 /* ----------------------------------------------------------------
  *				Section 7:	random stuff

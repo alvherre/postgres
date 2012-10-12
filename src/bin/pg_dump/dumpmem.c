@@ -42,6 +42,9 @@ pg_malloc(size_t size)
 {
 	void	   *tmp;
 
+	/* Avoid unportable behavior of malloc(0) */
+	if (size == 0)
+		size = 1;
 	tmp = malloc(size);
 	if (!tmp)
 		exit_horribly(NULL, "out of memory\n");
@@ -49,13 +52,12 @@ pg_malloc(size_t size)
 }
 
 void *
-pg_calloc(size_t nmemb, size_t size)
+pg_malloc0(size_t size)
 {
 	void	   *tmp;
 
-	tmp = calloc(nmemb, size);
-	if (!tmp)
-		exit_horribly(NULL, "out of memory\n");
+	tmp = pg_malloc(size);
+	MemSet(tmp, 0, size);
 	return tmp;
 }
 
@@ -64,6 +66,9 @@ pg_realloc(void *ptr, size_t size)
 {
 	void	   *tmp;
 
+	/* Avoid unportable behavior of realloc(NULL, 0) */
+	if (ptr == NULL && size == 0)
+		size = 1;
 	tmp = realloc(ptr, size);
 	if (!tmp)
 		exit_horribly(NULL, "out of memory\n");

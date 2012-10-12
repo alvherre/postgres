@@ -159,7 +159,7 @@ InitArchiveFmt_Tar(ArchiveHandle *AH)
 	/*
 	 * Set up some special context used in compressing data.
 	 */
-	ctx = (lclContext *) pg_calloc(1, sizeof(lclContext));
+	ctx = (lclContext *) pg_malloc0(sizeof(lclContext));
 	AH->formatData = (void *) ctx;
 	ctx->filePos = 0;
 	ctx->isSpecialScript = 0;
@@ -266,7 +266,7 @@ _ArchiveEntry(ArchiveHandle *AH, TocEntry *te)
 	lclTocEntry *ctx;
 	char		fn[K_STD_BUF_SIZE];
 
-	ctx = (lclTocEntry *) pg_calloc(1, sizeof(lclTocEntry));
+	ctx = (lclTocEntry *) pg_malloc0(sizeof(lclTocEntry));
 	if (te->dataDumper != NULL)
 	{
 #ifdef HAVE_LIBZ
@@ -305,7 +305,7 @@ _ReadExtraToc(ArchiveHandle *AH, TocEntry *te)
 
 	if (ctx == NULL)
 	{
-		ctx = (lclTocEntry *) pg_calloc(1, sizeof(lclTocEntry));
+		ctx = (lclTocEntry *) pg_malloc0(sizeof(lclTocEntry));
 		te->formatData = (void *) ctx;
 	}
 
@@ -378,7 +378,7 @@ tarOpen(ArchiveHandle *AH, const char *filename, char mode)
 	}
 	else
 	{
-		tm = pg_calloc(1, sizeof(TAR_MEMBER));
+		tm = pg_malloc0(sizeof(TAR_MEMBER));
 
 #ifndef WIN32
 		tm->tmpFH = tmpfile();
@@ -647,56 +647,46 @@ _PrintTocData(ArchiveHandle *AH, TocEntry *te, RestoreOptions *ropt)
 {
 	lclContext *ctx = (lclContext *) AH->formatData;
 	lclTocEntry *tctx = (lclTocEntry *) te->formatData;
-	char	   *tmpCopy;
-	size_t		i,
-				pos1,
-				pos2;
+	int			pos1;
 
 	if (!tctx->filename)
 		return;
 
+	/*
+	 * If we're writing the special restore.sql script, emit a suitable
+	 * command to include each table's data from the corresponding file.
+	 *
+	 * In the COPY case this is a bit klugy because the regular COPY command
+	 * was already printed before we get control.
+	 */
 	if (ctx->isSpecialScript)
 	{
-		if (!te->copyStmt)
-			return;
+		if (te->copyStmt)
+		{
+			/* Abort the COPY FROM stdin */
+			ahprintf(AH, "\\.\n");
 
-		/* Abort the default COPY */
-		ahprintf(AH, "\\.\n");
+			/*
+			 * The COPY statement should look like "COPY ... FROM stdin;\n",
+			 * see dumpTableData().
+			 */
+			pos1 = (int) strlen(te->copyStmt) - 13;
+			if (pos1 < 6 || strncmp(te->copyStmt, "COPY ", 5) != 0 ||
+				strcmp(te->copyStmt + pos1, " FROM stdin;\n") != 0)
+				exit_horribly(modulename,
+							  "unexpected COPY statement syntax: \"%s\"\n",
+							  te->copyStmt);
 
-		/* Get a copy of the COPY statement and clean it up */
-		tmpCopy = pg_strdup(te->copyStmt);
-		for (i = 0; i < strlen(tmpCopy); i++)
-			tmpCopy[i] = pg_tolower((unsigned char) tmpCopy[i]);
-
-		/*
-		 * This is very nasty; we don't know if the archive used WITH OIDS, so
-		 * we search the string for it in a paranoid sort of way.
-		 */
-		if (strncmp(tmpCopy, "copy ", 5) != 0)
-			exit_horribly(modulename,
-						  "invalid COPY statement -- could not find \"copy\" in string \"%s\"\n", tmpCopy);
-
-		pos1 = 5;
-		for (pos1 = 5; pos1 < strlen(tmpCopy); pos1++)
-			if (tmpCopy[pos1] != ' ')
-				break;
-
-		if (tmpCopy[pos1] == '"')
-			pos1 += 2;
-
-		pos1 += strlen(te->tag);
-
-		for (pos2 = pos1; pos2 < strlen(tmpCopy); pos2++)
-			if (strncmp(&tmpCopy[pos2], "from stdin", 10) == 0)
-				break;
-
-		if (pos2 >= strlen(tmpCopy))
-			exit_horribly(modulename,
-						  "invalid COPY statement -- could not find \"from stdin\" in string \"%s\" starting at position %lu\n",
-						  tmpCopy, (unsigned long) pos1);
-
-		ahwrite(tmpCopy, 1, pos2, AH);	/* 'copy "table" [with oids]' */
-		ahprintf(AH, " from '$$PATH$$/%s' %s", tctx->filename, &tmpCopy[pos2 + 10]);
+			/* Emit all but the FROM part ... */
+			ahwrite(te->copyStmt, 1, pos1, AH);
+			/* ... and insert modified FROM */
+			ahprintf(AH, " FROM '$$PATH$$/%s';\n\n", tctx->filename);
+		}
+		else
+		{
+			/* --inserts mode, no worries, just include the data file */
+			ahprintf(AH, "\\i $$PATH$$/%s\n\n", tctx->filename);
+		}
 
 		return;
 	}
@@ -843,18 +833,14 @@ _CloseArchive(ArchiveHandle *AH)
 		 * if the files have been extracted.
 		 */
 		th = tarOpen(AH, "restore.sql", 'w');
-		tarPrintf(AH, th, "create temporary table pgdump_restore_path(p text);\n");
+
 		tarPrintf(AH, th, "--\n"
 				  "-- NOTE:\n"
 				  "--\n"
 				  "-- File paths need to be edited. Search for $$PATH$$ and\n"
 				  "-- replace it with the path to the directory containing\n"
 				  "-- the extracted data files.\n"
-				  "--\n"
-				  "-- Edit the following to match the path where the\n"
-				  "-- tar archive has been extracted.\n"
 				  "--\n");
-		tarPrintf(AH, th, "insert into pgdump_restore_path values('/tmp');\n\n");
 
 		AH->CustomOutPtr = _scriptOut;
 
@@ -882,8 +868,12 @@ _CloseArchive(ArchiveHandle *AH)
 
 		tarClose(AH, th);
 
-		/* Add a block of NULLs since it's de-rigeur. */
-		for (i = 0; i < 512; i++)
+		ctx->isSpecialScript = 0;
+
+		/*
+		 * EOF marker for tar files is two blocks of NULLs.
+		 */
+		for (i = 0; i < 512 * 2; i++)
 		{
 			if (fputc(0, ctx->tarFH) == EOF)
 				exit_horribly(modulename,
@@ -1032,11 +1022,16 @@ _tarChecksum(char *header)
 	int			i,
 				sum;
 
-	sum = 0;
+	/*
+	 * Per POSIX, the checksum is the simple sum of all bytes in the header,
+	 * treating the bytes as unsigned, and treating the checksum field (at
+	 * offset 148) as though it contained 8 spaces.
+	 */
+	sum = 8 * ' ';				/* presumed value for checksum field */
 	for (i = 0; i < 512; i++)
 		if (i < 148 || i >= 156)
 			sum += 0xFF & header[i];
-	return sum + 256;			/* Assume 8 blanks in checksum field */
+	return sum;
 }
 
 bool
@@ -1050,11 +1045,15 @@ isValidTarHeader(char *header)
 	if (sum != chk)
 		return false;
 
-	/* POSIX format */
-	if (strncmp(&header[257], "ustar00", 7) == 0)
+	/* POSIX tar format */
+	if (memcmp(&header[257], "ustar\0", 6) == 0 &&
+		memcmp(&header[263], "00", 2) == 0)
 		return true;
-	/* older format */
-	if (strncmp(&header[257], "ustar  ", 7) == 0)
+	/* GNU tar format */
+	if (memcmp(&header[257], "ustar  \0", 8) == 0)
+		return true;
+	/* not-quite-POSIX format written by pre-9.3 pg_dump */
+	if (memcmp(&header[257], "ustar00\0", 8) == 0)
 		return true;
 
 	return false;
@@ -1129,7 +1128,7 @@ static TAR_MEMBER *
 _tarPositionTo(ArchiveHandle *AH, const char *filename)
 {
 	lclContext *ctx = (lclContext *) AH->formatData;
-	TAR_MEMBER *th = pg_calloc(1, sizeof(TAR_MEMBER));
+	TAR_MEMBER *th = pg_malloc0(sizeof(TAR_MEMBER));
 	char		c;
 	char		header[512];
 	size_t		i,
@@ -1329,63 +1328,71 @@ static void
 _tarWriteHeader(TAR_MEMBER *th)
 {
 	char		h[512];
-	int			lastSum = 0;
-	int			sum;
 
+	/*
+	 * Note: most of the fields in a tar header are not supposed to be
+	 * null-terminated.  We use sprintf, which will write a null after the
+	 * required bytes; that null goes into the first byte of the next field.
+	 * This is okay as long as we fill the fields in order.
+	 */
 	memset(h, 0, sizeof(h));
 
 	/* Name 100 */
 	sprintf(&h[0], "%.99s", th->targetFile);
 
 	/* Mode 8 */
-	sprintf(&h[100], "100600 ");
+	sprintf(&h[100], "0000600 ");
 
 	/* User ID 8 */
-	sprintf(&h[108], "004000 ");
+	sprintf(&h[108], "0004000 ");
 
 	/* Group 8 */
-	sprintf(&h[116], "002000 ");
+	sprintf(&h[116], "0002000 ");
 
-	/* File size 12 - 11 digits, 1 space, no NUL */
+	/* File size 12 - 11 digits, 1 space; use print_val for 64 bit support */
 	print_val(&h[124], th->fileLen, 8, 11);
 	sprintf(&h[135], " ");
 
 	/* Mod Time 12 */
 	sprintf(&h[136], "%011o ", (int) time(NULL));
 
-	/* Checksum 8 */
-	sprintf(&h[148], "%06o ", lastSum);
+	/* Checksum 8 cannot be calculated until we've filled all other fields */
 
 	/* Type - regular file */
 	sprintf(&h[156], "0");
 
-	/* Link tag 100 (NULL) */
+	/* Link Name 100 (leave as nulls) */
 
-	/* Magic 6 + Version 2 */
-	sprintf(&h[257], "ustar00");
+	/* Magic 6 */
+	sprintf(&h[257], "ustar");
 
-#if 0
+	/* Version 2 */
+	sprintf(&h[263], "00");
+
 	/* User 32 */
-	sprintf(&h[265], "%.31s", "");		/* How do I get username reliably? Do
-										 * I need to? */
+	/* XXX: Do we need to care about setting correct username? */
+	sprintf(&h[265], "%.31s", "postgres");
 
 	/* Group 32 */
-	sprintf(&h[297], "%.31s", "");		/* How do I get group reliably? Do I
-										 * need to? */
+	/* XXX: Do we need to care about setting correct group name? */
+	sprintf(&h[297], "%.31s", "postgres");
 
-	/* Maj Dev 8 */
-	sprintf(&h[329], "%6o ", 0);
+	/* Major Dev 8 */
+	sprintf(&h[329], "%07o ", 0);
 
-	/* Min Dev 8 */
-	sprintf(&h[337], "%6o ", 0);
-#endif
+	/* Minor Dev 8 */
+	sprintf(&h[337], "%07o ", 0);
 
-	while ((sum = _tarChecksum(h)) != lastSum)
-	{
-		sprintf(&h[148], "%06o ", sum);
-		lastSum = sum;
-	}
+	/* Prefix 155 - not used, leave as nulls */
 
+	/*
+	 * We mustn't overwrite the next field while inserting the checksum.
+	 * Fortunately, the checksum can't exceed 6 octal digits, so we just write
+	 * 6 digits, a space, and a null, which is legal per POSIX.
+	 */
+	sprintf(&h[148], "%06o ", _tarChecksum(h));
+
+	/* Now write the completed header. */
 	if (fwrite(h, 1, 512, th->tarFH) != 512)
 		exit_horribly(modulename, "could not write to output file: %s\n", strerror(errno));
 }
