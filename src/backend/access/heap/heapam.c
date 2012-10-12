@@ -5203,8 +5203,8 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 }
 
 /*
- * MultiXactIdWait
- *		Sleep on a MultiXactId.
+ * Do_MultiXactIdWait
+ * 		Actual implementation for the two functions below.
  *
  * We do this by sleeping on each member using XactLockTableWait.  Any
  * members that belong to the current backend are *not* waited for, however;
@@ -5218,67 +5218,14 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
  * But by the time we finish sleeping, someone else may have changed the Xmax
  * of the containing tuple, so the caller needs to iterate on us somehow.
  *
- * We return (in *remaining, if not NULL) the number of members that are still
- * running, including any (non-aborted) subtransactions of our own transaction.
+ * Note that in case we return false, the number of remaining members is
+ * not to be trusted.
  *
  * The infomask is passed for consistency checks.
  */
-static void
-MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining,
-				uint16 infomask)
-{
-	MultiXactMember *members;
-	int			nmembers;
-	int			remain = 0;
-
-	nmembers = GetMultiXactIdMembers(multi, &members, true);
-	if (nmembers == -1 &&
-		((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-		 !(infomask & HEAP_XMAX_LOCK_ONLY)))
-		elog(ERROR, "invalid infomask with old MultiXactId value");
-
-	if (nmembers >= 0)
-	{
-		int			i;
-
-		for (i = 0; i < nmembers; i++)
-		{
-			TransactionId memxid = members[i].xid;
-			MultiXactStatus memstatus = members[i].status;
-
-			if (TransactionIdIsCurrentTransactionId(memxid))
-			{
-				remain++;
-				continue;
-			}
-
-			if (!DoLockModesConflict(LOCKMODE_from_mxstatus(memstatus),
-									 LOCKMODE_from_mxstatus(status)))
-			{
-				/* skip overhead if we don't need the count */
-				if (remaining && TransactionIdIsInProgress(memxid))
-					remain++;
-				continue;
-			}
-
-			XactLockTableWait(memxid);
-		}
-	}
-
-	if (remaining)
-		*remaining = remain;
-}
-
-/*
- * ConditionalMultiXactIdWait
- *		As above, but only lock if we can get the lock without blocking.
- *
- * Note that in case we return false, the number of remaining members is
- * not to be trusted.
- */
 static bool
-ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-						   int *remaining, uint16 infomask)
+Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+						   int *remaining, uint16 infomask, bool nowait)
 {
 	bool		result = true;
 	MultiXactMember *members;
@@ -5313,9 +5260,19 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 					remain++;
 				continue;
 			}
-			result = ConditionalXactLockTableWait(memxid);
-			if (!result)
-				break;
+
+			/*
+			 * This member conflicts with our multi, so we have to sleep (or
+			 * return failure, if asked to avoid waiting.)
+			 */
+			if (nowait)
+			{
+				result = ConditionalXactLockTableWait(memxid);
+				if (!result)
+					break;
+			}
+			else
+				XactLockTableWait(memxid);
 		}
 
 		pfree(members);
@@ -5325,6 +5282,44 @@ ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 		*remaining = remain;
 
 	return result;
+}
+
+/*
+ * MultiXactIdWait
+ *		Sleep on a MultiXactId.
+ *
+ * By the time we finish sleeping, someone else may have changed the Xmax
+ * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
+ * We return (in *remaining, if not NULL) the number of members that are still
+ * running, including any (non-aborted) subtransactions of our own transaction.
+ *
+ */
+static void
+MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+				int *remaining, uint16 infomask)
+{
+	Do_MultiXactIdWait(multi, status, remaining, infomask, false);
+}
+
+/*
+ * ConditionalMultiXactIdWait
+ *		As above, but only lock if we can get the lock without blocking.
+ *
+ * By the time we finish sleeping, someone else may have changed the Xmax
+ * of the containing tuple, so the caller needs to iterate on us somehow.
+ *
+ * If the multixact is now all gone, return true.  Returns false if some
+ * transactions might still be running.
+ *
+ * We return (in *remaining, if not NULL) the number of members that are still
+ * running, including any (non-aborted) subtransactions of our own transaction.
+ */
+static bool
+ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status,
+						   int *remaining, uint16 infomask)
+{
+	return Do_MultiXactIdWait(multi, status, remaining, infomask, true);
 }
 
 /*
