@@ -4508,8 +4508,8 @@ l5:
 															  old_infomask)))
 			{
 				/*
-				 * Reset these bits and let the conditional block above handle
-				 * it.  Otherwise fall through to create a new multi below.
+				 * Reset these bits and restart; otherwise fall through to
+				 * create a new multi below.
 				 */
 				old_infomask &= ~HEAP_XMAX_IS_MULTI;
 				old_infomask |= HEAP_XMAX_INVALID;
@@ -4594,8 +4594,8 @@ l5:
 
 		/*
 		 * If the existing lock mode is identical to or weaker than the new
-		 * one, we can act as though there is no existing lock and have the
-		 * upper block handle this.
+		 * one, we can act as though there is no existing lock, so set
+		 * XMAX_INVALID and restart.
 		 */
 		if (xmax == add_to_xmax)
 		{
@@ -4610,6 +4610,13 @@ l5:
 			 */
 			if ((mode >= old_mode) && (is_update || !old_isupd))
 			{
+				/*
+				 * Note that the infomask might contain some other dirty bits.
+				 * However, since the new infomask is reset to zero, we only
+				 * set what's minimally necessary, and that the case that
+				 * checks HEAP_XMAX_INVALID is the very first above, there is
+				 * no need for extra cleanup of the infomask here.
+				 */
 				old_infomask |= HEAP_XMAX_INVALID;
 				goto l5;
 			}
