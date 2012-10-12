@@ -87,8 +87,10 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf,
 				Buffer newbuf, HeapTuple oldtup,
 				HeapTuple newtup, bool all_visible_cleared,
 				bool new_all_visible_cleared);
-static bool HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
-					   HeapTuple oldtup, HeapTuple newtup);
+static void HeapSatisfiesHOTandKeyUpdate(Relation relation,
+							 Bitmapset *hot_attrs, Bitmapset *key_attrs,
+							 bool *satisfies_hot, bool *satisfies_key,
+							 HeapTuple oldtup, HeapTuple newtup);
 static void compute_new_xmax_infomask(TransactionId xmax, uint16 old_infomask,
 						  uint16 old_infomask2, TransactionId add_to_xmax,
 						  LockTupleMode mode, bool is_update,
@@ -2885,6 +2887,8 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 				pagefree;
 	bool		have_tuple_lock = false;
 	bool		iscombo;
+	bool		satisfies_hot;
+	bool		satisfies_key;
 	bool		use_hot_update = false;
 	bool		key_intact;
 	bool		all_visible_cleared = false;
@@ -2948,7 +2952,10 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	 * updates that don't manipulate key columns, not those that
 	 * serendipitiously arrive at the same key values.
 	 */
-	if (HeapSatisfiesHOTUpdate(relation, key_attrs, &oldtup, newtup))
+	HeapSatisfiesHOTandKeyUpdate(relation, hot_attrs, key_attrs,
+								 &satisfies_hot, &satisfies_key,
+								 &oldtup, newtup);
+	if (satisfies_key)
 	{
 		tuplock = LockTupleUpdate;
 		mxact_status = MultiXactStatusUpdate;
@@ -3402,7 +3409,7 @@ l2:
 		 * to do a HOT update.	Check if any of the index columns have been
 		 * changed.  If not, then HOT update is possible.
 		 */
-		if (HeapSatisfiesHOTUpdate(relation, hot_attrs, &oldtup, heaptup))
+		if (satisfies_hot)
 			use_hot_update = true;
 	}
 	else
@@ -3551,7 +3558,7 @@ l2:
 
 /*
  * Check if the specified attribute's value is same in both given tuples.
- * Subroutine for HeapSatisfiesHOTUpdate.
+ * Subroutine for HeapSatisfiesHOTandKeyUpdate.
  */
 static bool
 heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum,
@@ -3585,7 +3592,7 @@ heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum,
 
 	/*
 	 * Extract the corresponding values.  XXX this is pretty inefficient if
-	 * there are many indexed columns.	Should HeapSatisfiesHOTUpdate do a
+	 * there are many indexed columns.	Should HeapSatisfiesHOTandKeyUpdate do a
 	 * single heap_deform_tuple call on each tuple, instead?  But that doesn't
 	 * work for system columns ...
 	 */
@@ -3628,35 +3635,101 @@ heap_tuple_attr_equals(TupleDesc tupdesc, int attrnum,
 }
 
 /*
- * Check if the old and new tuples represent a HOT-safe update. To be able
- * to do a HOT update, we must not have changed any columns used in index
- * definitions.
+ * Check which columns are being updated.
  *
- * The set of attributes to be checked is passed in (we dare not try to
- * compute it while holding exclusive buffer lock...)  NOTE that hot_attrs
- * is destructively modified!  That is OK since this is invoked at most once
- * by heap_update().
+ * This simultaneously checks conditions for HOT updates and for FOR KEY
+ * SHARE updates.  Since much of the time they will be checking very similar
+ * sets of columns, and doing the same tests on them, it makes sense to
+ * optimize and do them together.
  *
- * Returns true if safe to do HOT update.
+ * We receive two bitmapsets comprising the two sets of columns we're
+ * interested in.  Note these are destructively modified; that is OK since
+ * this is invoked at most once in heap_update.
+ *
+ * hot_result is set to TRUE if it's okay to do a HOT update (i.e. it does not
+ * modified indexed columns); key_result is set to TRUE if the update does not
+ * modify columns used in the key.
  */
-static bool
-HeapSatisfiesHOTUpdate(Relation relation, Bitmapset *hot_attrs,
-					   HeapTuple oldtup, HeapTuple newtup)
+static void
+HeapSatisfiesHOTandKeyUpdate(Relation relation,
+							 Bitmapset *hot_attrs, Bitmapset *key_attrs,
+							 bool *satisfies_hot, bool *satisfies_key,
+							 HeapTuple oldtup, HeapTuple newtup)
 {
-	int			attrnum;
+	int		next_hot_attnum;
+	int		next_key_attnum;
+	bool	hot_result = true;
+	bool	key_result = true;
+	bool	key_done = false;
+	bool	hot_done = false;
 
-	while ((attrnum = bms_first_member(hot_attrs)) >= 0)
-	{
+	next_hot_attnum = bms_first_member(hot_attrs);
+	if (next_hot_attnum == -1)
+		hot_done = true;
+	else
 		/* Adjust for system attributes */
-		attrnum += FirstLowInvalidHeapAttributeNumber;
+		next_hot_attnum += FirstLowInvalidHeapAttributeNumber;
 
-		/* If the attribute value has changed, we can't do HOT update */
-		if (!heap_tuple_attr_equals(RelationGetDescr(relation), attrnum,
-									oldtup, newtup))
-			return false;
+	next_key_attnum = bms_first_member(key_attrs);
+	if (next_key_attnum == -1)
+		key_done = true;
+	else
+		/* Adjust for system attributes */
+		next_key_attnum += FirstLowInvalidHeapAttributeNumber;
+
+	for (;;)
+	{
+		int		check_now;
+		bool	changed;
+
+		/* both bitmapsets are now empty */
+		if (key_done && hot_done)
+			break;
+
+		/* XXX there's probably an easier way ... */
+		if (hot_done)
+			check_now = next_key_attnum;
+		if (key_done)
+			check_now = next_hot_attnum;
+		else
+			check_now = Min(next_hot_attnum, next_key_attnum);
+
+		changed = !heap_tuple_attr_equals(RelationGetDescr(relation),
+										  check_now, oldtup, newtup);
+		if (changed)
+		{
+			if (check_now == next_hot_attnum)
+				hot_result = false;
+			if (check_now == next_key_attnum)
+				key_result = false;
+		}
+
+		/* if both are false now, we can stop checking */
+		if (!hot_result && !key_result)
+			break;
+
+		if (check_now == next_hot_attnum)
+		{
+			next_hot_attnum = bms_first_member(hot_attrs);
+			if (next_hot_attnum == -1)
+				hot_done = true;
+			else
+				/* Adjust for system attributes */
+				next_hot_attnum += FirstLowInvalidHeapAttributeNumber;
+		}
+		if (check_now == next_key_attnum)
+		{
+			next_key_attnum = bms_first_member(key_attrs);
+			if (next_key_attnum == -1)
+				key_done = true;
+			else
+				/* Adjust for system attributes */
+				next_key_attnum += FirstLowInvalidHeapAttributeNumber;
+		}
 	}
 
-	return true;
+	*satisfies_hot = hot_result;
+	*satisfies_key = key_result;
 }
 
 /*
