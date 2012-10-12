@@ -3896,14 +3896,16 @@ l3:
 			nmembers = GetMultiXactIdMembers(xwait, &members, true);
 			if (nmembers == -1 &&
 				((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-				!(infomask & HEAP_XMAX_LOCK_ONLY)))
+				 !(infomask & HEAP_XMAX_LOCK_ONLY)))
 				elog(ERROR, "invalid infomask with old MultiXactId value");
 
 			for (i = 0; i < nmembers; i++)
 			{
 				if (TransactionIdIsCurrentTransactionId(members[i].xid))
 				{
-					LockTupleMode	membermode = TUPLOCK_from_mxstatus(members[i].status);
+					LockTupleMode	membermode;
+
+					membermode = TUPLOCK_from_mxstatus(members[i].status);
 
 					if (membermode > mode)
 					{
@@ -3935,8 +3937,8 @@ l3:
 				if (!ConditionalLockTupleTuplock(relation, tid, mode))
 					ereport(ERROR,
 							(errcode(ERRCODE_LOCK_NOT_AVAILABLE),
-					errmsg("could not obtain lock on row in relation \"%s\"",
-						   RelationGetRelationName(relation))));
+							 errmsg("could not obtain lock on row in relation \"%s\"",
+									RelationGetRelationName(relation))));
 			}
 			else
 				LockTupleTuplock(relation, tid, mode);
@@ -3949,101 +3951,112 @@ l3:
 		 * this can be turned off.
 		 */
 		require_sleep = true;
-
-		/*
-		 * If we're requesting KeyShare, and there's no update present, we
-		 * don't need to wait.  Even if there is an update, we can still
-		 * continue if the key hasn't been modified.
-		 *
-		 * However, if there are updates, we need to walk the update chain
-		 * to mark future versions of the row as locked, too.  That way, if
-		 * somebody deletes that future version, we're protected against the
-		 * key going away.  This locking of future versions could block
-		 * momentarily, if a concurrent transaction is deleting a key; or it
-		 * could return a value to the effect that the transaction deleting the
-		 * key has already committed.  So we do this before re-locking the
-		 * buffer; otherwise this would be prone to deadlocks.  Note that the
-		 * TID we're locking was grabbed before we unlocked the buffer.  For it
-		 * to change while we're not looking, the other properties we're
-		 * testing for below after re-locking the buffer would also change, in
-		 * which case we would restart this loop above.
-		 */
-		if ((mode == LockTupleKeyShare) &&
-			!(infomask2 & HEAP_KEYS_UPDATED))
+		if (mode == LockTupleKeyShare)
 		{
-			bool	updated;
-
-			updated = !HeapTupleHeaderInfomaskIsOnlyLocked(infomask);
-
-			/* if there are updates, follow the update chain */
-			if (follow_updates && updated)
+			/*
+			 * If we're requesting KeyShare, and there's no update present, we
+			 * don't need to wait.  Even if there is an update, we can still
+			 * continue if the key hasn't been modified.
+			 *
+			 * However, if there are updates, we need to walk the update chain
+			 * to mark future versions of the row as locked, too.  That way, if
+			 * somebody deletes that future version, we're protected against
+			 * the key going away.  This locking of future versions could block
+			 * momentarily, if a concurrent transaction is deleting a key; or
+			 * it could return a value to the effect that the transaction
+			 * deleting the key has already committed.  So we do this before
+			 * re-locking the buffer; otherwise this would be prone to
+			 * deadlocks.
+			 *
+			 * Note that the TID we're locking was grabbed before we unlocked
+			 * the buffer.  For it to change while we're not looking, the other
+			 * properties we're testing for below after re-locking the buffer
+			 * would also change, in which case we would restart this loop
+			 * above.
+			 */
+			if (!(infomask2 & HEAP_KEYS_UPDATED))
 			{
-				HTSU_Result		res;
+				bool	updated;
 
-				res = heap_lock_updated_tuple(relation, tuple, &t_ctid,
-											  GetCurrentTransactionId(),
-											  mode);
-				if (res != HeapTupleMayBeUpdated)
+				updated = !HeapTupleHeaderInfomaskIsOnlyLocked(infomask);
+
+				/*
+				 * If there are updates, follow the update chain; bail out
+				 * if that cannot be done.
+				 */
+				if (follow_updates && updated)
 				{
-					result = res;
-					/* recovery code expects to have buffer lock held */
-					LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
-					goto failed;
+					HTSU_Result		res;
+
+					res = heap_lock_updated_tuple(relation, tuple, &t_ctid,
+												  GetCurrentTransactionId(),
+												  mode);
+					if (res != HeapTupleMayBeUpdated)
+					{
+						result = res;
+						/* recovery code expects to have buffer lock held */
+						LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+						goto failed;
+					}
 				}
+
+				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
+
+				/*
+				 * Make sure it's still an appropriate lock, else start over.
+				 * Also, if it wasn't updated before we released the lock, but
+				 * is updated now, we start over too; the reason is that we now
+				 * need to follow the update chain to lock the new versions.
+				 */
+				if (!HeapTupleHeaderIsOnlyLocked(tuple->t_data) &&
+					((tuple->t_data->t_infomask2 & HEAP_KEYS_UPDATED) ||
+					 !updated))
+					goto l3;
+
+				/* Things look okay, so we can skip sleeping */
+				require_sleep = false;
+
+				/*
+				 * Note we allow Xmax to change here; other updaters/lockers
+				 * could have modified it before we grabbed the buffer lock.
+				 * However, this is not a problem, because with the recheck we
+				 * just did we ensure that they still don't conflict with the
+				 * lock we want.
+				 */
 			}
-
-			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
-
-			/*
-			 * Make sure it's still an appropriate lock, else start over.
-			 * Also, if it wasn't updated before we released the lock,
-			 * but is updated now, we start over too; the reason is that we now
-			 * need to follow the update chain to lock the new versions.
-			 */
-			if (!HeapTupleHeaderIsOnlyLocked(tuple->t_data) &&
-				((tuple->t_data->t_infomask2 & HEAP_KEYS_UPDATED) ||
-				 !updated))
-				goto l3;
-			require_sleep = false;
-
-			/*
-			 * Note we allow Xmax to change here; other updaters/lockers could
-			 * have modified it before we grabbed the buffer lock.  However,
-			 * this is not a problem, because with the recheck we just did we
-			 * ensure that they still don't conflict with the lock we want.
-			 */
 		}
-
-		/*
-		 * If we're requesting Share, we can similarly avoid sleeping if
-		 * there's no update and no exclusive lock present.
-		 */
-		if (mode == LockTupleShare &&
-			(infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) &&
-			!(infomask & HEAP_XMAX_EXCL_LOCK))
+		else if (mode == LockTupleShare)
 		{
-			LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
-
 			/*
-			 * Make sure it's still an appropriate lock, else start over.  See
-			 * above about allowing xmax to change.
+			 * If we're requesting Share, we can similarly avoid sleeping if
+			 * there's no update and no exclusive lock present.
 			 */
-			if (!(tuple->t_data->t_infomask &
-				  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) ||
-				(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
-				goto l3;
-			require_sleep = false;
-		}
+			if ((infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) &&
+				!(infomask & HEAP_XMAX_EXCL_LOCK))
+			{
+				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
-		/*
-		 * If we're requesting Update, we might also be able to avoid sleeping;
-		 * just ensure that there's no other lock type than KeyShare.  Note
-		 * that this is a bit more involved than just checking hint bits -- we
-		 * need to expand the multixact to figure out lock modes for each one
-		 * (unless there was only one such locker).
-		 */
-		if (mode == LockTupleUpdate)
+				/*
+				 * Make sure it's still an appropriate lock, else start over.
+				 * See above about allowing xmax to change.
+				 */
+				if (!(tuple->t_data->t_infomask &
+					  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) ||
+					(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
+					goto l3;
+				require_sleep = false;
+			}
+		}
+		else if (mode == LockTupleUpdate)
 		{
+			/*
+			 * If we're requesting Update, we might also be able to avoid
+			 * sleeping; just ensure that there's no other lock type than
+			 * KeyShare.  Note that this is a bit more involved than just
+			 * checking hint bits -- we need to expand the multixact to figure
+			 * out lock modes for each one (unless there was only one such
+			 * locker).
+			 */
 			if (infomask & HEAP_XMAX_IS_MULTI)
 			{
 				int		nmembers;
@@ -4052,7 +4065,7 @@ l3:
 				nmembers = GetMultiXactIdMembers(xwait, &members, true);
 				if (nmembers == -1 &&
 					((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-					!(infomask & HEAP_XMAX_LOCK_ONLY)))
+					 !(infomask & HEAP_XMAX_LOCK_ONLY)))
 					elog(ERROR, "invalid infomask with old MultiXactId value");
 
 				if (nmembers <= 0)
@@ -4158,9 +4171,9 @@ l3:
 				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
 				/*
-				 * If xwait had just locked the tuple then some other xact could
-				 * update this tuple before we get to this point. Check for xmax
-				 * change, and start over if so.
+				 * If xwait had just locked the tuple then some other xact
+				 * could update this tuple before we get to this point. Check
+				 * for xmax change, and start over if so.
 				 */
 				if (!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
 					!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple->t_data),
