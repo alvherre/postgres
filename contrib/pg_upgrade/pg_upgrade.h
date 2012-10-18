@@ -114,7 +114,7 @@ extern char *output_files[];
 /*
  * pg_multixact format changed in this catversion:
  */
-#define MULTIXACT_FORMATCHANGE_CAT_VER 201208161
+#define MULTIXACT_FORMATCHANGE_CAT_VER 201210181
 
 /*
  * Each relation is represented by a relinfo structure.
