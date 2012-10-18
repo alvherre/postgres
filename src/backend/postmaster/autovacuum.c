@@ -78,7 +78,7 @@
 #include "catalog/pg_database.h"
 #include "commands/dbcommands.h"
 #include "commands/vacuum.h"
-#include "lib/dllist.h"
+#include "lib/ilist.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -154,6 +154,7 @@ typedef struct avl_dbase
 	Oid			adl_datid;		/* hash key -- must be first */
 	TimestampTz adl_next_worker;
 	int			adl_score;
+	dlist_node	adl_node;
 } avl_dbase;
 
 /* struct to keep track of databases in worker */
@@ -211,7 +212,7 @@ typedef struct autovac_table
  */
 typedef struct WorkerInfoData
 {
-	SHM_QUEUE	wi_links;
+	dlist_node	wi_links;
 	Oid			wi_dboid;
 	Oid			wi_tableoid;
 	PGPROC	   *wi_proc;
@@ -254,15 +255,18 @@ typedef struct
 {
 	sig_atomic_t av_signal[AutoVacNumSignals];
 	pid_t		av_launcherpid;
-	WorkerInfo	av_freeWorkers;
-	SHM_QUEUE	av_runningWorkers;
+	dlist_head	av_freeWorkers;
+	dlist_head	av_runningWorkers;
 	WorkerInfo	av_startingWorker;
 } AutoVacuumShmemStruct;
 
 static AutoVacuumShmemStruct *AutoVacuumShmem;
 
-/* the database list in the launcher, and the context that contains it */
-static Dllist *DatabaseList = NULL;
+/*
+ * the database list (of avl_dbase elements) in the launcher, and the context
+ * that contains it
+ */
+static dlist_head DatabaseList = DLIST_STATIC_INIT(DatabaseList);
 static MemoryContext DatabaseListCxt = NULL;
 
 /* Pointer to my own WorkerInfo, valid on each worker */
@@ -511,7 +515,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 
 		/* don't leave dangling pointers to freed memory */
 		DatabaseListCxt = NULL;
-		DatabaseList = NULL;
+		dlist_init(&DatabaseList);
 
 		/*
 		 * Make sure pgstat also considers our stat data as gone.  Note: we
@@ -579,7 +583,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 		struct timeval nap;
 		TimestampTz current_time = 0;
 		bool		can_launch;
-		Dlelem	   *elem;
+		avl_dbase  *avdb;
 		int			rc;
 
 		/*
@@ -589,7 +593,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 		 * wakening conditions.
 		 */
 
-		launcher_determine_sleep((AutoVacuumShmem->av_freeWorkers != NULL),
+		launcher_determine_sleep(!dlist_is_empty(&AutoVacuumShmem->av_freeWorkers),
 								 false, &nap);
 
 		/* Allow sinval catchup interrupts while sleeping */
@@ -682,7 +686,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 		current_time = GetCurrentTimestamp();
 		LWLockAcquire(AutovacuumLock, LW_SHARED);
 
-		can_launch = (AutoVacuumShmem->av_freeWorkers != NULL);
+		can_launch = !dlist_is_empty(&AutoVacuumShmem->av_freeWorkers);
 
 		if (AutoVacuumShmem->av_startingWorker != NULL)
 		{
@@ -724,8 +728,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 					worker->wi_tableoid = InvalidOid;
 					worker->wi_proc = NULL;
 					worker->wi_launchtime = 0;
-					worker->wi_links.next = (SHM_QUEUE *) AutoVacuumShmem->av_freeWorkers;
-					AutoVacuumShmem->av_freeWorkers = worker;
+					dlist_push_head(&AutoVacuumShmem->av_freeWorkers, &worker->wi_links);
 					AutoVacuumShmem->av_startingWorker = NULL;
 					elog(WARNING, "worker took too long to start; canceled");
 				}
@@ -741,20 +744,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 
 		/* We're OK to start a new worker */
 
-		elem = DLGetTail(DatabaseList);
-		if (elem != NULL)
-		{
-			avl_dbase  *avdb = DLE_VAL(elem);
-
-			/*
-			 * launch a worker if next_worker is right now or it is in the
-			 * past
-			 */
-			if (TimestampDifferenceExceeds(avdb->adl_next_worker,
-										   current_time, 0))
-				launch_worker(current_time);
-		}
-		else
+		if (dlist_is_empty(&DatabaseList))
 		{
 			/*
 			 * Special case when the list is empty: start a worker right away.
@@ -765,6 +755,23 @@ AutoVacLauncherMain(int argc, char *argv[])
 			 * empty).
 			 */
 			launch_worker(current_time);
+		}
+		else
+		{
+			/*
+			 * because rebuild_database_list constructs a list with most
+			 * distant adl_next_worker first, we obtain our database from the
+			 * tail of the list.
+			 */
+			avdb = dlist_tail_element(avl_dbase, adl_node, &DatabaseList);
+
+			/*
+			 * launch a worker if next_worker is right now or it is in the
+			 * past
+			 */
+			if (TimestampDifferenceExceeds(avdb->adl_next_worker,
+										   current_time, 0))
+				launch_worker(current_time);
 		}
 	}
 
@@ -786,7 +793,7 @@ AutoVacLauncherMain(int argc, char *argv[])
 static void
 launcher_determine_sleep(bool canlaunch, bool recursing, struct timeval * nap)
 {
-	Dlelem	   *elem;
+	avl_dbase  *avdb;
 
 	/*
 	 * We sleep until the next scheduled vacuum.  We trust that when the
@@ -799,13 +806,14 @@ launcher_determine_sleep(bool canlaunch, bool recursing, struct timeval * nap)
 		nap->tv_sec = autovacuum_naptime;
 		nap->tv_usec = 0;
 	}
-	else if ((elem = DLGetTail(DatabaseList)) != NULL)
+	else if (!dlist_is_empty(&DatabaseList))
 	{
-		avl_dbase  *avdb = DLE_VAL(elem);
 		TimestampTz current_time = GetCurrentTimestamp();
 		TimestampTz next_wakeup;
 		long		secs;
 		int			usecs;
+
+		avdb = dlist_tail_element(avl_dbase, adl_node, &DatabaseList);
 
 		next_wakeup = avdb->adl_next_worker;
 		TimestampDifference(current_time, next_wakeup, &secs, &usecs);
@@ -870,6 +878,7 @@ rebuild_database_list(Oid newdb)
 	int			score;
 	int			nelems;
 	HTAB	   *dbhash;
+	dlist_iter  iter;
 
 	/* use fresh stats */
 	autovac_refresh_stats();
@@ -930,36 +939,28 @@ rebuild_database_list(Oid newdb)
 	}
 
 	/* Now insert the databases from the existing list */
-	if (DatabaseList != NULL)
+	dlist_foreach(iter, &DatabaseList)
 	{
-		Dlelem	   *elem;
+		avl_dbase  *avdb = dlist_container(avl_dbase, adl_node, iter.cur);
+		avl_dbase  *db;
+		bool		found;
+		PgStat_StatDBEntry *entry;
 
-		elem = DLGetHead(DatabaseList);
-		while (elem != NULL)
+		/*
+		 * skip databases with no stat entries -- in particular, this gets
+		 * rid of dropped databases
+		 */
+		entry = pgstat_fetch_stat_dbentry(avdb->adl_datid);
+		if (entry == NULL)
+			continue;
+
+		db = hash_search(dbhash, &(avdb->adl_datid), HASH_ENTER, &found);
+
+		if (!found)
 		{
-			avl_dbase  *avdb = DLE_VAL(elem);
-			avl_dbase  *db;
-			bool		found;
-			PgStat_StatDBEntry *entry;
-
-			elem = DLGetSucc(elem);
-
-			/*
-			 * skip databases with no stat entries -- in particular, this gets
-			 * rid of dropped databases
-			 */
-			entry = pgstat_fetch_stat_dbentry(avdb->adl_datid);
-			if (entry == NULL)
-				continue;
-
-			db = hash_search(dbhash, &(avdb->adl_datid), HASH_ENTER, &found);
-
-			if (!found)
-			{
-				/* hash_search already filled in the key */
-				db->adl_score = score++;
-				/* next_worker is filled in later */
-			}
+			/* hash_search already filled in the key */
+			db->adl_score = score++;
+			/* next_worker is filled in later */
 		}
 	}
 
@@ -990,7 +991,7 @@ rebuild_database_list(Oid newdb)
 
 	/* from here on, the allocated memory belongs to the new list */
 	MemoryContextSwitchTo(newcxt);
-	DatabaseList = DLNewList();
+	dlist_init(&DatabaseList);
 
 	if (nelems > 0)
 	{
@@ -1032,15 +1033,13 @@ rebuild_database_list(Oid newdb)
 		for (i = 0; i < nelems; i++)
 		{
 			avl_dbase  *db = &(dbary[i]);
-			Dlelem	   *elem;
 
 			current_time = TimestampTzPlusMilliseconds(current_time,
 													   millis_increment);
 			db->adl_next_worker = current_time;
 
-			elem = DLNewElem(db);
 			/* later elements should go closer to the head of the list */
-			DLAddHead(DatabaseList, elem);
+			dlist_push_head(&DatabaseList, &db->adl_node);
 		}
 	}
 
@@ -1091,7 +1090,7 @@ do_start_worker(void)
 
 	/* return quickly when there are no free workers */
 	LWLockAcquire(AutovacuumLock, LW_SHARED);
-	if (AutoVacuumShmem->av_freeWorkers == NULL)
+	if (dlist_is_empty(&AutoVacuumShmem->av_freeWorkers))
 	{
 		LWLockRelease(AutovacuumLock);
 		return InvalidOid;
@@ -1161,7 +1160,7 @@ do_start_worker(void)
 	foreach(cell, dblist)
 	{
 		avw_dbase  *tmp = lfirst(cell);
-		Dlelem	   *elem;
+		dlist_iter iter;
 
 		/* Check to see if this one is at risk of wraparound */
 		if (TransactionIdPrecedes(tmp->adw_frozenxid, xidForceLimit))
@@ -1205,11 +1204,10 @@ do_start_worker(void)
 		 * autovacuum time yet.
 		 */
 		skipit = false;
-		elem = DatabaseList ? DLGetTail(DatabaseList) : NULL;
 
-		while (elem != NULL)
+		dlist_reverse_foreach(iter, &DatabaseList)
 		{
-			avl_dbase  *dbp = DLE_VAL(elem);
+			avl_dbase  *dbp = dlist_container(avl_dbase, adl_node, iter.cur);
 
 			if (dbp->adl_datid == tmp->adw_datid)
 			{
@@ -1226,7 +1224,6 @@ do_start_worker(void)
 
 				break;
 			}
-			elem = DLGetPred(elem);
 		}
 		if (skipit)
 			continue;
@@ -1244,20 +1241,17 @@ do_start_worker(void)
 	if (avdb != NULL)
 	{
 		WorkerInfo	worker;
+		dlist_node *wptr;
 
 		LWLockAcquire(AutovacuumLock, LW_EXCLUSIVE);
 
 		/*
 		 * Get a worker entry from the freelist.  We checked above, so there
-		 * really should be a free slot -- complain very loudly if there
-		 * isn't.
+		 * really should be a free slot.
 		 */
-		worker = AutoVacuumShmem->av_freeWorkers;
-		if (worker == NULL)
-			elog(FATAL, "no free worker found");
+		wptr = dlist_pop_head_node(&AutoVacuumShmem->av_freeWorkers);
 
-		AutoVacuumShmem->av_freeWorkers = (WorkerInfo) worker->wi_links.next;
-
+		worker = dlist_container(WorkerInfoData, wi_links, wptr);
 		worker->wi_dboid = avdb->adw_datid;
 		worker->wi_proc = NULL;
 		worker->wi_launchtime = GetCurrentTimestamp();
@@ -1300,22 +1294,25 @@ static void
 launch_worker(TimestampTz now)
 {
 	Oid			dbid;
-	Dlelem	   *elem;
+	dlist_iter  iter;
 
 	dbid = do_start_worker();
 	if (OidIsValid(dbid))
 	{
+		bool found = false;
+
 		/*
 		 * Walk the database list and update the corresponding entry.  If the
 		 * database is not on the list, we'll recreate the list.
 		 */
-		elem = (DatabaseList == NULL) ? NULL : DLGetHead(DatabaseList);
-		while (elem != NULL)
+		dlist_foreach(iter, &DatabaseList)
 		{
-			avl_dbase  *avdb = DLE_VAL(elem);
+			avl_dbase  *avdb = dlist_container(avl_dbase, adl_node, iter.cur);
 
 			if (avdb->adl_datid == dbid)
 			{
+				found = true;
+
 				/*
 				 * add autovacuum_naptime seconds to the current time, and use
 				 * that as the new "next_worker" field for this database.
@@ -1323,10 +1320,9 @@ launch_worker(TimestampTz now)
 				avdb->adl_next_worker =
 					TimestampTzPlusMilliseconds(now, autovacuum_naptime * 1000);
 
-				DLMoveToFront(elem);
+				dlist_move_head(&DatabaseList, iter.cur);
 				break;
 			}
-			elem = DLGetSucc(elem);
 		}
 
 		/*
@@ -1336,7 +1332,7 @@ launch_worker(TimestampTz now)
 		 * pgstat entry, but this is not a problem because we don't want to
 		 * schedule workers regularly into those in any case.
 		 */
-		if (elem == NULL)
+		if (!found)
 			rebuild_database_list(dbid);
 	}
 }
@@ -1616,8 +1612,8 @@ AutoVacWorkerMain(int argc, char *argv[])
 		MyWorkerInfo->wi_proc = MyProc;
 
 		/* insert into the running list */
-		SHMQueueInsertBefore(&AutoVacuumShmem->av_runningWorkers,
-							 &MyWorkerInfo->wi_links);
+		dlist_push_head(&AutoVacuumShmem->av_runningWorkers,
+						&MyWorkerInfo->wi_links);
 
 		/*
 		 * remove from the "starting" pointer, so that the launcher can start
@@ -1708,8 +1704,7 @@ FreeWorkerInfo(int code, Datum arg)
 		 */
 		AutovacuumLauncherPid = AutoVacuumShmem->av_launcherpid;
 
-		SHMQueueDelete(&MyWorkerInfo->wi_links);
-		MyWorkerInfo->wi_links.next = (SHM_QUEUE *) AutoVacuumShmem->av_freeWorkers;
+		dlist_delete(&AutoVacuumShmem->av_runningWorkers, &MyWorkerInfo->wi_links);
 		MyWorkerInfo->wi_dboid = InvalidOid;
 		MyWorkerInfo->wi_tableoid = InvalidOid;
 		MyWorkerInfo->wi_proc = NULL;
@@ -1717,7 +1712,7 @@ FreeWorkerInfo(int code, Datum arg)
 		MyWorkerInfo->wi_cost_delay = 0;
 		MyWorkerInfo->wi_cost_limit = 0;
 		MyWorkerInfo->wi_cost_limit_base = 0;
-		AutoVacuumShmem->av_freeWorkers = MyWorkerInfo;
+		dlist_push_head(&AutoVacuumShmem->av_freeWorkers, &MyWorkerInfo->wi_links);
 		/* not mine anymore */
 		MyWorkerInfo = NULL;
 
@@ -1767,7 +1762,7 @@ autovac_balance_cost(void)
 								autovacuum_vac_cost_delay : VacuumCostDelay);
 	double		cost_total;
 	double		cost_avail;
-	WorkerInfo	worker;
+	dlist_iter	iter;
 
 	/* not set? nothing to do */
 	if (vac_cost_limit <= 0 || vac_cost_delay <= 0)
@@ -1775,19 +1770,14 @@ autovac_balance_cost(void)
 
 	/* caculate the total base cost limit of active workers */
 	cost_total = 0.0;
-	worker = (WorkerInfo) SHMQueueNext(&AutoVacuumShmem->av_runningWorkers,
-									   &AutoVacuumShmem->av_runningWorkers,
-									   offsetof(WorkerInfoData, wi_links));
-	while (worker)
+	dlist_foreach(iter, &AutoVacuumShmem->av_runningWorkers)
 	{
+		WorkerInfo worker = dlist_container(WorkerInfoData, wi_links, iter.cur);
+
 		if (worker->wi_proc != NULL &&
 			worker->wi_cost_limit_base > 0 && worker->wi_cost_delay > 0)
 			cost_total +=
 				(double) worker->wi_cost_limit_base / worker->wi_cost_delay;
-
-		worker = (WorkerInfo) SHMQueueNext(&AutoVacuumShmem->av_runningWorkers,
-										   &worker->wi_links,
-										 offsetof(WorkerInfoData, wi_links));
 	}
 	/* there are no cost limits -- nothing to do */
 	if (cost_total <= 0)
@@ -1798,11 +1788,10 @@ autovac_balance_cost(void)
 	 * limit to autovacuum_vacuum_cost_limit.
 	 */
 	cost_avail = (double) vac_cost_limit / vac_cost_delay;
-	worker = (WorkerInfo) SHMQueueNext(&AutoVacuumShmem->av_runningWorkers,
-									   &AutoVacuumShmem->av_runningWorkers,
-									   offsetof(WorkerInfoData, wi_links));
-	while (worker)
+	dlist_foreach(iter, &AutoVacuumShmem->av_runningWorkers)
 	{
+		WorkerInfo worker = dlist_container(WorkerInfoData, wi_links, iter.cur);
+
 		if (worker->wi_proc != NULL &&
 			worker->wi_cost_limit_base > 0 && worker->wi_cost_delay > 0)
 		{
@@ -1824,10 +1813,6 @@ autovac_balance_cost(void)
 				 worker->wi_cost_limit, worker->wi_cost_limit_base,
 				 worker->wi_cost_delay);
 		}
-
-		worker = (WorkerInfo) SHMQueueNext(&AutoVacuumShmem->av_runningWorkers,
-										   &worker->wi_links,
-										 offsetof(WorkerInfoData, wi_links));
 	}
 }
 
@@ -2205,10 +2190,10 @@ do_autovacuum(void)
 	{
 		Oid			relid = lfirst_oid(cell);
 		autovac_table *tab;
-		WorkerInfo	worker;
 		bool		skipit;
 		int			stdVacuumCostDelay;
 		int			stdVacuumCostLimit;
+		dlist_iter	iter;
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -2225,29 +2210,23 @@ do_autovacuum(void)
 		 * worker.
 		 */
 		skipit = false;
-		worker = (WorkerInfo) SHMQueueNext(&AutoVacuumShmem->av_runningWorkers,
-										 &AutoVacuumShmem->av_runningWorkers,
-										 offsetof(WorkerInfoData, wi_links));
-		while (worker)
+		dlist_foreach(iter, &AutoVacuumShmem->av_runningWorkers)
 		{
+			WorkerInfo	worker = dlist_container(WorkerInfoData, wi_links, iter.cur);
+
 			/* ignore myself */
 			if (worker == MyWorkerInfo)
-				goto next_worker;
+				continue;
 
 			/* ignore workers in other databases */
 			if (worker->wi_dboid != MyDatabaseId)
-				goto next_worker;
+				continue;
 
 			if (worker->wi_tableoid == relid)
 			{
 				skipit = true;
 				break;
 			}
-
-	next_worker:
-			worker = (WorkerInfo) SHMQueueNext(&AutoVacuumShmem->av_runningWorkers,
-											   &worker->wi_links,
-										 offsetof(WorkerInfoData, wi_links));
 		}
 		LWLockRelease(AutovacuumLock);
 		if (skipit)
@@ -2912,8 +2891,8 @@ AutoVacuumShmemInit(void)
 		Assert(!found);
 
 		AutoVacuumShmem->av_launcherpid = 0;
-		AutoVacuumShmem->av_freeWorkers = NULL;
-		SHMQueueInit(&AutoVacuumShmem->av_runningWorkers);
+		dlist_init(&AutoVacuumShmem->av_freeWorkers);
+		dlist_init(&AutoVacuumShmem->av_runningWorkers);
 		AutoVacuumShmem->av_startingWorker = NULL;
 
 		worker = (WorkerInfo) ((char *) AutoVacuumShmem +
@@ -2921,10 +2900,7 @@ AutoVacuumShmemInit(void)
 
 		/* initialize the WorkerInfo free list */
 		for (i = 0; i < autovacuum_max_workers; i++)
-		{
-			worker[i].wi_links.next = (SHM_QUEUE *) AutoVacuumShmem->av_freeWorkers;
-			AutoVacuumShmem->av_freeWorkers = &worker[i];
-		}
+			dlist_push_head(&AutoVacuumShmem->av_freeWorkers, &worker[i].wi_links);
 	}
 	else
 		Assert(found);

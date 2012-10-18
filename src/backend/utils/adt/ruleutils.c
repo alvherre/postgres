@@ -6755,11 +6755,12 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 		int			varno = ((RangeTblRef *) jtnode)->rtindex;
 		RangeTblEntry *rte = rt_fetch(varno, query->rtable);
 		char	   *refname = get_rtable_name(varno, context);
-		bool		gavealias = false;
+		bool		printalias;
 
 		if (rte->lateral)
 			appendStringInfoString(buf, "LATERAL ");
 
+		/* Print the FROM item proper */
 		switch (rte->rtekind)
 		{
 			case RTE_RELATION:
@@ -6792,11 +6793,12 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				break;
 		}
 
+		/* Print the relation alias, if needed */
+		printalias = false;
 		if (rte->alias != NULL)
 		{
 			/* Always print alias if user provided one */
-			appendStringInfo(buf, " %s", quote_identifier(refname));
-			gavealias = true;
+			printalias = true;
 		}
 		else if (rte->rtekind == RTE_RELATION)
 		{
@@ -6806,10 +6808,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 			 * resolve a conflict).
 			 */
 			if (strcmp(refname, get_relation_name(rte->relid)) != 0)
-			{
-				appendStringInfo(buf, " %s", quote_identifier(refname));
-				gavealias = true;
-			}
+				printalias = true;
 		}
 		else if (rte->rtekind == RTE_FUNCTION)
 		{
@@ -6818,16 +6817,28 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 			 * renaming of the function and/or instability of the
 			 * FigureColname rules for things that aren't simple functions.
 			 */
-			appendStringInfo(buf, " %s", quote_identifier(refname));
-			gavealias = true;
+			printalias = true;
 		}
+		else if (rte->rtekind == RTE_CTE)
+		{
+			/*
+			 * No need to print alias if it's same as CTE name (this would
+			 * normally be the case, but not if set_rtable_names had to
+			 * resolve a conflict).
+			 */
+			if (strcmp(refname, rte->ctename) != 0)
+				printalias = true;
+		}
+		if (printalias)
+			appendStringInfo(buf, " %s", quote_identifier(refname));
 
+		/* Print the column definitions or aliases, if needed */
 		if (rte->rtekind == RTE_FUNCTION)
 		{
 			if (rte->funccoltypes != NIL)
 			{
 				/* Function returning RECORD, reconstruct the columndefs */
-				if (!gavealias)
+				if (!printalias)
 					appendStringInfo(buf, " AS ");
 				get_from_clause_coldeflist(rte->eref->colnames,
 										   rte->funccoltypes,
