@@ -34,6 +34,7 @@
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
+#include "catalog/objectaccess.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_operator.h"
@@ -687,7 +688,8 @@ index_create(Relation heapRelation,
 			 bool initdeferred,
 			 bool allow_system_table_mods,
 			 bool skip_build,
-			 bool concurrent)
+			 bool concurrent,
+			 bool is_internal)
 {
 	Oid			heapRelationId = RelationGetRelid(heapRelation);
 	Relation	pg_class;
@@ -1019,6 +1021,17 @@ index_create(Relation heapRelation,
 		Assert(!initdeferred);
 	}
 
+	/* Post creation hook for new index */
+	if (object_access_hook)
+	{
+		ObjectAccessPostCreate	post_create_args;
+
+		memset(&post_create_args, 0, sizeof(ObjectAccessPostCreate));
+		post_create_args.is_internal = is_internal;
+		(*object_access_hook)(OAT_POST_CREATE, RelationRelationId,
+							  indexRelationId, 0, &post_create_args);
+	}
+
 	/*
 	 * Advance the command counter so that we can see the newly-entered
 	 * catalog tuples for the index.
@@ -1321,6 +1334,18 @@ index_drop(Oid indexId, bool concurrent)
 	 * In the concurrent case we make sure that nobody can be looking at the
 	 * indexes by dropping the index in multiple steps, so we don't need a full
 	 * AccessExclusiveLock yet.
+	 *
+	 * All predicate locks on the index are about to be made invalid. Promote
+	 * them to relation locks on the heap. For correctness the index must not
+	 * be seen with indisvalid = true during query planning after the move
+	 * starts, so that the index will not be used for a scan after the
+	 * predicate lock move, as this could create new predicate locks on the
+	 * index which would not ensure a heap relation lock. Also, the index must
+	 * not be seen during execution of a heap tuple insert with indisready =
+	 * false before the move is complete, since the conflict with the
+	 * predicate lock on the index gap could be missed before the lock on the
+	 * heap relation is in place to detect a conflict based on the heap tuple
+	 * insert.
 	 */
 	heapId = IndexGetRelation(indexId, false);
 	if (concurrent)
@@ -1446,14 +1471,21 @@ index_drop(Oid indexId, bool concurrent)
 		}
 
 		/*
+		 * No more predicate locks will be acquired on this index, and we're
+		 * about to stop doing inserts into the index which could show
+		 * conflicts with existing predicate locks, so now is the time to move
+		 * them to the heap relation.
+		 */
+		userHeapRelation = heap_open(heapId, ShareUpdateExclusiveLock);
+		userIndexRelation = index_open(indexId, ShareUpdateExclusiveLock);
+		TransferPredicateLocksToHeapRelation(userIndexRelation);
+
+		/*
 		 * Now we are sure that nobody uses the index for queries, they just
 		 * might have it opened for updating it. So now we can unset
 		 * indisready and wait till nobody could update the index anymore.
 		 */
 		indexRelation = heap_open(IndexRelationId, RowExclusiveLock);
-
-		userHeapRelation = heap_open(heapId, ShareUpdateExclusiveLock);
-		userIndexRelation = index_open(indexId, ShareUpdateExclusiveLock);
 
 		tuple = SearchSysCacheCopy1(INDEXRELID,
 									ObjectIdGetDatum(indexId));
@@ -1515,12 +1547,8 @@ index_drop(Oid indexId, bool concurrent)
 		userHeapRelation = heap_open(heapId, ShareUpdateExclusiveLock);
 		userIndexRelation = index_open(indexId, AccessExclusiveLock);
 	}
-
-	/*
-	 * All predicate locks on the index are about to be made invalid. Promote
-	 * them to relation locks on the heap.
-	 */
-	TransferPredicateLocksToHeapRelation(userIndexRelation);
+	else
+		TransferPredicateLocksToHeapRelation(userIndexRelation);
 
 	/*
 	 * Schedule physical removal of the files
