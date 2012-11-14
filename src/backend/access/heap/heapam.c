@@ -3915,7 +3915,7 @@ l3:
 
 					membermode = TUPLOCK_from_mxstatus(members[i].status);
 
-					if (membermode > mode)
+					if (membermode >= mode)
 					{
 						if (have_tuple_lock)
 							UnlockTupleTuplock(relation, tid, mode);
