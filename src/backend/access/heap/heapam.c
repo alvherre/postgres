@@ -109,19 +109,19 @@ static bool ConditionalMultiXactIdWait(MultiXactId multi,
 						   MultiXactStatus status, int *remaining,
 						   uint16 infomask);
 
-typedef struct TupleLockExtraInfo
-{
-	LOCKMODE	hwlock;
-	MultiXactStatus	lockstatus;
-	MultiXactStatus	updstatus;
-} TupleLockExtraInfo;
 
 /*
  * Each tuple lock mode has a corresponding heavyweight lock, and one or two
  * corresponding MultiXactStatuses (one to merely lock tuples, another one to
  * update them).
  */
-static const TupleLockExtraInfo tupleLockExtraInfo[MaxLockTupleMode + 1] =
+static const struct
+{
+	LOCKMODE	hwlock;
+	MultiXactStatus	lockstatus;
+	MultiXactStatus	updstatus;
+}
+tupleLockExtraInfo[MaxLockTupleMode + 1] =
 {
 	{	/* LockTupleKeyShare */
 		AccessShareLock,
