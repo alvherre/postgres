@@ -750,7 +750,13 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 		if (HeapTupleHeaderInfomaskIsOnlyLocked(tuple->t_infomask))
 		{
-			if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+			/*
+			 * If it's only locked but neither EXCL_LOCK nor KEYSHR_LOCK
+			 * is set, it cannot possibly be running.
+			 */
+			if ((tuple->t_infomask & (HEAP_XMAX_EXCL_LOCK |
+									  HEAP_XMAX_KEYSHR_LOCK)) &&
+				MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 				return HeapTupleBeingUpdated;
 
 			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
@@ -1337,7 +1343,14 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 		{
 			if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 			{
-				if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+				/*
+				 * If it's only locked but neither EXCL_LOCK nor KEYSHR_LOCK
+				 * are set, it cannot possibly be running; otherwise have to
+				 * check.
+				 */
+				if ((tuple->t_infomask & (HEAP_XMAX_EXCL_LOCK |
+										  HEAP_XMAX_KEYSHR_LOCK)) &&
+					MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 					return HEAPTUPLE_LIVE;
 				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 

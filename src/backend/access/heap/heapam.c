@@ -3901,11 +3901,12 @@ l3:
 			int		nmembers;
 			MultiXactMember *members;
 
-			nmembers = GetMultiXactIdMembers(xwait, &members, true);
-			if (nmembers == -1 &&
-				((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-				 !(infomask & HEAP_XMAX_LOCK_ONLY)))
-				elog(ERROR, "invalid infomask with old MultiXactId value");
+			/*
+			 * We don't need to allow old multixacts here; if that had been the
+			 * case, HeapTupleSatisfiesUpdate would have returned MayBeUpdated
+			 * and we wouldn't be here.
+			 */
+			nmembers = GetMultiXactIdMembers(xwait, &members, false);
 
 			for (i = 0; i < nmembers; i++)
 			{
@@ -4070,11 +4071,12 @@ l3:
 				int		nmembers;
 				MultiXactMember *members;
 
-				nmembers = GetMultiXactIdMembers(xwait, &members, true);
-				if (nmembers == -1 &&
-					((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-					 !(infomask & HEAP_XMAX_LOCK_ONLY)))
-					elog(ERROR, "invalid infomask with old MultiXactId value");
+				/*
+				 * We don't need to allow old multixacts here; if that had been
+				 * the case, HeapTupleSatisfiesUpdate would have returned
+				 * MayBeUpdated and we wouldn't be here.
+				 */
+				nmembers = GetMultiXactIdMembers(xwait, &members, false);
 
 				if (nmembers <= 0)
 				{
@@ -4529,6 +4531,20 @@ l5:
 		 * for databases upgraded by pg_upgrade; MultiXactIdExpand assumes that
 		 * such multis are never passed.
 		 */
+
+		/*
+		 * A multixact together with LOCK_ONLY set but neither EXCL_LOCK nor
+		 * KEYSHR_LOCK (i.e. a pg_upgraded share locked tuple) cannot possibly
+		 * be running anymore.
+		 */
+		if (!(old_infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) &&
+			(old_infomask & HEAP_XMAX_LOCK_ONLY))
+		{
+			old_infomask &= ~HEAP_XMAX_IS_MULTI;
+			old_infomask |= HEAP_XMAX_INVALID;
+			goto l5;
+		}
+
 		if (!MultiXactIdIsRunning(xmax))
 		{
 			if ((old_infomask & HEAP_XMAX_LOCK_ONLY) ||
@@ -5235,23 +5251,20 @@ HeapTupleGetUpdateXid(HeapTupleHeader tuple)
  *
  * Note that in case we return false, the number of remaining members is
  * not to be trusted.
- *
- * The infomask is passed for consistency checks.
  */
 static bool
 Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
-						   int *remaining, uint16 infomask, bool nowait)
+				   int *remaining, uint16 infomask, bool nowait)
 {
+	bool		allow_old;
 	bool		result = true;
 	MultiXactMember *members;
 	int			nmembers;
 	int			remain = 0;
 
-	nmembers = GetMultiXactIdMembers(multi, &members, true);
-	if (nmembers == -1 &&
-		((infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) ||
-		 !(infomask & HEAP_XMAX_LOCK_ONLY)))
-		elog(ERROR, "invalid infomask with old MultiXactId value");
+	allow_old = (!(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) &&
+				 (infomask & HEAP_XMAX_LOCK_ONLY));
+	nmembers = GetMultiXactIdMembers(multi, &members, allow_old);
 
 	if (nmembers >= 0)
 	{

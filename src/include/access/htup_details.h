@@ -190,7 +190,7 @@ struct HeapTupleHeaderData
  * HEAP_XMAX_LOCK_ONLY bit is set.
  *
  * See also HeapTupleHeaderIsOnlyLocked, which also checks for a possible
- * aborted transaction.
+ * aborted updater transaction.
  *
  * XXX should we AssertMacro() that HEAP_XMAX_INVALID is not set?
  */

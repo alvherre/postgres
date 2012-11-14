@@ -161,17 +161,16 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				MultiXactMember *members;
 				int			nmembers;
 				bool		first = true;
+				bool		allow_old;
 
 				values[Atnum_ismulti] = pstrdup("true");
 
-				nmembers = GetMultiXactIdMembers(xmax, &members, true);
+				allow_old = (!(infomask & (HEAP_XMAX_EXCL_LOCK |
+										   HEAP_XMAX_KEYSHR_LOCK)) &&
+							 (infomask & HEAP_XMAX_LOCK_ONLY));
+				nmembers = GetMultiXactIdMembers(xmax, &members, allow_old);
 				if (nmembers == -1)
 				{
-					if (((infomask & (HEAP_XMAX_EXCL_LOCK |
-									  HEAP_XMAX_KEYSHR_LOCK)) ||
-						 !(infomask & HEAP_XMAX_LOCK_ONLY)))
-						elog(ERROR, "invalid infomask with old MultiXactId value");
-
 					values[Atnum_xids] = "{0}";
 					values[Atnum_modes] = "{transient upgrade status}";
 					values[Atnum_pids] = "{0}";

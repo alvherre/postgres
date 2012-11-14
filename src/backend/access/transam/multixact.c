@@ -517,11 +517,11 @@ MultiXactIdIsRunning(MultiXactId multi)
 
 	debug_elog3(DEBUG2, "IsRunning %u?", multi);
 
-	nmembers = GetMultiXactIdMembers(multi, &members, true);
 	/*
-	 * XXX we don't have the infomask to run the required consistency check
-	 * here; the required notational overhead seems excessive.
+	 * Note: callers are expected to have checked that the given multi
+	 * cannot possibly come from a pg_upgraded database.
 	 */
+	nmembers = GetMultiXactIdMembers(multi, &members, false);
 
 	if (nmembers < 0)
 	{
@@ -1046,9 +1046,11 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
  *		Returns the set of MultiXactMembers that make up a MultiXactId
  *
  * If the given MultiXactId is older than the value we know to be oldest, we
- * return -1.  The caller is expected to verify that it's a valid case:
- * currently the only way for that to happen is that an old cluster was
- * upgraded with pg_upgrade and some tuples in it were share-locked.
+ * return -1.  The caller is expected to allow that only in permissible cases,
+ * i.e. when the infomask lets it presuppose that the tuple had been
+ * share-locked before a pg_upgrade; this means that the HEAP_XMAX_LOCK_ONLY
+ * needs to be set, but HEAP_XMAX_KEYSHR_LOCK and HEAP_XMAX_EXCL_LOCK are not
+ * set.
  *
  * Other border conditions, such as trying to read a value that's larger than
  * the value currently known as the next to assign, raise an error.  Previously
@@ -1056,7 +1058,8 @@ GetNewMultiXactId(int nmembers, MultiXactOffset *offset)
  * results, it is dangerous to do that.
  */
 int
-GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members, bool allow_old)
+GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members,
+					  bool allow_old)
 {
 	int			pageno;
 	int			prev_pageno;
@@ -1121,9 +1124,10 @@ GetMultiXactIdMembers(MultiXactId multi, MultiXactMember **members, bool allow_o
 
 	if (MultiXactIdPrecedes(multi, oldestMXact))
 	{
-		elog(allow_old ? DEBUG1 : ERROR,
-			 "MultiXactId %u does no longer exist -- apparent wraparound",
-			 multi);
+		ereport(allow_old ? DEBUG1 : ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("MultiXactId %u does no longer exist -- apparent wraparound",
+						multi)));
 		return -1;
 	}
 
@@ -1310,6 +1314,7 @@ pg_get_multixact_members(PG_FUNCTION_ARGS)
 		oldcxt = MemoryContextSwitchTo(funccxt->multi_call_memory_ctx);
 
 		multi = palloc(sizeof(multixact));
+		/* no need to allow for old values here */
 		multi->nmembers = GetMultiXactIdMembers(mxid, &multi->members, false);
 		multi->iter = 0;
 
