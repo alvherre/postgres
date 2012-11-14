@@ -133,15 +133,15 @@ static const TupleLockExtraInfo tupleLockExtraInfo[MaxLockTupleMode + 1] =
 		MultiXactStatusForShare,
 		-1	/* Share does not allow updating tuples */
 	},
-	{	/* LockTupleUpdate */
+	{	/* LockTupleNoKeyExclusive */
 		ExclusiveLock,
+		MultiXactStatusForNoKeyUpdate,
+		MultiXactStatusNoKeyUpdate
+	},
+	{	/* LockTupleExclusive */
+		AccessExclusiveLock,
 		MultiXactStatusForUpdate,
 		MultiXactStatusUpdate
-	},
-	{	/* LockTupleKeyUpdate */
-		AccessExclusiveLock,
-		MultiXactStatusForKeyUpdate,
-		MultiXactStatusKeyUpdate
 	}
 };
 
@@ -150,10 +150,10 @@ static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
 {
 	LockTupleKeyShare,		/* ForKeyShare */
 	LockTupleShare,			/* ForShare */
-	LockTupleUpdate,		/* ForUpdate */
-	LockTupleKeyUpdate,		/* ForKeyUpdate */
-	LockTupleUpdate,		/* Update */
-	LockTupleKeyUpdate		/* KeyUpdate */
+	LockTupleNoKeyExclusive,		/* ForNoKeyUpdate */
+	LockTupleExclusive,		/* ForUpdate */
+	LockTupleNoKeyExclusive,		/* NoKeyUpdate */
+	LockTupleExclusive		/* Update */
 };
 
 /*
@@ -173,7 +173,7 @@ static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
 			(MultiXactStatusLock[(status)])
 /* Get the is_update bit for a given MultiXactStatus */
 #define ISUPDATE_from_mxstatus(status) \
-			((status) > MultiXactStatusForKeyUpdate)
+			((status) > MultiXactStatusForUpdate)
 /* Get the LOCKMODE for a given MultiXactStatus */
 #define LOCKMODE_from_mxstatus(status) \
 			(tupleLockExtraInfo[TUPLOCK_from_mxstatus((status))].hwlock)
@@ -2567,7 +2567,7 @@ l1:
 		 */
 		if (!have_tuple_lock)
 		{
-			LockTupleTuplock(relation, &(tp.t_self), LockTupleKeyUpdate);
+			LockTupleTuplock(relation, &(tp.t_self), LockTupleExclusive);
 			have_tuple_lock = true;
 		}
 
@@ -2579,7 +2579,7 @@ l1:
 		if (infomask & HEAP_XMAX_IS_MULTI)
 		{
 			/* wait for multixact */
-			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusKeyUpdate,
+			MultiXactIdWait((MultiXactId) xwait, MultiXactStatusUpdate,
 							NULL, infomask);
 			LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -2656,7 +2656,7 @@ l1:
 			hufd->cmax = 0;		/* for lack of an InvalidCommandId value */
 		UnlockReleaseBuffer(buffer);
 		if (have_tuple_lock)
-			UnlockTupleTuplock(relation, &(tp.t_self), LockTupleKeyUpdate);
+			UnlockTupleTuplock(relation, &(tp.t_self), LockTupleExclusive);
 		if (vmbuffer != InvalidBuffer)
 			ReleaseBuffer(vmbuffer);
 		return result;
@@ -2703,7 +2703,7 @@ l1:
 
 	compute_new_xmax_infomask(HeapTupleHeaderGetRawXmax(tp.t_data),
 							  tp.t_data->t_infomask, tp.t_data->t_infomask2,
-							  xid, LockTupleKeyUpdate, true,
+							  xid, LockTupleExclusive, true,
 							  &new_xmax, &new_infomask, &new_infomask2);
 
 	/* store transaction information of xact deleting the tuple */
@@ -2784,7 +2784,7 @@ l1:
 	 * Release the lmgr tuple lock, if we had it.
 	 */
 	if (have_tuple_lock)
-		UnlockTupleTuplock(relation, &(tp.t_self), LockTupleKeyUpdate);
+		UnlockTupleTuplock(relation, &(tp.t_self), LockTupleExclusive);
 
 	pgstat_count_heap_delete(relation);
 
@@ -2958,8 +2958,8 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 								 &oldtup, newtup);
 	if (satisfies_key)
 	{
-		tuplock = LockTupleUpdate;
-		mxact_status = MultiXactStatusUpdate;
+		tuplock = LockTupleNoKeyExclusive;
+		mxact_status = MultiXactStatusNoKeyUpdate;
 		key_intact = true;
 
 		/*
@@ -2975,8 +2975,8 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	}
 	else
 	{
-		tuplock = LockTupleKeyUpdate;
-		mxact_status = MultiXactStatusKeyUpdate;
+		tuplock = LockTupleExclusive;
+		mxact_status = MultiXactStatusUpdate;
 		key_intact = false;
 	}
 
@@ -3086,7 +3086,7 @@ l2:
 			 * an update conflict, and we have to return HeapTupleUpdated
 			 * below.
 			 *
-			 * In the LockTupleKeyUpdate case, we still need to preserve the
+			 * In the LockTupleExclusive case, we still need to preserve the
 			 * surviving members: those would include the tuple locks we had
 			 * before this one, which are important to keep in case this
 			 * subxact aborts.
@@ -4050,7 +4050,7 @@ l3:
 				require_sleep = false;
 			}
 		}
-		else if (mode == LockTupleUpdate)
+		else if (mode == LockTupleNoKeyExclusive)
 		{
 			/*
 			 * If we're requesting Update, we might also be able to avoid
@@ -4137,7 +4137,7 @@ l3:
 				MultiXactStatus status = get_mxact_status_for_lock(mode, false);
 
 				/* We only ever lock tuples, never update them */
-				if (status >= MultiXactStatusUpdate)
+				if (status >= MultiXactStatusNoKeyUpdate)
 					elog(ERROR, "invalid lock mode in heap_lock_tuple");
 
 				/* wait for multixact to end */
@@ -4463,7 +4463,7 @@ l5:
 		if (is_update)
 		{
 			new_xmax = add_to_xmax;
-			if (mode == LockTupleKeyUpdate)
+			if (mode == LockTupleExclusive)
 				new_infomask2 |= HEAP_KEYS_UPDATED;
 		}
 		else
@@ -4481,11 +4481,11 @@ l5:
 					GetMultiXactIdHintBits(new_xmax, &new_infomask,
 										   &new_infomask2);
 					break;
-				case LockTupleUpdate:
+				case LockTupleNoKeyExclusive:
 					new_xmax = add_to_xmax;
 					new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
 					break;
-				case LockTupleKeyUpdate:
+				case LockTupleExclusive:
 					new_xmax = add_to_xmax;
 					new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
 					new_infomask2 |= HEAP_KEYS_UPDATED;
@@ -4553,9 +4553,9 @@ l5:
 		MultiXactStatus		new_status;
 
 		if (old_infomask2 & HEAP_KEYS_UPDATED)
-			status = MultiXactStatusKeyUpdate;
-		else
 			status = MultiXactStatusUpdate;
+		else
+			status = MultiXactStatusNoKeyUpdate;
 
 		new_status = get_mxact_status_for_lock(mode, is_update);
 		/*
@@ -4583,9 +4583,9 @@ l5:
 			else if (old_infomask & HEAP_XMAX_EXCL_LOCK)
 			{
 				if (old_infomask2 & HEAP_KEYS_UPDATED)
-					status = MultiXactStatusForKeyUpdate;
-				else
 					status = MultiXactStatusForUpdate;
+				else
+					status = MultiXactStatusForNoKeyUpdate;
 			}
 			else
 			{
@@ -4605,9 +4605,9 @@ l5:
 		{
 			/* it's an update, but which kind? */
 			if (old_infomask2 & HEAP_KEYS_UPDATED)
-				status = MultiXactStatusKeyUpdate;
-			else
 				status = MultiXactStatusUpdate;
+			else
+				status = MultiXactStatusNoKeyUpdate;
 		}
 
 		new_status = get_mxact_status_for_lock(mode, is_update);
@@ -4655,9 +4655,9 @@ l5:
 		MultiXactStatus		new_status;
 
 		if (old_infomask2 & HEAP_KEYS_UPDATED)
-			status = MultiXactStatusKeyUpdate;
-		else
 			status = MultiXactStatusUpdate;
+		else
+			status = MultiXactStatusNoKeyUpdate;
 
 		new_status = get_mxact_status_for_lock(mode, is_update);
 		/*
@@ -5108,18 +5108,18 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 			case MultiXactStatusForShare:
 				/* nothing here */
 				break;
-			case MultiXactStatusForUpdate:
+			case MultiXactStatusForNoKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				break;
-			case MultiXactStatusForKeyUpdate:
+			case MultiXactStatusForUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				bits2 |= HEAP_KEYS_UPDATED;
 				break;
-			case MultiXactStatusUpdate:
+			case MultiXactStatusNoKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				has_update = true;
 				break;
-			case MultiXactStatusKeyUpdate:
+			case MultiXactStatusUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
 				bits2 |= HEAP_KEYS_UPDATED;
 				has_update = true;
@@ -5168,8 +5168,8 @@ MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask)
 			/* Ignore lockers */
 			if (members[i].status == MultiXactStatusForKeyShare ||
 				members[i].status == MultiXactStatusForShare ||
-				members[i].status == MultiXactStatusForUpdate ||
-				members[i].status == MultiXactStatusForKeyUpdate)
+				members[i].status == MultiXactStatusForNoKeyUpdate ||
+				members[i].status == MultiXactStatusForUpdate)
 				continue;
 
 			/* ignore aborted transactions */
@@ -5177,8 +5177,8 @@ MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask)
 				continue;
 			/* there should be at most one non-aborted updater */
 			Assert(update_xact == InvalidTransactionId);
-			Assert(members[i].status == MultiXactStatusUpdate ||
-				   members[i].status == MultiXactStatusKeyUpdate);
+			Assert(members[i].status == MultiXactStatusNoKeyUpdate ||
+				   members[i].status == MultiXactStatusUpdate);
 			update_xact = members[i].xid;
 #ifndef USE_ASSERT_CHECKING
 			/*

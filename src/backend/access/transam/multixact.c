@@ -480,7 +480,7 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
 	for (i = 0, j = 0; i < nmembers; i++)
 	{
 		if (TransactionIdIsInProgress(members[i].xid) ||
-			((members[i].status > MultiXactStatusForKeyUpdate) &&
+			((members[i].status > MultiXactStatusForUpdate) &&
 			 TransactionIdDidCommit(members[i].xid)))
 		{
 			newMembers[j].xid = members[i].xid;
@@ -836,7 +836,7 @@ RecordNewMultiXact(MultiXactId multi, MultiXactOffset offset,
 		int			flagsoff;
 		int			memberoff;
 
-		Assert(members[i].status <= MultiXactStatusKeyUpdate);
+		Assert(members[i].status <= MultiXactStatusUpdate);
 
 		pageno = MXOffsetToMemberPage(offset);
 		memberoff = MXOffsetToMemberOffset(offset);
@@ -1506,14 +1506,14 @@ mxstatus_to_string(MultiXactStatus status)
 			return "keysh";
 		case MultiXactStatusForShare:
 			return "sh";
+		case MultiXactStatusForNoKeyUpdate:
+			return "fornokeyupd";
 		case MultiXactStatusForUpdate:
 			return "forupd";
-		case MultiXactStatusForKeyUpdate:
-			return "forkeyupd";
+		case MultiXactStatusNoKeyUpdate:
+			return "nokeyupd";
 		case MultiXactStatusUpdate:
 			return "upd";
-		case MultiXactStatusKeyUpdate:
-			return "keyup";
 		default:
 			elog(ERROR, "unrecognized multixact status %d", status);
 			return "";

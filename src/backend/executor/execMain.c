@@ -794,7 +794,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 
 		switch (rc->markType)
 		{
-			case ROW_MARK_KEYUPDATE:
+			case ROW_MARK_KEYEXCLUSIVE:
 			case ROW_MARK_EXCLUSIVE:
 			case ROW_MARK_SHARE:
 			case ROW_MARK_KEYSHARE:
@@ -1713,7 +1713,7 @@ EvalPlanQual(EState *estate, EPQState *epqstate,
 	/*
 	 * Get and lock the updated version of the row; if fail, return NULL.
 	 */
-	copyTuple = EvalPlanQualFetch(estate, relation, LockTupleUpdate,
+	copyTuple = EvalPlanQualFetch(estate, relation, LockTupleNoKeyExclusive,
 								  tid, priorXmax);
 
 	if (copyTuple == NULL)

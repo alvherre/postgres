@@ -2585,7 +2585,7 @@ ltrmark:;
 		tuple.t_self = *tid;
 		test = heap_lock_tuple(relation, &tuple,
 							   estate->es_output_cid,
-							   LockTupleUpdate, false /* wait */,
+							   LockTupleNoKeyExclusive, false /* wait */,
 							   false, &buffer, &hufd);
 		switch (test)
 		{

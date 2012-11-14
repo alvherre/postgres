@@ -31,22 +31,22 @@
 
 /*
  * Possible multixact lock modes ("status").  The first four modes are for
- * tuple locks (FOR KEY SHARE, FOR SHARE, FOR UPDATE, FOR KEY UPDATE); the
+ * tuple locks (FOR KEY SHARE, FOR SHARE, FOR NO KEY UPDATE, FOR UPDATE); the
  * next two are used for update and delete modes.
  */
 typedef enum
 {
 	MultiXactStatusForKeyShare = 0x00,
 	MultiXactStatusForShare = 0x01,
-	MultiXactStatusForUpdate = 0x02,
-	MultiXactStatusForKeyUpdate = 0x03,
+	MultiXactStatusForNoKeyUpdate = 0x02,
+	MultiXactStatusForUpdate = 0x03,
 	/* an update that doesn't touch "key" columns */
-	MultiXactStatusUpdate = 0x04,
+	MultiXactStatusNoKeyUpdate = 0x04,
 	/* other updates, and delete */
-	MultiXactStatusKeyUpdate = 0x05
+	MultiXactStatusUpdate = 0x05
 } MultiXactStatus;
 
-#define MaxMultiXactStatus MultiXactStatusKeyUpdate
+#define MaxMultiXactStatus MultiXactStatusUpdate
 
 
 typedef struct MultiXactMember

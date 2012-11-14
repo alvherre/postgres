@@ -6,12 +6,12 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s1d: SELECT * FROM foo FOR UPDATE;
+step s1d: SELECT * FROM foo FOR NO KEY UPDATE;
 key            value          
 
 1              1              
 step s1r: ROLLBACK TO f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1c: COMMIT;
 step s2l: <... completed>
 key            value          
@@ -25,11 +25,11 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s1d: SELECT * FROM foo FOR UPDATE;
+step s1d: SELECT * FROM foo FOR NO KEY UPDATE;
 key            value          
 
 1              1              
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1r: ROLLBACK TO f;
 step s1c: COMMIT;
 step s2l: <... completed>
@@ -44,12 +44,12 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s1d: SELECT * FROM foo FOR UPDATE;
+step s1d: SELECT * FROM foo FOR NO KEY UPDATE;
 key            value          
 
 1              1              
 step s1r: ROLLBACK TO f;
-step s2l2: SELECT * FROM foo FOR UPDATE;
+step s2l2: SELECT * FROM foo FOR NO KEY UPDATE;
 key            value          
 
 1              1              
@@ -62,11 +62,11 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s1d: SELECT * FROM foo FOR UPDATE;
+step s1d: SELECT * FROM foo FOR NO KEY UPDATE;
 key            value          
 
 1              1              
-step s2l2: SELECT * FROM foo FOR UPDATE; <waiting ...>
+step s2l2: SELECT * FROM foo FOR NO KEY UPDATE; <waiting ...>
 step s1r: ROLLBACK TO f;
 step s2l2: <... completed>
 key            value          

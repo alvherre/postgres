@@ -2042,7 +2042,7 @@ preprocess_rowmarks(PlannerInfo *root)
 		newrc->rowmarkId = ++(root->glob->lastRowMarkId);
 		switch (rc->strength)
 		{
-			case LCS_FORUPDATE:
+			case LCS_FORNOKEYUPDATE:
 				newrc->markType = ROW_MARK_EXCLUSIVE;
 				break;
 			case LCS_FORSHARE:
@@ -2051,8 +2051,8 @@ preprocess_rowmarks(PlannerInfo *root)
 			case LCS_FORKEYSHARE:
 				newrc->markType = ROW_MARK_KEYSHARE;
 				break;
-			case LCS_FORKEYUPDATE:
-				newrc->markType = ROW_MARK_KEYUPDATE;
+			case LCS_FORUPDATE:
+				newrc->markType = ROW_MARK_KEYEXCLUSIVE;
 				break;
 			default:
 				elog(ERROR, "unsupported rowmark type %d", rc->strength);

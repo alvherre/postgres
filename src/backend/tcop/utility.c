@@ -2265,8 +2265,8 @@ CreateCommandTag(Node *parsetree)
 							/* not 100% but probably close enough */
 							switch (((RowMarkClause *) linitial(stmt->rowMarks))->strength)
 							{
-								case LCS_FORUPDATE:
-									tag = "SELECT FOR UPDATE";
+								case LCS_FORNOKEYUPDATE:
+									tag = "SELECT FOR NO KEY UPDATE";
 									break;
 								case LCS_FORSHARE:
 									tag = "SELECT FOR SHARE";
@@ -2274,8 +2274,8 @@ CreateCommandTag(Node *parsetree)
 								case LCS_FORKEYSHARE:
 									tag = "SELECT FOR KEY SHARE";
 									break;
-								case LCS_FORKEYUPDATE:
-									tag = "SELECT FOR KEY UPDATE";
+								case LCS_FORUPDATE:
+									tag = "SELECT FOR UPDATE";
 									break;
 								default:
 									tag =  "???";
@@ -2327,8 +2327,8 @@ CreateCommandTag(Node *parsetree)
 							/* not 100% but probably close enough */
 							switch (((RowMarkClause *) linitial(stmt->rowMarks))->strength)
 							{
-								case LCS_FORUPDATE:
-									tag = "SELECT FOR UPDATE";
+								case LCS_FORNOKEYUPDATE:
+									tag = "SELECT FOR NO KEY UPDATE";
 									break;
 								case LCS_FORSHARE:
 									tag = "SELECT FOR SHARE";
@@ -2336,8 +2336,8 @@ CreateCommandTag(Node *parsetree)
 								case LCS_FORKEYSHARE:
 									tag = "SELECT FOR KEY SHARE";
 									break;
-								case LCS_FORKEYUPDATE:
-									tag = "SELECT FOR KEY UPDATE";
+								case LCS_FORUPDATE:
+									tag = "SELECT FOR UPDATE";
 									break;
 								default:
 									tag =  "???";

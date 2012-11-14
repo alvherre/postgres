@@ -9,7 +9,7 @@ step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
 step s1c: COMMIT;
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              
@@ -23,7 +23,7 @@ key            value
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1c: COMMIT;
 step s2l: <... completed>
 key            value          
@@ -39,7 +39,7 @@ key            value
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s1l s1svp s1d s2l s1r s1c s2c
@@ -49,7 +49,7 @@ key            value
 1              1              
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1r: ROLLBACK TO f;
 step s1c: COMMIT;
 step s2l: <... completed>
@@ -65,7 +65,7 @@ key            value
 1              1              
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1r: ROLLBACK TO f;
 invalid permutation detected
 
@@ -76,7 +76,7 @@ key            value
 1              1              
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s1l s1svp s2l s1d s1r s1c s2c
@@ -85,7 +85,7 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
 step s1c: COMMIT;
@@ -101,7 +101,7 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
 invalid permutation detected
@@ -112,7 +112,7 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1d: DELETE FROM foo;
 invalid permutation detected
 
@@ -122,7 +122,7 @@ key            value
 
 1              1              
 step s1svp: SAVEPOINT f;
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s1l s2l s1svp s1d s1r s1c s2c
@@ -130,7 +130,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE;
 key            value          
 
 1              1              
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
@@ -146,7 +146,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE;
 key            value          
 
 1              1              
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 step s1r: ROLLBACK TO f;
@@ -157,7 +157,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE;
 key            value          
 
 1              1              
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1svp: SAVEPOINT f;
 step s1d: DELETE FROM foo;
 invalid permutation detected
@@ -167,7 +167,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE;
 key            value          
 
 1              1              
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 step s1svp: SAVEPOINT f;
 invalid permutation detected
 
@@ -176,11 +176,11 @@ step s1l: SELECT * FROM foo FOR KEY SHARE;
 key            value          
 
 1              1              
-step s2l: SELECT * FROM foo FOR KEY UPDATE; <waiting ...>
+step s2l: SELECT * FROM foo FOR UPDATE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s2l s1l s1svp s1d s1r s1c s2c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              
@@ -188,7 +188,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s2l s1l s1svp s1d s1r s2c s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              
@@ -196,7 +196,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s2l s1l s1svp s1d s2c s1r s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              
@@ -204,7 +204,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s2l s1l s1svp s2c s1d s1r s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              
@@ -212,7 +212,7 @@ step s1l: SELECT * FROM foo FOR KEY SHARE; <waiting ...>
 invalid permutation detected
 
 starting permutation: s2l s1l s2c s1svp s1d s1r s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              
@@ -228,7 +228,7 @@ step s1r: ROLLBACK TO f;
 step s1c: COMMIT;
 
 starting permutation: s2l s2c s1l s1svp s1d s1r s1c
-step s2l: SELECT * FROM foo FOR KEY UPDATE;
+step s2l: SELECT * FROM foo FOR UPDATE;
 key            value          
 
 1              1              

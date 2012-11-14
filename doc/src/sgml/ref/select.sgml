@@ -45,7 +45,7 @@ SELECT [ ALL | DISTINCT [ ON ( <replaceable class="parameter">expression</replac
     [ LIMIT { <replaceable class="parameter">count</replaceable> | ALL } ]
     [ OFFSET <replaceable class="parameter">start</replaceable> [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ <replaceable class="parameter">count</replaceable> ] { ROW | ROWS } ONLY ]
-    [ FOR { KEY UPDATE | UPDATE | SHARE | KEY SHARE } [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ] [...] ]
+    [ FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ] [...] ]
 
 <phrase>where <replaceable class="parameter">from_item</replaceable> can be one of:</phrase>
 
@@ -178,7 +178,7 @@ TABLE [ ONLY ] <replaceable class="parameter">table_name</replaceable> [ * ]
 
     <listitem>
      <para>
-      If <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</literal>, <literal>FOR SHARE</literal>
+      If <literal>FOR UPDATE</>, <literal>FOR NO KEY UPDATE</literal>, <literal>FOR SHARE</literal>
       or <literal>FOR KEY SHARE</literal>
       is specified, the
       <command>SELECT</command> statement locks the selected rows
@@ -1190,26 +1190,26 @@ FETCH { FIRST | NEXT } [ <replaceable class="parameter">count</replaceable> ] { 
   </refsect2>
 
   <refsect2 id="SQL-FOR-UPDATE-SHARE">
-   <title id="sql-for-update-share-title"><literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>/<literal>FOR SHARE</>/<literal>FOR KEY SHARE</> Clauses</title>
+   <title id="sql-for-update-share-title"><literal>FOR UPDATE</>, <literal>FOR NO KEY UPDATE</>/<literal>FOR SHARE</>/<literal>FOR KEY SHARE</> Clauses</title>
 
    <para>
-    <literal>FOR KEY UPDATE</>, <literal>FOR UPDATE</>, <literal>FOR SHARE</>
+    <literal>FOR UPDATE</>, <literal>FOR NO KEY UPDATE</>, <literal>FOR SHARE</>
     and <literal>FOR KEY SHARE</>
     are <firstterm>locking clauses</>; they affect how <literal>SELECT</>
     locks rows as they are obtained from the table.
    </para>
 
    <para>
-    The <literal>FOR KEY UPDATE</literal> clause has this form:
+    The <literal>FOR UPDATE</literal> clause has this form:
 <synopsis>
-FOR KEY UPDATE [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ]
+FOR UPDATE [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ]
 </synopsis>
    </para>
 
    <para>
-    The <literal>FOR UPDATE</literal> clause has this form:
+    The <literal>FOR NO KEY UPDATE</literal> clause has this form:
 <synopsis>
-FOR UPDATE [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ]
+FOR NO KEY UPDATE [ OF <replaceable class="parameter">table_name</replaceable> [, ...] ] [ NOWAIT ]
 </synopsis>
    </para>
 
@@ -1233,8 +1233,18 @@ FOR KEY SHARE [ OF <replaceable class="parameter">table_name</replaceable> [, ..
     update.  This prevents them from being modified or deleted by
     other transactions until the current transaction ends.  That is,
     other transactions that attempt <command>UPDATE</command>,
-    <command>DELETE</command>, or <command>SELECT FOR UPDATE</command>
+    <command>DELETE</command>,
+    <command>SELECT FOR UPDATE</command>,
+    <command>SELECT FOR SHARE</command> or
+    <command>SELECT FOR KEY SHARE</command>
     of these rows will be blocked until the current transaction ends.
+    The <literal>FOR UPDATE</> lock mode
+    is also acquired by any <command>DELETE</> on a row, and also by an
+    <command>UPDATE</> that modifies the values on certain columns.  Currently,
+    the set of columns considered for the <command>UPDATE</> case are those that
+    have an unique index on them that can be used in a foreign key (so partial
+    indexes and expressional indexes are not considered), but this may change
+    in the future.
     Also, if an <command>UPDATE</command>, <command>DELETE</command>,
     or <command>SELECT FOR UPDATE</command> from another transaction
     has already locked a selected row or rows, <command>SELECT FOR
@@ -1247,17 +1257,10 @@ FOR KEY SHARE [ OF <replaceable class="parameter">table_name</replaceable> [, ..
    </para>
 
    <para>
-    <literal>FOR KEY UPDATE</> behaves similarly, except that the lock
-    acquired is stronger: this lock will block
+    <literal>FOR NO KEY UPDATE</> behaves similarly, except that the lock
+    acquired is weaker: this lock will not block
     <literal>SELECT FOR KEY SHARE</> commands that attempt to acquire
-    a lock on the same rows, in addition to all commands blocked by
-    <literal>FOR UPDATE</>.  The <literal>FOR KEY UPDATE</> lock mode
-    is also acquired by any <command>DELETE</> on a row, and also by an
-    <command>UPDATE</> that modifies the values on certain columns.  Currently,
-    the set of columns considered for the <command>UPDATE</> case are those that
-    have an unique index on them that can be used in a foreign key (so partial
-    indexes and expressional indexes are not considered), but this may change
-    in the future.
+    a lock on the same rows.
    </para>
 
    <para>
@@ -1266,13 +1269,15 @@ FOR KEY SHARE [ OF <replaceable class="parameter">table_name</replaceable> [, ..
     row.  A shared lock blocks other transactions from performing
     <command>UPDATE</command>, <command>DELETE</command>, or <command>SELECT
     FOR UPDATE</command> on these rows, but it does not prevent them
-    from performing <command>SELECT FOR SHARE</command>.
+    from performing <command>SELECT FOR SHARE</command> or
+    <command>SELECT FOR KEY SHARE</command>.
    </para>
 
    <para>
-    <literal>FOR KEY SHARE</> behaves similarly, except that the lock
-    is weaker: <literal>SELECT FOR KEY UPDATE</> is blocked, but
-    not <literal>SELECT FOR UPDATE</>.  A key-shared
+    <literal>FOR KEY SHARE</> behaves similarly to <literal>FOR SHARE</literal>,
+    except that the lock
+    is weaker: <literal>SELECT FOR UPDATE</> is blocked, but
+    not <literal>SELECT FOR NO KEY UPDATE</>.  A key-shared
     lock blocks other transactions from performing <command>DELETE</command>
     or any <command>UPDATE</command> that changes the key values, but not
     other <command>UPDATE</>, and neither it does prevent

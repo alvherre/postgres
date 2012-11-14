@@ -38,13 +38,13 @@ typedef enum
 	LockTupleKeyShare,
 	/* SELECT FOR SHARE */
 	LockTupleShare,
-	/* SELECT FOR UPDATE, and UPDATEs that don't modify key columns */
-	LockTupleUpdate,
-	/* SELECT FOR KEY UPDATE, UPDATEs that modify key columns, and DELETE */
-	LockTupleKeyUpdate
+	/* SELECT FOR NO KEY UPDATE, and UPDATEs that don't modify key columns */
+	LockTupleNoKeyExclusive,
+	/* SELECT FOR UPDATE, UPDATEs that modify key columns, and DELETE */
+	LockTupleExclusive
 } LockTupleMode;
 
-#define MaxLockTupleMode	LockTupleKeyUpdate
+#define MaxLockTupleMode	LockTupleExclusive
 
 /*
  * When heap_update, heap_delete, or heap_lock_tuple fail because the target

@@ -8896,9 +8896,10 @@ select_with_parens:
  * The duplicative productions are annoying, but hard to get rid of without
  * creating shift/reduce conflicts.
  *
- *	FOR UPDATE/SHARE may be before or after LIMIT/OFFSET.
+ *	The locking clause (FOR UPDATE etc) may be before or after LIMIT/OFFSET.
  *	In <=7.2.X, LIMIT/OFFSET had to be after FOR UPDATE
- *	We now support both orderings, but prefer LIMIT/OFFSET before FOR UPDATE/SHARE
+ *	We now support both orderings, but prefer LIMIT/OFFSET before the locking
+ * clause.
  *	2002-08-28 bjm
  */
 select_no_parens:
@@ -9317,12 +9318,12 @@ for_locking_items:
 		;
 
 for_locking_item:
-			FOR UPDATE locked_rels_list opt_nowait
+			FOR NO KEY UPDATE locked_rels_list opt_nowait
 				{
 					LockingClause *n = makeNode(LockingClause);
-					n->lockedRels = $3;
-					n->strength = LCS_FORUPDATE;
-					n->noWait = $4;
+					n->lockedRels = $5;
+					n->strength = LCS_FORNOKEYUPDATE;
+					n->noWait = $6;
 					$$ = (Node *) n;
 				}
 			| FOR SHARE locked_rels_list opt_nowait
@@ -9341,12 +9342,12 @@ for_locking_item:
 					n->noWait = $5;
 					$$ = (Node *) n;
 				}
-			| FOR KEY UPDATE locked_rels_list opt_nowait
+			| FOR UPDATE locked_rels_list opt_nowait
 				{
 					LockingClause *n = makeNode(LockingClause);
 					n->lockedRels = $4;
-					n->strength = LCS_FORKEYUPDATE;
-					n->noWait = $5;
+					n->strength = LCS_FORUPDATE;
+					n->noWait = $4;
 					$$ = (Node *) n;
 				}
 		;

@@ -25,5 +25,5 @@ step "s1c"		{ COMMIT; }
 
 session "s2"
 setup			{ BEGIN; }
-step "s2l"		{ SELECT * FROM foo FOR KEY UPDATE; }
+step "s2l"		{ SELECT * FROM foo FOR UPDATE; }
 step "s2c"		{ COMMIT; }

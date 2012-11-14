@@ -3065,12 +3065,12 @@ get_select_query_def(Query *query, deparse_context *context,
 					appendContextKeyword(context, " FOR SHARE",
 										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 					break;
-				case LCS_FORUPDATE:
-					appendContextKeyword(context, " FOR UPDATE",
+				case LCS_FORNOKEYUPDATE:
+					appendContextKeyword(context, " FOR NO KEY UPDATE",
 										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 					break;
-				case LCS_FORKEYUPDATE:
-					appendContextKeyword(context, " FOR KEY UPDATE",
+				case LCS_FORUPDATE:
+					appendContextKeyword(context, " FOR UPDATE",
 										 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 					break;
 				default:
