@@ -4102,7 +4102,10 @@ l3:
 						if (!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ||
 							!TransactionIdEquals(HeapTupleHeaderGetRawXmax(tuple->t_data),
 												 xwait))
+						{
+							pfree(members);
 							goto l3;
+						}
 						/* otherwise, we're good */
 						require_sleep = false;
 					}
