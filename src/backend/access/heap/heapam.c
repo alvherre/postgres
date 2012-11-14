@@ -113,7 +113,9 @@ static bool ConditionalMultiXactIdWait(MultiXactId multi,
 /*
  * Each tuple lock mode has a corresponding heavyweight lock, and one or two
  * corresponding MultiXactStatuses (one to merely lock tuples, another one to
- * update them).
+ * update them).  This table (and the macros below) helps us determine the
+ * heavyweight lock mode and MultiXactStatus values to use for any particular
+ * tuple lock strength.
  */
 static const struct
 {
@@ -144,8 +146,26 @@ tupleLockExtraInfo[MaxLockTupleMode + 1] =
 		MultiXactStatusUpdate
 	}
 };
+/* Get the LOCKMODE for a given MultiXactStatus */
+#define LOCKMODE_from_mxstatus(status) \
+			(tupleLockExtraInfo[TUPLOCK_from_mxstatus((status))].hwlock)
 
-/* corresponding lock mode for each multixact status */
+/*
+ * Acquire heavyweight locks on tuples, using a LockTupleMode strength value.
+ * This is more readable than having every caller translate it to lock.h's
+ * LOCKMODE.
+ */
+#define LockTupleTuplock(rel, tup, mode) \
+	LockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
+#define UnlockTupleTuplock(rel, tup, mode) \
+	UnlockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
+#define ConditionalLockTupleTuplock(rel, tup, mode) \
+	ConditionalLockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
+
+/*
+ * This table maps tuple lock strength values for each particular
+ * MultiXactStatus value.
+ */
 static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
 {
 	LockTupleKeyShare,		/* ForKeyShare */
@@ -156,27 +176,12 @@ static const int MultiXactStatusLock[MaxMultiXactStatus + 1] =
 	LockTupleExclusive		/* Update */
 };
 
-/*
- * Convenience macros.  These let the code specify a LockTupleMode argument,
- * instead of having to translate it to LOCKMODE, which is slightly more
- * readable.
- */
-#define LockTupleTuplock(rel, tup, mode) \
-	LockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
-#define UnlockTupleTuplock(rel, tup, mode) \
-	UnlockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
-#define ConditionalLockTupleTuplock(rel, tup, mode) \
-	ConditionalLockTuple((rel), (tup), tupleLockExtraInfo[mode].hwlock)
-
 /* Get the LockTupleMode for a given MultiXactStatus */
 #define TUPLOCK_from_mxstatus(status) \
 			(MultiXactStatusLock[(status)])
 /* Get the is_update bit for a given MultiXactStatus */
 #define ISUPDATE_from_mxstatus(status) \
 			((status) > MultiXactStatusForUpdate)
-/* Get the LOCKMODE for a given MultiXactStatus */
-#define LOCKMODE_from_mxstatus(status) \
-			(tupleLockExtraInfo[TUPLOCK_from_mxstatus((status))].hwlock)
 
 /* ----------------------------------------------------------------
  *						 heap support routines
