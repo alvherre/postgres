@@ -719,8 +719,11 @@ vac_update_datfrozenxid(void)
 	 */
 	newFrozenXid = GetOldestXmin(true, true);
 
-	/* FIXME what should we initialize this to? */
-	newFrozenMulti = ReadNextMultiXactId();
+	/*
+	 * Similarly, initialize the MultiXact "min" with the value that would
+	 * be used on pg_class for new tables.  See AddNewRelationTuple().
+	 */
+	newFrozenMulti = GetOldestMultiXactId();
 
 	/*
 	 * We must seqscan pg_class to find the minimum Xid, because there is no
