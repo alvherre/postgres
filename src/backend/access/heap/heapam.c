@@ -4732,127 +4732,123 @@ heap_lock_updated_tuple_rec(Relation rel, ItemPointer tid, TransactionId xid,
 
 	ItemPointerCopy(tid, &tupid);
 
-restart:
-	new_infomask = 0;
-	new_xmax = InvalidTransactionId;
-	ItemPointerCopy(&tupid, &(mytup.t_self));
+	for (;;)
+	{
+		new_infomask = 0;
+		new_xmax = InvalidTransactionId;
+		ItemPointerCopy(&tupid, &(mytup.t_self));
 
-	if (!heap_fetch(rel, SnapshotAny, &mytup, &buf, false, NULL))
-		elog(ERROR, "unable to fetch updated version of tuple");
-
-	/*
-	 * XXX we do not lock this tuple here; the theory is that it's sufficient
-	 * with the buffer lock we're about to grab.  Any other code must be able
-	 * to cope with tuple lock specifics changing while they don't hold buffer
-	 * lock anyway.
-	 */
+		if (!heap_fetch(rel, SnapshotAny, &mytup, &buf, false, NULL))
+			elog(ERROR, "unable to fetch updated version of tuple");
 
 l4:
-	LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
+		CHECK_FOR_INTERRUPTS();
+		LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-	old_infomask = mytup.t_data->t_infomask;
-	xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
-
-	/*
-	 * If this tuple is updated and the key has been modified (or deleted),
-	 * what we do depends on the status of the updating transaction: if it's
-	 * live, we sleep until it finishes; if it has committed, we have to fail
-	 * (i.e. return HeapTupleUpdated); if it aborted, we ignore it.  For
-	 * updates that didn't touch the key, we can just plough ahead.
-	 */
-	if (!(old_infomask & HEAP_XMAX_INVALID) &&
-		(mytup.t_data->t_infomask2 & HEAP_KEYS_UPDATED))
-	{
-		TransactionId	update_xid;
+		old_infomask = mytup.t_data->t_infomask;
+		xmax = HeapTupleHeaderGetRawXmax(mytup.t_data);
 
 		/*
-		 * Note: we *must* check TransactionIdIsInProgress before
-		 * TransactionIdDidAbort/Commit; see comment at top of tqual.c for an
-		 * explanation.
+		 * If this tuple is updated and the key has been modified (or deleted),
+		 * what we do depends on the status of the updating transaction: if
+		 * it's live, we sleep until it finishes; if it has committed, we have
+		 * to fail (i.e. return HeapTupleUpdated); if it aborted, we ignore it.
+		 * For updates that didn't touch the key, we can just plough ahead.
 		 */
-		update_xid = HeapTupleHeaderGetUpdateXid(mytup.t_data);
-		if (TransactionIdIsCurrentTransactionId(update_xid))
+		if (!(old_infomask & HEAP_XMAX_INVALID) &&
+			(mytup.t_data->t_infomask2 & HEAP_KEYS_UPDATED))
+		{
+			TransactionId	update_xid;
+
+			/*
+			 * Note: we *must* check TransactionIdIsInProgress before
+			 * TransactionIdDidAbort/Commit; see comment at top of tqual.c for
+			 * an explanation.
+			 */
+			update_xid = HeapTupleHeaderGetUpdateXid(mytup.t_data);
+			if (TransactionIdIsCurrentTransactionId(update_xid))
+			{
+				UnlockReleaseBuffer(buf);
+				return HeapTupleSelfUpdated;
+			}
+			else if (TransactionIdIsInProgress(update_xid))
+			{
+				LockBuffer(buf, BUFFER_LOCK_UNLOCK);
+				/* No LockTupleTuplock here -- see heap_lock_updated_tuple */
+				XactLockTableWait(update_xid);
+				goto l4;
+			}
+			else if (TransactionIdDidAbort(update_xid))
+				;	/* okay to proceed */
+			else if (TransactionIdDidCommit(update_xid))
+			{
+				UnlockReleaseBuffer(buf);
+				return HeapTupleUpdated;
+			}
+		}
+
+		/* compute the new Xmax and infomask values for the tuple ... */
+		compute_new_xmax_infomask(xmax, old_infomask, mytup.t_data->t_infomask2,
+								  xid, mode, false,
+								  &new_xmax, &new_infomask, &new_infomask2);
+
+		START_CRIT_SECTION();
+
+		/* ... and set them */
+		HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
+		mytup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
+		mytup.t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
+		mytup.t_data->t_infomask |= new_infomask;
+		mytup.t_data->t_infomask2 |= new_infomask2;
+
+		MarkBufferDirty(buf);
+
+		/* XLOG stuff */
+		if (RelationNeedsWAL(rel))
+		{
+			xl_heap_lock_updated xlrec;
+			XLogRecPtr	recptr;
+			XLogRecData	rdata;
+			Page		page = BufferGetPage(buf);
+
+			xlrec.target.node = rel->rd_node;
+			xlrec.target.tid = mytup.t_self;
+			xlrec.xmax = new_xmax;
+			xlrec.infobits_set = compute_infobits(new_infomask, new_infomask2);
+
+			rdata.data = (char *) &xlrec;
+			rdata.len = SizeOfHeapLockUpdated;
+			rdata.buffer = buf;
+			rdata.buffer_std = true;
+			rdata.next = NULL;
+
+			recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOCK_UPDATED, &rdata);
+
+			PageSetLSN(page, recptr);
+			PageSetTLI(page, ThisTimeLineID);
+		}
+
+		END_CRIT_SECTION();
+
+		/* if we find the end of update chain, we're done. */
+		if (mytup.t_data->t_infomask & HEAP_XMAX_INVALID ||
+			ItemPointerEquals(&mytup.t_self, &mytup.t_data->t_ctid)  ||
+			HeapTupleHeaderIsOnlyLocked(mytup.t_data))
 		{
 			UnlockReleaseBuffer(buf);
-			return HeapTupleSelfUpdated;
+			return HeapTupleMayBeUpdated;
 		}
-		else if (TransactionIdIsInProgress(update_xid))
-		{
-			LockBuffer(buf, BUFFER_LOCK_UNLOCK);
-			XactLockTableWait(update_xid);
-			goto l4;
-		}
-		else if (TransactionIdDidAbort(update_xid))
-			;	/* okay to proceed */
-		else if (TransactionIdDidCommit(update_xid))
-		{
-			UnlockReleaseBuffer(buf);
-			return HeapTupleUpdated;
-		}
-	}
 
-	/* compute the new Xmax and infomask values for the tuple ... */
-	compute_new_xmax_infomask(xmax, old_infomask, mytup.t_data->t_infomask2,
-							  xid, mode, false,
-							  &new_xmax, &new_infomask, &new_infomask2);
-
-	START_CRIT_SECTION();
-
-	/* ... and set them */
-	HeapTupleHeaderSetXmax(mytup.t_data, new_xmax);
-	mytup.t_data->t_infomask &= ~HEAP_XMAX_BITS;
-	mytup.t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
-	mytup.t_data->t_infomask |= new_infomask;
-	mytup.t_data->t_infomask2 |= new_infomask2;
-
-	MarkBufferDirty(buf);
-
-	/* XLOG stuff */
-	if (RelationNeedsWAL(rel))
-	{
-		xl_heap_lock_updated xlrec;
-		XLogRecPtr	recptr;
-		XLogRecData	rdata;
-		Page		page = BufferGetPage(buf);
-
-		xlrec.target.node = rel->rd_node;
-		xlrec.target.tid = mytup.t_self;
-		xlrec.xmax = new_xmax;
-		xlrec.infobits_set = compute_infobits(new_infomask, new_infomask2);
-
-		rdata.data = (char *) &xlrec;
-		rdata.len = SizeOfHeapLockUpdated;
-		rdata.buffer = buf;
-		rdata.buffer_std = true;
-		rdata.next = NULL;
-
-		recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOCK_UPDATED, &rdata);
-
-		PageSetLSN(page, recptr);
-		PageSetTLI(page, ThisTimeLineID);
-	}
-
-	END_CRIT_SECTION();
-
-	/* if we find the end of update chain, we're done. */
-	if (mytup.t_data->t_infomask & HEAP_XMAX_INVALID ||
-		HeapTupleHeaderIsOnlyLocked(mytup.t_data) ||
-		ItemPointerEquals(&mytup.t_self, &mytup.t_data->t_ctid))
-	{
+		/* tail recursion */
+		ItemPointerCopy(&(mytup.t_data->t_ctid), &tupid);
 		UnlockReleaseBuffer(buf);
-		return HeapTupleMayBeUpdated;
 	}
-
-	/* tail recursion */
-	ItemPointerCopy(&(mytup.t_data->t_ctid), &tupid);
-	UnlockReleaseBuffer(buf);
-	goto restart;
 }
 
 /*
  * heap_lock_updated_tuple
- * 		Follow update chain when locking an updated tuple, acquiring locks on
- * 		the updated versions.
+ * 		Follow update chain when locking an updated tuple, acquiring locks (row
+ * 		marks) on the updated versions.
  *
  * The initial tuple is assumed to be already locked.
  *
@@ -4860,6 +4856,16 @@ l4:
  * tuple(s) as locked.  If any tuple in the updated chain is being deleted
  * concurrently (or updated with the key being modified), sleep until the
  * transaction doing it is finished.
+ *
+ * Note that we don't acquire heavyweight tuple locks on the tuples we walk
+ * when we have to wait for other transactions to release them, as opposed to
+ * what heap_lock_tuple does.  The reason is that having more than one
+ * transaction walking the chain is probably uncommon enough that risk of
+ * starvation is not likely: one of the preconditions for being here is that
+ * the snapshot in use predates the update that created this tuple (because we
+ * started at an earlier version of the tuple), but at the same time such a
+ * transaction cannot be using repeatable read or serializable isolation
+ * levels, because that would lead to a serializability failure.
  */
 static HTSU_Result
 heap_lock_updated_tuple(Relation rel, HeapTuple tuple, ItemPointer ctid,
