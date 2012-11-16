@@ -752,7 +752,8 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 		{
 			/*
 			 * If it's only locked but neither EXCL_LOCK nor KEYSHR_LOCK
-			 * is set, it cannot possibly be running.
+			 * is set, it cannot possibly be running.  Otherwise need to
+			 * check.
 			 */
 			if ((tuple->t_infomask & (HEAP_XMAX_EXCL_LOCK |
 									  HEAP_XMAX_KEYSHR_LOCK)) &&
@@ -1493,15 +1494,22 @@ HeapTupleIsSurelyDead(HeapTupleHeader tuple, TransactionId OldestXmin)
 
 	/*
 	 * If the inserting transaction committed, but any deleting transaction
-	 * aborted, the tuple is still alive.  Likewise, if XMAX is a lock rather
-	 * than a delete, the tuple is still alive.
-	 *
-	 * FIXME -- the XMAX_IS_MULTI test is a bit wrong .. it's possible to
-	 * have tuples with that bit set that are dead.  However, if that's
-	 * changed, the RawXmax() call below should probably be researched as well.
+	 * aborted, the tuple is still alive.
 	 */
-	if (tuple->t_infomask &
-		(HEAP_XMAX_INVALID | HEAP_XMAX_LOCK_ONLY | HEAP_XMAX_IS_MULTI))
+	if (tuple->t_infomask & HEAP_XMAX_INVALID)
+		return false;
+
+	/*
+	 * If the XMAX is just a lock, the tuple is still alive.
+	 */
+	if (HeapTupleHeaderInfomaskIsOnlyLocked(tuple->t_infomask))
+		return false;
+
+	/*
+	 * If the Xmax is a MultiXact, it might be dead or alive, but we cannot
+	 * know without checking pg_multixact.
+	 */
+	if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 		return false;
 
 	/* If deleter isn't known to have committed, assume it's still running. */
