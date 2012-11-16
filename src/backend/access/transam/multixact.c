@@ -573,13 +573,14 @@ MultiXactIdIsRunning(MultiXactId multi)
  * MultiXactIdSetOldestMember
  *		Save the oldest MultiXactId this transaction could be a member of.
  *
- * We set the OldestMemberMXactId for a given transaction the first time
- * it's going to acquire a shared lock.  We need to do this even if we end
- * up using a TransactionId instead of a MultiXactId, because there is a
- * chance that another transaction would add our XID to a MultiXactId.
+ * We set the OldestMemberMXactId for a given transaction the first time it's
+ * going to do some operation that might require a MultiXactId (tuple lock,
+ * update or delete).  We need to do this even if we end up using a
+ * TransactionId instead of a MultiXactId, because there is a chance that
+ * another transaction would add our XID to a MultiXactId.
  *
- * The value to set is the next-to-be-assigned MultiXactId, so this is meant
- * to be called just before acquiring a shared lock.
+ * The value to set is the next-to-be-assigned MultiXactId, so this is meant to
+ * be called just before doing any such possibly-MultiXactId-able operation.
  */
 void
 MultiXactIdSetOldestMember(void)
