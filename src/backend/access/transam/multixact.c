@@ -1337,8 +1337,10 @@ mXactCacheGetBySet(int nmembers, MultiXactMember *members)
 		if (entry->nmembers != nmembers)
 			continue;
 
-		/* We assume the cache entries are sorted */
-		/* XXX we assume the unused bits in "status" are zeroed */
+		/*
+		 * We assume the cache entries are sorted, and that the unused bits in
+		 * "status" are zeroed.
+		 */
 		if (memcmp(members, entry->members, nmembers * sizeof(MultiXactMember)) == 0)
 		{
 			debug_elog3(DEBUG2, "CacheGet: found %u", entry->multi);
