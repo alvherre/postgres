@@ -65,11 +65,15 @@ typedef enum
 	BgWorkerStart_RecoveryFinished
 } BgWorkerStartTime;
 
+#define BGW_DEFAULT_RESTART_INTERVAL	60
+#define BGW_NEVER_RESTART				-1
+
 typedef struct BackgroundWorker
 {
 	char	   *bgw_name;
 	int         bgw_flags;
 	BgWorkerStartTime bgw_start_time;
+	int			bgw_restart_time;		/* in seconds, or BGW_NEVER_RESTART */
 	bgworker_main_type	bgw_main;
 	void	   *bgw_main_arg;
 	bgworker_sighdlr_type bgw_sighup;

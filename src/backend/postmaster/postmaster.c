@@ -5119,6 +5119,20 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 		/* XXX other checks? */
 	}
 
+	if ((worker->bgw_restart_time < 0 &&
+		 worker->bgw_restart_time != BGW_NEVER_RESTART) ||
+		 (worker->bgw_restart_time > USECS_PER_DAY / 1000))
+	{
+		if (!IsUnderPostmaster)
+			ereport(LOG,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("invalid restart interval")));
+		return;
+	}
+
+	/*
+	 * Copy the registration data into the registered workers list.
+	 */
 	rw = malloc(MAXALIGN(sizeof(RegisteredBgWorker)) +
 				MAXALIGN(sizeof(BackgroundWorker)) +
 				strlen(worker->bgw_name) + 1);		/* FIXME -- check for NULL and missing \0 terminator? */
@@ -5538,22 +5552,22 @@ StartOneBackgroundWorker(void)
 			continue;
 
 		/*
-		 * If this worker has crashed previously, check how long ago did it
-		 * last happen.  If the last crash is too recent, don't start the
-		 * worker right away; but let it be restarted once enough time has
-		 * passed.
-		 *
-		 * (The other alternative would be to have the worker not be started
-		 * again at all until postmaster is restarted, but this doesn't seem
-		 * as useful.)
+		 * If this worker has crashed previously, maybe it needs to be
+		 * restarted (unless on registration it specified it doesn't want to be
+		 * restarted at all).  Check how long ago did a crash last happen.  If
+		 * the last crash is too recent, don't start it right away; let it be
+		 * restarted once enough time has passed.
 		 */
 		if (rw->crashed_at != 0)
 		{
+			if (rw->worker->bgw_restart_time == BGW_NEVER_RESTART)
+				continue;
+
 			if (now == 0)
 				now = GetCurrentTimestamp();
 
 			if (!TimestampDifferenceExceeds(rw->crashed_at, now,
-											60 * 1000)) /* 60 seconds */
+											rw->worker->bgw_restart_time * 1000))
 			{
 				HaveCrashedWorker = true;
 				continue;

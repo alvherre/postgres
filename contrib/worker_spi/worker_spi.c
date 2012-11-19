@@ -160,7 +160,6 @@ _PG_init(void)
 	BackgroundWorker		worker;
 
 	/* register the worker process */
-	worker.bgw_name = "SPI worker";
 	worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
 	worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
 	worker.bgw_main = worker_spi_main;
@@ -168,10 +167,12 @@ _PG_init(void)
 	worker.bgw_sigterm = worker_spi_sigterm;
 
 	worker.bgw_name = "SPI worker 1";
+	worker.bgw_restart_time = BGW_NEVER_RESTART;
 	worker.bgw_main_arg = "table1";
 	RegisterBackgroundWorker(&worker);
 
 	worker.bgw_name = "SPI worker 2";
+	worker.bgw_restart_time = INT_MIN;
 	worker.bgw_main_arg = "table2";
 	RegisterBackgroundWorker(&worker);
 }
