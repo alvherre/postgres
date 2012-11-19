@@ -5078,6 +5078,7 @@ void
 RegisterBackgroundWorker(BackgroundWorker *worker)
 {
 	RegisteredBgWorker *rw;
+	int			namelen = strlen(worker->bgw_name);
 #ifdef EXEC_BACKEND
 	static int	BackgroundWorkerCookie = 0;
 #endif
@@ -5091,7 +5092,8 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 		if (!IsUnderPostmaster)
 			ereport(LOG,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("background worker must be registered in shared_preload_libraries")));
+					 errmsg("background worker \"%s\": must be registered in shared_preload_libraries",
+							worker->bgw_name)));
 		return;
 	}
 
@@ -5103,7 +5105,8 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 			if (!IsUnderPostmaster)
 				ereport(LOG,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("background worker must attach to shared memory in order to request a database connection")));
+						 errmsg("background worker \"%s\": must attach to shared memory in order to request a database connection",
+								worker->bgw_name)));
 			return;
 		}
 
@@ -5112,7 +5115,8 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 			if (!IsUnderPostmaster)
 				ereport(LOG,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("background worker cannot request database access if starting at postmaster start")));
+						 errmsg("background worker \"%s\": cannot request database access if starting at postmaster start",
+								worker->bgw_name)));
 			return;
 		}
 
@@ -5126,7 +5130,8 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 		if (!IsUnderPostmaster)
 			ereport(LOG,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("invalid restart interval")));
+					 errmsg("background worker \"%s\": invalid restart interval",
+							worker->bgw_name)));
 		return;
 	}
 
@@ -5134,8 +5139,7 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 	 * Copy the registration data into the registered workers list.
 	 */
 	rw = malloc(MAXALIGN(sizeof(RegisteredBgWorker)) +
-				MAXALIGN(sizeof(BackgroundWorker)) +
-				strlen(worker->bgw_name) + 1);		/* FIXME -- check for NULL and missing \0 terminator? */
+				MAXALIGN(sizeof(BackgroundWorker)) + namelen + 1);
 	if (rw == NULL)
 	{
 		ereport(LOG,
@@ -5149,7 +5153,7 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 	memcpy(rw->worker, worker, sizeof(BackgroundWorker));
 	rw->worker->bgw_name = (char *)
 		MAXALIGN((char *) rw->worker + sizeof(BackgroundWorker));
-	strlcpy(rw->worker->bgw_name, worker->bgw_name, strlen(worker->bgw_name) + 1);	/* FIXME strlen again */
+	strlcpy(rw->worker->bgw_name, worker->bgw_name, namelen + 1);
 
 	rw->backend = NULL;
 	rw->pid = 0;
