@@ -2277,9 +2277,6 @@ CreateCommandTag(Node *parsetree)
 								case LCS_FORUPDATE:
 									tag = "SELECT FOR UPDATE";
 									break;
-								default:
-									tag =  "???";
-									break;
 							}
 						}
 						else

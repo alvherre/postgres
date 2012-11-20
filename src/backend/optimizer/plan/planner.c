@@ -2054,8 +2054,6 @@ preprocess_rowmarks(PlannerInfo *root)
 			case LCS_FORUPDATE:
 				newrc->markType = ROW_MARK_KEYEXCLUSIVE;
 				break;
-			default:
-				elog(ERROR, "unsupported rowmark type %d", rc->strength);
 		}
 		newrc->noWait = rc->noWait;
 		newrc->isParent = false;
