@@ -32,7 +32,7 @@ typedef struct BulkInsertStateData *BulkInsertState;
 /*
  * Possible lock modes for a tuple.
  */
-typedef enum
+typedef enum LockTupleMode
 {
 	/* SELECT FOR KEY SHARE */
 	LockTupleKeyShare,

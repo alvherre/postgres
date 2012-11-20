@@ -165,9 +165,8 @@ pgrowlocks(PG_FUNCTION_ARGS)
 
 				values[Atnum_ismulti] = pstrdup("true");
 
-				allow_old = (!(infomask & (HEAP_XMAX_EXCL_LOCK |
-										   HEAP_XMAX_KEYSHR_LOCK)) &&
-							 (infomask & HEAP_XMAX_LOCK_ONLY));
+				allow_old = !(infomask & HEAP_LOCK_MASK) &&
+							 (infomask & HEAP_XMAX_LOCK_ONLY);
 				nmembers = GetMultiXactIdMembers(xmax, &members, allow_old);
 				if (nmembers == -1)
 				{
@@ -243,14 +242,11 @@ pgrowlocks(PG_FUNCTION_ARGS)
 				values[Atnum_modes] = palloc(NCHARS);
 				if (infomask & HEAP_XMAX_LOCK_ONLY)
 				{
-					if ((infomask & HEAP_XMAX_KEYSHR_LOCK) &&
-						(infomask & HEAP_XMAX_EXCL_LOCK))
-						/* both bits set: invalid combination */
-						snprintf(values[Atnum_modes], NCHARS,
-								 "{invalid two lock bits}");
-					else if (infomask & HEAP_XMAX_KEYSHR_LOCK)
-						snprintf(values[Atnum_modes], NCHARS, "{Key Share}");
-					else if (infomask & HEAP_XMAX_EXCL_LOCK)
+					if (HEAP_XMAX_IS_SHR_LOCKED(infomask))
+						snprintf(values[Atnum_modes], NCHARS, "{For Share}");
+					else if (HEAP_XMAX_IS_KEYSHR_LOCKED(infomask))
+						snprintf(values[Atnum_modes], NCHARS, "{For Key Share}");
+					else if (HEAP_XMAX_IS_EXCL_LOCKED(infomask))
 						snprintf(values[Atnum_modes], NCHARS, "{For Update}");
 					else
 						/* neither keyshare nor exclusive bit it set */

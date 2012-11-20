@@ -2455,6 +2455,7 @@ compute_infobits(uint16 infomask, uint16 infomask2)
 		((infomask & HEAP_XMAX_IS_MULTI) != 0 ? XLHL_XMAX_IS_MULTI : 0) |
 		((infomask & HEAP_XMAX_LOCK_ONLY) != 0 ? XLHL_XMAX_LOCK_ONLY : 0) |
 		((infomask & HEAP_XMAX_EXCL_LOCK) != 0 ? XLHL_XMAX_EXCL_LOCK : 0) |
+		/* note we ignore HEAP_XMAX_SHR_LOCK here */
 		((infomask & HEAP_XMAX_KEYSHR_LOCK) != 0 ? XLHL_XMAX_KEYSHR_LOCK : 0) |
 		((infomask2 & HEAP_KEYS_UPDATED) != 0 ?
 		 XLHL_UPDATE_KEY_REVOKED : 0);
@@ -2633,7 +2634,7 @@ l1:
 		 * only locked the tuple without updating it.
 		 */
 		if ((tp.t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderInfomaskIsOnlyLocked(tp.t_data->t_infomask) ||
+			HEAP_XMAX_IS_LOCKED_ONLY(tp.t_data->t_infomask) ||
 			HeapTupleHeaderIsOnlyLocked(tp.t_data))
 			result = HeapTupleMayBeUpdated;
 		else
@@ -3097,7 +3098,7 @@ l2:
 			 * subxact aborts.
 			 */
 			update_xact = InvalidTransactionId;
-			if (!(oldtup.t_data->t_infomask & HEAP_XMAX_LOCK_ONLY))
+			if (!HEAP_XMAX_IS_LOCKED_ONLY(oldtup.t_data->t_infomask))
 				update_xact = HeapTupleGetUpdateXid(oldtup.t_data);
 
 			/* there was no UPDATE in the MultiXact; or it aborted. */
@@ -3114,7 +3115,7 @@ l2:
 			 * key columns, we don't need to wait for it to end; but we
 			 * need to preserve it as locker.
 			 */
-			if ((infomask & HEAP_XMAX_KEYSHR_LOCK) && key_intact)
+			if (HEAP_XMAX_IS_KEYSHR_LOCKED(infomask) && key_intact)
 			{
 				LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -3987,7 +3988,7 @@ l3:
 			{
 				bool	updated;
 
-				updated = !HeapTupleHeaderInfomaskIsOnlyLocked(infomask);
+				updated = !HEAP_XMAX_IS_LOCKED_ONLY(infomask);
 
 				/*
 				 * If there are updates, follow the update chain; bail out
@@ -4040,8 +4041,8 @@ l3:
 			 * If we're requesting Share, we can similarly avoid sleeping if
 			 * there's no update and no exclusive lock present.
 			 */
-			if ((infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) &&
-				!(infomask & HEAP_XMAX_EXCL_LOCK))
+			if (HEAP_XMAX_IS_LOCKED_ONLY(infomask) &&
+				!HEAP_XMAX_IS_EXCL_LOCKED(infomask))
 			{
 				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -4049,9 +4050,8 @@ l3:
 				 * Make sure it's still an appropriate lock, else start over.
 				 * See above about allowing xmax to change.
 				 */
-				if (!(tuple->t_data->t_infomask &
-					  (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY)) ||
-					(tuple->t_data->t_infomask & HEAP_XMAX_EXCL_LOCK))
+				if (!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_data->t_infomask) ||
+					HEAP_XMAX_IS_EXCL_LOCKED(tuple->t_data->t_infomask))
 					goto l3;
 				require_sleep = false;
 			}
@@ -4059,8 +4059,8 @@ l3:
 		else if (mode == LockTupleNoKeyExclusive)
 		{
 			/*
-			 * If we're requesting Update, we might also be able to avoid
-			 * sleeping; just ensure that there's no other lock type than
+			 * If we're requesting NoKeyExclusive, we might also be able to
+			 * avoid sleeping; just ensure that there's no other lock type than
 			 * KeyShare.  Note that this is a bit more involved than just
 			 * checking hint bits -- we need to expand the multixact to figure
 			 * out lock modes for each one (unless there was only one such
@@ -4120,7 +4120,7 @@ l3:
 					pfree(members);
 				}
 			}
-			else if (infomask & HEAP_XMAX_KEYSHR_LOCK)
+			else if (HEAP_XMAX_IS_KEYSHR_LOCKED(infomask))
 			{
 				LockBuffer(*buffer, BUFFER_LOCK_EXCLUSIVE);
 
@@ -4165,7 +4165,7 @@ l3:
 
 				/* if there are updates, follow the update chain */
 				if (follow_updates &&
-					!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
+					!HEAP_XMAX_IS_LOCKED_ONLY(infomask))
 				{
 					HTSU_Result		res;
 
@@ -4219,7 +4219,7 @@ l3:
 
 				/* if there are updates, follow the update chain */
 				if (follow_updates &&
-					!HeapTupleHeaderInfomaskIsOnlyLocked(infomask))
+					!HEAP_XMAX_IS_LOCKED_ONLY(infomask))
 				{
 					HTSU_Result		res;
 
@@ -4266,7 +4266,7 @@ l3:
 		 */
 		if (!require_sleep ||
 			(tuple->t_data->t_infomask & HEAP_XMAX_INVALID) ||
-			HeapTupleHeaderInfomaskIsOnlyLocked(tuple->t_data->t_infomask) ||
+			HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_data->t_infomask) ||
 			HeapTupleHeaderIsOnlyLocked(tuple->t_data))
 			result = HeapTupleMayBeUpdated;
 		else
@@ -4302,16 +4302,19 @@ failed:
 	 *
 	 * Note in particular that this covers the case where we already hold
 	 * exclusive lock on the tuple and the caller only wants key share or share
-	 * lock. It would certainly not do to give up the exclusive lock.  Note
-	 * there's no explicit test for a share lock only; this was already covered
-	 * above, because it's only representable by a MultiXactId.
+	 * lock. It would certainly not do to give up the exclusive lock.
 	 */
 	if (!(old_infomask & (HEAP_XMAX_INVALID |
 						  HEAP_XMAX_COMMITTED |
 						  HEAP_XMAX_IS_MULTI)) &&
 		(mode == LockTupleKeyShare ?
-		 (old_infomask & (HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_EXCL_LOCK)) :
-		 (old_infomask & HEAP_XMAX_EXCL_LOCK)) &&
+		 (HEAP_XMAX_IS_KEYSHR_LOCKED(old_infomask) ||
+		  HEAP_XMAX_IS_SHR_LOCKED(old_infomask) ||
+		  HEAP_XMAX_IS_EXCL_LOCKED(old_infomask)) :
+		 mode == LockTupleShare ?
+		 (HEAP_XMAX_IS_SHR_LOCKED(old_infomask) ||
+		  HEAP_XMAX_IS_EXCL_LOCKED(old_infomask)) :
+		 (HEAP_XMAX_IS_EXCL_LOCKED(old_infomask))) &&
 		TransactionIdIsCurrentTransactionId(xmax))
 	{
 		LockBuffer(*buffer, BUFFER_LOCK_UNLOCK);
@@ -4357,7 +4360,7 @@ failed:
 	tuple->t_data->t_infomask2 &= ~HEAP_KEYS_UPDATED;
 	tuple->t_data->t_infomask |= new_infomask;
 	tuple->t_data->t_infomask2 |= new_infomask2;
-	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
+	if (HEAP_XMAX_IS_LOCKED_ONLY(new_infomask))
 		HeapTupleHeaderClearHotUpdated(tuple->t_data);
 	HeapTupleHeaderSetXmax(tuple->t_data, xid);
 
@@ -4368,7 +4371,7 @@ failed:
 	 * updated, we need to follow the update chain to lock the new versions
 	 * of the tuple as well.
 	 */
-	if (HeapTupleHeaderInfomaskIsOnlyLocked(new_infomask))
+	if (HEAP_XMAX_IS_LOCKED_ONLY(new_infomask))
 		tuple->t_data->t_ctid = *tid;
 
 	MarkBufferDirty(*buffer);
@@ -4478,26 +4481,24 @@ l5:
 		}
 		else
 		{
+			new_infomask |= HEAP_XMAX_LOCK_ONLY;
 			switch (mode)
 			{
 				case LockTupleKeyShare:
 					new_xmax = add_to_xmax;
-					new_infomask |= HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_LOCK_ONLY;
+					new_infomask |= HEAP_XMAX_KEYSHR_LOCK;
 					break;
 				case LockTupleShare:
-					/* need a multixact here in any case */
-					new_xmax = MultiXactIdCreateSingleton(add_to_xmax,
-														  MultiXactStatusForShare);
-					GetMultiXactIdHintBits(new_xmax, &new_infomask,
-										   &new_infomask2);
+					new_xmax = add_to_xmax;
+					new_infomask |= HEAP_XMAX_SHR_LOCK;
 					break;
 				case LockTupleNoKeyExclusive:
 					new_xmax = add_to_xmax;
-					new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
+					new_infomask |= HEAP_XMAX_EXCL_LOCK;
 					break;
 				case LockTupleExclusive:
 					new_xmax = add_to_xmax;
-					new_infomask |= HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY;
+					new_infomask |= HEAP_XMAX_EXCL_LOCK;
 					new_infomask2 |= HEAP_KEYS_UPDATED;
 					break;
 				default:
@@ -4517,6 +4518,21 @@ l5:
 		Assert(!(old_infomask & HEAP_XMAX_COMMITTED));
 
 		/*
+		 * A multixact together with LOCK_ONLY set but neither lock bit set
+		 * (i.e. a pg_upgraded share locked tuple) cannot possibly be running
+		 * anymore.  This check is critical for databases upgraded by
+		 * pg_upgrade; both MultiXactIdIsRunning and MultiXactIdExpand assume
+		 * that such multis are never passed.
+		 */
+		if (!(old_infomask & HEAP_LOCK_MASK) &&
+			HEAP_XMAX_IS_LOCKED_ONLY(old_infomask))
+		{
+			old_infomask &= ~HEAP_XMAX_IS_MULTI;
+			old_infomask |= HEAP_XMAX_INVALID;
+			goto l5;
+		}
+
+		/*
 		 * If the XMAX is already a MultiXactId, then we need to expand it to
 		 * include add_to_xmax; but if all the members were lockers and are all
 		 * gone, we can do away with the IS_MULTI bit and just set add_to_xmax
@@ -4526,28 +4542,10 @@ l5:
 		 * The cost of doing GetMultiXactIdMembers would be paid by
 		 * MultiXactIdExpand if we weren't to do this, so this check is not
 		 * incurring extra work anyhow.
-		 *
-		 * This check (at least the part involving only lockers) is critical
-		 * for databases upgraded by pg_upgrade; MultiXactIdExpand assumes that
-		 * such multis are never passed.
 		 */
-
-		/*
-		 * A multixact together with LOCK_ONLY set but neither EXCL_LOCK nor
-		 * KEYSHR_LOCK (i.e. a pg_upgraded share locked tuple) cannot possibly
-		 * be running anymore.
-		 */
-		if (!(old_infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) &&
-			(old_infomask & HEAP_XMAX_LOCK_ONLY))
-		{
-			old_infomask &= ~HEAP_XMAX_IS_MULTI;
-			old_infomask |= HEAP_XMAX_INVALID;
-			goto l5;
-		}
-
 		if (!MultiXactIdIsRunning(xmax))
 		{
-			if ((old_infomask & HEAP_XMAX_LOCK_ONLY) ||
+			if (HEAP_XMAX_IS_LOCKED_ONLY(old_infomask) ||
 				TransactionIdDidAbort(MultiXactIdGetUpdateXid(xmax,
 															  old_infomask)))
 			{
@@ -4570,8 +4568,8 @@ l5:
 	else if (old_infomask & HEAP_XMAX_COMMITTED)
 	{
 		/*
-		 * It's a committed update, so we gotta preserve him as updater of the
-		 * tuple.
+		 * It's a committed update, so we need to preserve him as updater of
+		 * the tuple.
 		 */
 		MultiXactStatus		status;
 		MultiXactStatus		new_status;
@@ -4600,11 +4598,13 @@ l5:
 		MultiXactStatus		status;
 		MultiXactStatus		new_status;
 
-		if (old_infomask & HEAP_XMAX_LOCK_ONLY)
+		if (HEAP_XMAX_IS_LOCKED_ONLY(old_infomask))
 		{
-			if (old_infomask & HEAP_XMAX_KEYSHR_LOCK)
+			if (HEAP_XMAX_IS_KEYSHR_LOCKED(old_infomask))
 				status = MultiXactStatusForKeyShare;
-			else if (old_infomask & HEAP_XMAX_EXCL_LOCK)
+			else if (HEAP_XMAX_IS_SHR_LOCKED(old_infomask))
+				status = MultiXactStatusForShare;
+			else if (HEAP_XMAX_IS_EXCL_LOCKED(old_infomask))
 			{
 				if (old_infomask2 & HEAP_KEYS_UPDATED)
 					status = MultiXactStatusForUpdate;
@@ -4615,9 +4615,9 @@ l5:
 			{
 				/*
 				 * LOCK_ONLY can be present alone only when a page has been
-				 * upgraded by pg_upgrade.  But in that case, XidIsInProgress
-				 * should have returned false.  We assume it's no longer locked
-				 * in this case.
+				 * upgraded by pg_upgrade.  But in that case,
+				 * TransactionIdIsInProgress() should have returned false.  We
+				 * assume it's no longer locked in this case.
 				 */
 				elog(WARNING, "LOCK_ONLY found for Xid in progress %u", xmax);
 				old_infomask |= HEAP_XMAX_INVALID;
@@ -4668,7 +4668,7 @@ l5:
 		new_xmax = MultiXactIdCreate(xmax, status, add_to_xmax, new_status);
 		GetMultiXactIdHintBits(new_xmax, &new_infomask, &new_infomask2);
 	}
-	else if (!(old_infomask & HEAP_XMAX_LOCK_ONLY) &&
+	else if (!HEAP_XMAX_IS_LOCKED_ONLY(old_infomask) &&
 			 TransactionIdDidCommit(xmax))
 	{
 		/*
@@ -5136,7 +5136,7 @@ GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask,
 				bits |= HEAP_XMAX_KEYSHR_LOCK;
 				break;
 			case MultiXactStatusForShare:
-				/* nothing here */
+				bits |= HEAP_XMAX_SHR_LOCK;
 				break;
 			case MultiXactStatusForNoKeyUpdate:
 				bits |= HEAP_XMAX_EXCL_LOCK;
@@ -5268,8 +5268,7 @@ Do_MultiXactIdWait(MultiXactId multi, MultiXactStatus status,
 	int			nmembers;
 	int			remain = 0;
 
-	allow_old = (!(infomask & (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)) &&
-				 (infomask & HEAP_XMAX_LOCK_ONLY));
+	allow_old = !(infomask & HEAP_LOCK_MASK) && HEAP_XMAX_IS_LOCKED_ONLY(infomask);
 	nmembers = GetMultiXactIdMembers(multi, &members, allow_old);
 
 	if (nmembers >= 0)
@@ -6213,6 +6212,7 @@ fix_infomask_from_infobits(uint8 infobits, uint16 *infomask, uint16 *infomask2)
 		*infomask |= HEAP_XMAX_LOCK_ONLY;
 	if (infobits & XLHL_XMAX_EXCL_LOCK)
 		*infomask |= HEAP_XMAX_EXCL_LOCK;
+	/* note HEAP_XMAX_SHR_LOCK isn't considered here */
 	if (infobits & XLHL_XMAX_KEYSHR_LOCK)
 		*infomask |= HEAP_XMAX_KEYSHR_LOCK;
 

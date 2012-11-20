@@ -167,7 +167,10 @@ struct HeapTupleHeaderData
 #define HEAP_XMAX_EXCL_LOCK		0x0040	/* xmax is exclusive locker */
 #define HEAP_XMAX_LOCK_ONLY		0x0080	/* xmax, if valid, is only a locker */
 
-#define HEAP_LOCK_BITS	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_LOCK_ONLY | \
+										/* xmax is a shared locker */
+#define HEAP_XMAX_SHR_LOCK	(HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK)
+
+#define HEAP_LOCK_MASK	(HEAP_XMAX_SHR_LOCK | HEAP_XMAX_EXCL_LOCK | \
 						 HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED		0x0100	/* t_xmin committed */
 #define HEAP_XMIN_INVALID		0x0200	/* t_xmin invalid/aborted */
@@ -191,15 +194,22 @@ struct HeapTupleHeaderData
  *
  * See also HeapTupleHeaderIsOnlyLocked, which also checks for a possible
  * aborted updater transaction.
- *
- * XXX should we AssertMacro() that HEAP_XMAX_INVALID is not set?
  */
-#define HeapTupleHeaderInfomaskIsOnlyLocked(infomask) \
+#define HEAP_XMAX_IS_LOCKED_ONLY(infomask) \
 	((infomask) & HEAP_XMAX_LOCK_ONLY)
+/*
+ * Use these to test whether a particular lock is applied to a tuple
+ */
+#define HEAP_XMAX_IS_SHR_LOCKED(infomask) \
+    (((infomask) & HEAP_LOCK_MASK) == HEAP_XMAX_SHR_LOCK)
+#define HEAP_XMAX_IS_EXCL_LOCKED(infomask) \
+    (((infomask) & HEAP_LOCK_MASK) == HEAP_XMAX_EXCL_LOCK)
+#define HEAP_XMAX_IS_KEYSHR_LOCKED(infomask) \
+    (((infomask) & HEAP_LOCK_MASK) == HEAP_XMAX_KEYSHR_LOCK)
 
 /* turn these all off when Xmax is to change */
 #define HEAP_XMAX_BITS (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | \
-						HEAP_XMAX_IS_MULTI | HEAP_LOCK_BITS)
+						HEAP_XMAX_IS_MULTI | HEAP_LOCK_MASK | HEAP_XMAX_LOCK_ONLY)
 
 /*
  * information stored in t_infomask2:

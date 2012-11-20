@@ -314,39 +314,6 @@ static void WriteMZeroPageXlogRec(int pageno, uint8 info);
 
 
 /*
- * MultiXactIdCreateSingleton
- * 		Construct a MultiXactId representing a single transaction.
- *
- * This is used when a tuple is marked FOR SHARE; there is no purely-hint-bit
- * representation of that, so we have to resort to always using a multi.  Other
- * lock modes have dedicated hint bits, so they don't have this problem.
- *
- * Note that MultiXactIdExpand can also create singleton MultiXactIds in some
- * cases.
- *
- * NB - we don't worry about our local MultiXactId cache here, because that
- * is handled by the lower-level routines.
- */
-MultiXactId
-MultiXactIdCreateSingleton(TransactionId xid, MultiXactStatus status)
-{
-	MultiXactId	newMulti;
-	MultiXactMember	member[1];
-
-	AssertArg(TransactionIdIsValid(xid));
-
-	member[0].xid = xid;
-	member[0].status = status;
-
-	newMulti = CreateMultiXactId(1, member);
-
-	debug_elog4(DEBUG2, "Create: returning %u for %u",
-			   newMulti, xid);
-
-	return newMulti;
-}
-
-/*
  * MultiXactIdCreate
  *		Construct a MultiXactId representing two TransactionIds.
  *
@@ -507,6 +474,9 @@ MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status)
  * We return true if at least one member of the given MultiXactId is still
  * running.  Note that a "false" result is certain not to change,
  * because it is not legal to add members to an existing MultiXactId.
+ *
+ * Caller is expected to have verified that the multixact does not come from
+ * a pg_upgraded share-locked tuple.
  */
 bool
 MultiXactIdIsRunning(MultiXactId multi)
@@ -518,8 +488,8 @@ MultiXactIdIsRunning(MultiXactId multi)
 	debug_elog3(DEBUG2, "IsRunning %u?", multi);
 
 	/*
-	 * Note: callers are expected to have checked that the given multi
-	 * cannot possibly come from a pg_upgraded database.
+	 * "false" here means we assume our callers have checked that the given
+	 * multi cannot possibly come from a pg_upgraded database.
 	 */
 	nmembers = GetMultiXactIdMembers(multi, &members, false);
 
