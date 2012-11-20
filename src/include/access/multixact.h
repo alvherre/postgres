@@ -73,7 +73,7 @@ typedef struct xl_multixact_create
 	MultiXactMember members[FLEXIBLE_ARRAY_MEMBER];
 } xl_multixact_create;
 
-#define SizeOfMultiXactCreate (offsetof(xl_multixact_create, nmembers) + sizeof(int32))
+#define SizeOfMultiXactCreate (offsetof(xl_multixact_create, members))
 
 
 extern MultiXactId MultiXactIdCreate(TransactionId xid1,
