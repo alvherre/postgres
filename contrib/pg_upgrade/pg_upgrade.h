@@ -7,7 +7,6 @@
 
 #include <unistd.h>
 #include <assert.h>
-#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -373,7 +372,6 @@ const char *setupPageConverter(pageCnvCtx **result);
 typedef void *pageCnvCtx;
 #endif
 
-int			load_directory(const char *dirname, char ***namelist);
 const char *copyAndUpdateFile(pageCnvCtx *pageConverter, const char *src,
 				  const char *dst, bool force);
 const char *linkAndUpdateFile(pageCnvCtx *pageConverter, const char *src,
@@ -395,7 +393,6 @@ FileNameMap *gen_db_file_maps(DbInfo *old_db,
 				 DbInfo *new_db, int *nmaps, const char *old_pgdata,
 				 const char *new_pgdata);
 void		get_db_and_rel_infos(ClusterInfo *cluster);
-void		free_db_and_rel_infos(DbInfoArr *db_arr);
 void print_maps(FileNameMap *maps, int n,
 		   const char *db_name);
 
