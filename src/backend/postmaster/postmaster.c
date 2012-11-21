@@ -5167,19 +5167,18 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 }
 
 /*
- * Connect worker to a database.
- *
- * XXX is this really necessary, or would it be better to have module call
- * InitPostgres() directly?  If we were to have more stuff done here this would
- * be more justified; as is, it doesn't seem to.
+ * Connect background worker to a database.
  */
 void
 BackgroundWorkerInitializeConnection(char *dbname, char *username)
 {
-	/*
-	 * XXX Here we need to check that the BGWORKER_BACKEND_DATABASE_CONNECTION
-	 * flag was passed on registration, or raise an error otherwise.
-	 */
+	BackgroundWorker *worker = MyBgworkerEntry;
+
+	/* XXX is this the right errcode? */
+	if (!(worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION))
+		ereport(FATAL,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("database connection requirement not indicated during registration")));
 
 	InitPostgres(dbname, InvalidOid, username, NULL);
 
@@ -5249,6 +5248,7 @@ bgworker_quickdie(SIGNAL_ARGS)
 	 */
 	exit(0);
 }
+
 static void
 do_start_bgworker(void)
 {
