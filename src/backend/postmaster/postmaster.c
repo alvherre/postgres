@@ -5275,6 +5275,10 @@ do_start_bgworker(void)
 
 	SetProcessingMode(InitProcessing);
 
+	/* Apply PostAuthDelay */
+	if (PostAuthDelay > 0)
+		pg_usleep(PostAuthDelay * 1000000L);
+
 	/*
 	 * If possible, make this process a group leader, so that the postmaster
 	 * can signal any child processes too.
