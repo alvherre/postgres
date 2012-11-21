@@ -11,11 +11,16 @@
  */
 #include "postgres.h"
 
+/* These are always necessary for a bgworker */
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
+#include "storage/proc.h"
 #include "storage/shmem.h"
+
+/* these headers are used by this particular worker's code */
+#include "libpq/auth.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"
 
