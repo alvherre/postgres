@@ -11,19 +11,13 @@
  */
 #include "postgres.h"
 
-#include "libpq/auth.h"
-#include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
-#include "storage/smgr.h"
 #include "utils/guc.h"
-#include "utils/memutils.h"
-#include "utils/resowner.h"
 #include "utils/timestamp.h"
-#include <unistd.h>
 
 PG_MODULE_MAGIC;
 
@@ -66,30 +60,13 @@ auth_counter_sigterm(SIGNAL_ARGS)
 static void
 auth_counter_main(void *args)
 {
-	MemoryContext	auth_counter_context;
-
 	terminate = false;
 
 	/* We're now ready to receive signals */
 	BackgroundWorkerUnblockSignals();
-	/* Create a resource owner to keep track of our resources */
-	CurrentResourceOwner = ResourceOwnerCreate(NULL, WORKER_NAME);
 
 	/*
-	 * Create a memory context that we will do all our work in.  We do this so
-	 * that we can reset the context whenever it suit us, to avoid possible
-	 * memory leaks.
-	 */
-	auth_counter_context = AllocSetContextCreate(TopMemoryContext,
-												 WORKER_NAME,
-												 ALLOCSET_DEFAULT_MINSIZE,
-												 ALLOCSET_DEFAULT_INITSIZE,
-												 ALLOCSET_DEFAULT_MAXSIZE);
-	MemoryContextSwitchTo(auth_counter_context);
-
-
-	/*
-	 * Init counter variables
+	 * Initialize counter variables
 	 */
 	LWLockAcquire(ac->lock, LW_EXCLUSIVE);
 	ac->success = 0;
@@ -109,20 +86,13 @@ auth_counter_main(void *args)
 		n_failed  = ac->failure;
 		LWLockRelease(ac->lock);
 
-		tstamp = DirectFunctionCall1(timestamptz_out,
-							TimestampTzGetDatum(GetCurrentTimestamp()));
-
 		elog(LOG, "%s (%d) %lu logins successful, %lu failed logins - %s",
 			 WORKER_NAME, MyProcPid, n_success, n_failed,
-			 DatumGetCString(tstamp));
-
-		/* clear temporary memory objects */
-		MemoryContextReset(auth_counter_context);
+			 timestamptz_to_str(GetCurrentTimestamp()));
 	}
 
 	proc_exit(0);
 }
-
 
 /*
  * auth_counter_check
@@ -150,8 +120,6 @@ static void
 auth_counter_shmem_startup(void)
 {
 	bool	found;
-
-	elog(LOG, "auth_counter shmem_startup");
 
 	if (shmem_startup_hook_next)
 		shmem_startup_hook_next();
@@ -220,14 +188,14 @@ _PG_init(void)
 	shmem_startup_hook_next = shmem_startup_hook;
 	shmem_startup_hook = auth_counter_shmem_startup;
 
-	/* install a hook */
+	/* install our client auth hook */
 	original_client_auth_hook = ClientAuthentication_hook;
 	ClientAuthentication_hook = auth_counter_check;
 
 	/* register the worker process */
 	worker.bgw_name = WORKER_NAME;
-	worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
-	worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
+	worker.bgw_flags = BGWORKER_SHMEM_ACCESS;
+	worker.bgw_start_time = BgWorkerStart_ConsistentState;
 	worker.bgw_main = auth_counter_main;
 	worker.bgw_main_arg = NULL;
 	worker.bgw_sighup = auth_counter_sigterm;
