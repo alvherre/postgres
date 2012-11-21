@@ -15,6 +15,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
+#include "storage/latch.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
@@ -53,7 +54,13 @@ static volatile bool	terminate;
 static void
 auth_counter_sigterm(SIGNAL_ARGS)
 {
+	int			save_errno = errno;
+
 	terminate = true;
+	if (MyProc)
+		SetLatch(&MyProc->procLatch);
+
+	errno = save_errno;
 }
 
 /*
@@ -80,11 +87,24 @@ auth_counter_main(void *args)
 
 	while (!terminate)
 	{
-		Datum	tstamp;
 		long	n_success;
 		long	n_failed;
+		int		rc;
 
-		pg_usleep((long) auth_counter_interval * 1000000L);
+		/*
+		 * Background workers mustn't call sleep or any equivalent: instead,
+		 * they wait on their process latch, which sleeps if necessary, but is
+		 * awakened if postmaster dies.  That way the background process goes
+		 * away immediately in an emergency.
+		 */
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   auth_counter_interval * 1000L);
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
 
 		LWLockAcquire(ac->lock, LW_EXCLUSIVE);
 		n_success = ac->success;

@@ -15,6 +15,7 @@
 #include "miscadmin.h"
 #include "postmaster/bgworker.h"
 #include "storage/ipc.h"
+#include "storage/latch.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
@@ -36,13 +37,21 @@ static bool	got_sigterm = false;
 static void
 worker_spi_sigterm(SIGNAL_ARGS)
 {
+	int			save_errno = errno;
+
 	got_sigterm = true;
+	if (MyProc)
+		SetLatch(&MyProc->procLatch);
+
+	errno = save_errno;
 }
 
 static void
 worker_spi_sighup(SIGNAL_ARGS)
 {
 	elog(LOG, "got sighup!");
+	if (MyProc)
+		SetLatch(&MyProc->procLatch);
 }
 
 static void
@@ -125,7 +134,22 @@ worker_spi_main(void *main_arg)
 	{
 		int		ret;
 
-		pg_usleep(1000 * 1000 * 10);	/* 10s */
+		int		rc;
+
+		/*
+		 * Background workers mustn't call usleep() or any direct equivalent:
+		 * instead, they may wait on their process latch, which sleeps as
+		 * necessary, but is awakened if postmaster dies.  That way the
+		 * background process goes away immediately in an emergency.
+		 */
+		rc = WaitLatch(&MyProc->procLatch,
+					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+					   1000L);
+		ResetLatch(&MyProc->procLatch);
+
+		/* emergency bailout if postmaster has died */
+		if (rc & WL_POSTMASTER_DEATH)
+			proc_exit(1);
 
 		StartTransactionCommand();
 		SPI_connect();
