@@ -95,10 +95,10 @@ worker_spi_main(void *main_arg)
 	char		   *tabname;
 	StringInfoData		buf;
 
+	/* We're now ready to receive signals */
+	BackgroundWorkerUnblockSignals();
 	tabname = (char *) main_arg;
 
-	/* Unblock signals (they were blocked when the postmaster forked us) */
-    PG_SETMASK(&UnBlockSig);
 
 	BackgroundWorkerInitializeConnection("alvherre", NULL);
 

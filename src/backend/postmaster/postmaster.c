@@ -5190,6 +5190,21 @@ BackgroundWorkerInitializeConnection(char *dbname, char *username)
 	SetProcessingMode(NormalProcessing);
 }
 
+/*
+ * Block/unblock signals in a background worker
+ */
+void
+BackgroundWorkerBlockSignals(void)
+{
+	PG_SETMASK(&BlockSig);
+}
+
+void
+BackgroundWorkerUnblockSignals(void)
+{
+	PG_SETMASK(&UnBlockSig);
+}
+
 #ifdef EXEC_BACKEND
 static BackgroundWorker *
 find_bgworker_entry(int cookie)

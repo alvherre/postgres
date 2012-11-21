@@ -94,4 +94,8 @@ extern void RegisterBackgroundWorker(BackgroundWorker *worker);
  */
 extern void BackgroundWorkerInitializeConnection(char *dbname, char *username);
 
+/* Block/unblock signals in a background worker process */
+extern void BackgroundWorkerBlockSignals(void);
+extern void BackgroundWorkerUnblockSignals(void);
+
 #endif /* BGWORKER_H */

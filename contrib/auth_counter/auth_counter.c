@@ -70,6 +70,8 @@ auth_counter_main(void *args)
 
 	terminate = false;
 
+	/* We're now ready to receive signals */
+	BackgroundWorkerUnblockSignals();
 	/* Create a resource owner to keep track of our resources */
 	CurrentResourceOwner = ResourceOwnerCreate(NULL, WORKER_NAME);
 
@@ -85,8 +87,6 @@ auth_counter_main(void *args)
 												 ALLOCSET_DEFAULT_MAXSIZE);
 	MemoryContextSwitchTo(auth_counter_context);
 
-	/* Unblock signals (they were blocked when the postmaster forked us) */
-    PG_SETMASK(&UnBlockSig);
 
 	/*
 	 * Init counter variables
