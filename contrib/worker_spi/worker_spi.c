@@ -1,6 +1,14 @@
 /* -------------------------------------------------------------------------
  *
  * worker_spi.c
+ *		Sample background worker code that demonstrates usage of a database
+ *		connection.
+ *
+ * This code connects to a database, create a schema and table, and summarizes
+ * the numbers contained therein.  To see it working, insert an initial value
+ * with "total" type and some initial value; then insert some other rows with
+ * "delta" type.  Delta rows will be deleted by this worker and their values
+ * aggregated into the total.
  *
  * Copyright (C) 2012, PostgreSQL Global Development Group
  *
@@ -34,6 +42,13 @@ void	_PG_init(void);
 
 static bool	got_sigterm = false;
 
+
+typedef struct worktable
+{
+	const char	   *schema;
+	const char	   *name;
+} worktable;
+
 static void
 worker_spi_sigterm(SIGNAL_ARGS)
 {
@@ -55,7 +70,7 @@ worker_spi_sighup(SIGNAL_ARGS)
 }
 
 static void
-initialize_worker_spi(char *tabname)
+initialize_worker_spi(worktable *table)
 {
 	int		ret;
 	int		ntup;
@@ -67,7 +82,8 @@ initialize_worker_spi(char *tabname)
 	PushActiveSnapshot(GetTransactionSnapshot());
 
 	initStringInfo(&buf);
-	appendStringInfo(&buf, "select count(*) from pg_namespace where nspname = '%s'", tabname);
+	appendStringInfo(&buf, "select count(*) from pg_namespace where nspname = '%s'",
+					 table->schema);
 
 	ret = SPI_execute(buf.data, true, 0);
 	if (ret != SPI_OK_SELECT)
@@ -82,15 +98,17 @@ initialize_worker_spi(char *tabname)
 	if (isnull)
 		elog(FATAL, "null result");
 
-	elog(LOG, "pg_namespace has %d tuples for nspname = '%s'", ntup, tabname);
-
 	if (ntup == 0)
 	{
 		resetStringInfo(&buf);
 		appendStringInfo(&buf,
-						 "create schema \"%s\" "
-						 "create table \"%s\" (type	text, "
-						 "value	int)", tabname, tabname);
+						 "CREATE SCHEMA \"%s\" "
+						 "CREATE TABLE \"%s\" ("
+						 "		type text CHECK (type IN ('total', 'delta')), "
+						 "		value	integer)"
+						 "CREATE UNIQUE INDEX \"%s_unique_total\" ON \"%s\" (type) "
+						 "WHERE type = 'total'",
+						 table->schema, table->name, table->name, table->name);
 
 		ret = SPI_execute(buf.data, false, 0);
 
@@ -106,34 +124,48 @@ initialize_worker_spi(char *tabname)
 static void
 worker_spi_main(void *main_arg)
 {
-	char		   *tabname;
-	StringInfoData		buf;
+	worktable	   *table = (worktable *) main_arg;
+	StringInfoData	buf;
 
 	/* We're now ready to receive signals */
 	BackgroundWorkerUnblockSignals();
-	tabname = (char *) main_arg;
 
+	/* Connect to our database */
+	BackgroundWorkerInitializeConnection("postgres", NULL);
 
-	BackgroundWorkerInitializeConnection("alvherre", NULL);
+	elog(LOG, "%s initialized with %s.%s",
+		 MyBgworkerEntry->bgw_name, table->schema, table->name);
+	initialize_worker_spi(table);
 
-	initialize_worker_spi(tabname);
+	/*
+	 * Quote identifiers passed to us.  Note that this must be done after
+	 * initialize_worker_spi, because that routine assumes the names are not
+	 * quoted.
+	 *
+	 * Note some memory might be leaked here.
+	 */
+	table->schema = quote_identifier(table->schema);
+	table->name = quote_identifier(table->name);
 
 	initStringInfo(&buf);
 	appendStringInfo(&buf,
 					 "WITH deleted AS (DELETE "
-		"FROM %s.%s "
-		"WHERE type = 'delta' RETURNING value), "
+					 "FROM %s.%s "
+					 "WHERE type = 'delta' RETURNING value), "
 					 "total AS (SELECT coalesce(sum(value), 0) as sum "
-							   "FROM deleted) "
+					 "FROM deleted) "
 					 "UPDATE %s.%s "
 					 "SET value = %s.value + total.sum "
 					 "FROM total WHERE type = 'total' "
-					 "RETURNING %s.value", tabname, tabname, tabname, tabname, tabname, tabname);
+					 "RETURNING %s.value",
+					 table->schema, table->name,
+					 table->schema, table->name,
+					 table->name,
+					 table->name);
 
 	while (!got_sigterm)
 	{
 		int		ret;
-
 		int		rc;
 
 		/*
@@ -158,7 +190,8 @@ worker_spi_main(void *main_arg)
 		ret = SPI_execute(buf.data, false, 0);
 
 		if (ret != SPI_OK_UPDATE_RETURNING)
-			elog(FATAL, "cannot select from table %s: error code %d", tabname, ret);
+			elog(FATAL, "cannot select from table %s.%s: error code %d",
+				 table->schema, table->name, ret);
 
 		if (SPI_processed > 0)
 		{
@@ -169,7 +202,9 @@ worker_spi_main(void *main_arg)
 											   SPI_tuptable->tupdesc,
 											   1, &isnull));
 			if (!isnull)
-				elog(LOG, "count is now %d", val);
+				elog(LOG, "%s: count in %s.%s is now %d",
+					 MyBgworkerEntry->bgw_name,
+					 table->schema, table->name, val);
 		}
 
 		SPI_finish();
@@ -181,27 +216,48 @@ worker_spi_main(void *main_arg)
 }
 
 /*
- * Entrypoint of this module
+ * Entrypoint of this module.
+ *
+ * We register two worker processes here, to demonstrate how that can be done.
  */
 void
 _PG_init(void)
 {
-	BackgroundWorker		worker;
+	BackgroundWorker	worker;
+	worktable		   *table;
 
-	/* register the worker process */
-	worker.bgw_flags = BGWORKER_SHMEM_ACCESS | BGWORKER_BACKEND_DATABASE_CONNECTION;
+	/* register the worker processes.  These values are common for both */
+	worker.bgw_flags = BGWORKER_SHMEM_ACCESS |
+		BGWORKER_BACKEND_DATABASE_CONNECTION;
 	worker.bgw_start_time = BgWorkerStart_RecoveryFinished;
 	worker.bgw_main = worker_spi_main;
 	worker.bgw_sighup = worker_spi_sighup;
 	worker.bgw_sigterm = worker_spi_sigterm;
 
+	/*
+	 * These values are used for the first worker.
+	 *
+	 * Note these are palloc'd.  The reason this works after starting a new
+	 * worker process is that if we only fork, they point to valid allocated
+	 * memory in the child process; and if we fork and then exec, the exec'd
+	 * process will run this code again, and so the memory is also valid there.
+	 */
+	table = palloc(sizeof(worktable));
+	table->schema = pstrdup("schema1");
+	table->name = pstrdup("counted");
+
 	worker.bgw_name = "SPI worker 1";
 	worker.bgw_restart_time = BGW_NEVER_RESTART;
-	worker.bgw_main_arg = "table1";
+	worker.bgw_main_arg = (void *) table;
 	RegisterBackgroundWorker(&worker);
 
+	/* Values for the second worker */
+	table = palloc(sizeof(worktable));
+	table->schema = pstrdup("our schema2");
+	table->name = pstrdup("counted rows");
+
 	worker.bgw_name = "SPI worker 2";
-	worker.bgw_restart_time = INT_MIN;
-	worker.bgw_main_arg = "table2";
+	worker.bgw_restart_time = 2;
+	worker.bgw_main_arg = (void *) table;
 	RegisterBackgroundWorker(&worker);
 }

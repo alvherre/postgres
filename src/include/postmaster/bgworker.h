@@ -83,6 +83,9 @@ typedef struct BackgroundWorker
 /* Register a new bgworker */
 extern void RegisterBackgroundWorker(BackgroundWorker *worker);
 
+/* This is valid in a running worker */
+extern BackgroundWorker *MyBgworkerEntry;
+
 /*
  * Connect to the specified database, as the specified user.  Only a worker
  * that passed BGWORKER_BACKEND_DATABASE_CONNECTION during registration may
