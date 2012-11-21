@@ -1390,6 +1390,90 @@ checkDataDir(void)
 }
 
 /*
+ * Determine how long should we let ServerLoop sleep.
+ *
+ * In normal conditions we wait at most one minute, to ensure that the other
+ * background tasks handled by ServerLoop get done even when no requests are
+ * arriving.  However, if there are background workers waiting to be started,
+ * we don't actually sleep so that they are quickly serviced.
+ */
+static void
+DetermineSleepTime(struct timeval *timeout)
+{
+	TimestampTz		next_wakeup = 0;
+
+	/*
+	 * Normal case: either there are no background workers at all, or we're in
+	 * a shutdown sequence (during which we ignore bgworkers altogether).
+	 */
+	if (Shutdown > NoShutdown ||
+		(!StartWorkerNeeded && !HaveCrashedWorker))
+	{
+		timeout->tv_sec = 60;
+		timeout->tv_usec = 0;
+		return;
+	}
+
+	if (StartWorkerNeeded)
+	{
+		timeout->tv_sec = 0;
+		timeout->tv_usec = 0;
+		return;
+	}
+
+	if (HaveCrashedWorker)
+	{
+		slist_iter	siter;
+
+		/*
+		 * When there are crashed bgworkers, we sleep just long enough that
+		 * they are restarted when they request to be.  Scan the list to
+		 * determine the minimum of all wakeup times according to most
+		 * recent crash time and requested restart interval.
+		 */
+		slist_foreach(siter, &BackgroundWorkerList)
+		{
+			RegisteredBgWorker *rw;
+			TimestampTz		this_wakeup;
+
+			rw = slist_container(RegisteredBgWorker, lnode, siter.cur);
+
+			if (rw->crashed_at == 0)
+				continue;
+
+			if (rw->worker->bgw_restart_time == BGW_NEVER_RESTART)
+				continue;
+
+			this_wakeup = TimestampTzPlusMilliseconds(rw->crashed_at,
+										1000L * rw->worker->bgw_restart_time);
+			if (next_wakeup == 0 || this_wakeup < next_wakeup)
+				next_wakeup = this_wakeup;
+		}
+	}
+
+	if (next_wakeup != 0)
+	{
+		int		microsecs;
+
+		TimestampDifference(GetCurrentTimestamp(), next_wakeup,
+							&timeout->tv_sec, &microsecs);
+		timeout->tv_usec = microsecs;
+
+		/* Ensure we don't exceed one minute */
+		if (timeout->tv_sec > 60)
+		{
+			timeout->tv_sec = 60;
+			timeout->tv_usec = 0;
+		}
+	}
+	else
+	{
+		timeout->tv_sec = 60;
+		timeout->tv_usec = 0;
+	}
+}
+
+/*
  * Main idle loop of postmaster
  */
 static int
@@ -1430,23 +1514,7 @@ ServerLoop(void)
 			/* must set timeout each time; some OSes change it! */
 			struct timeval timeout;
 
-			/*
-			 * In normal conditions we wait at most one minute, to ensure that
-			 * the other background tasks handled below get done even when no
-			 * requests are arriving.  However, if there are background workers
-			 * waiting to be started, we don't actually sleep so that they are
-			 * quickly serviced.
-			 */
-			if (StartWorkerNeeded)
-			{
-				timeout.tv_sec = 0;
-				timeout.tv_usec = 0;
-			}
-			else
-			{
-				timeout.tv_sec = 60;
-				timeout.tv_usec = 0;
-			}
+			DetermineSleepTime(&timeout);
 
 			selres = select(nSockets, &rmask, NULL, NULL, &timeout);
 		}
@@ -1576,7 +1644,6 @@ ServerLoop(void)
 		}
 	}
 }
-
 
 /*
  * Initialise the masks for select() for the ports we are listening on.
@@ -2693,7 +2760,7 @@ reaper(SIGNAL_ARGS)
 		if (CleanupBackgroundWorker(pid, exitstatus))
 		{
 			/* have it be restarted */
-			StartWorkerNeeded = true;
+			HaveCrashedWorker = true;
 			continue;
 		}
 
@@ -2788,7 +2855,10 @@ CleanupBackgroundWorker(int pid,
 		rw->pid = 0;
 		rw->child_slot = 0;
 		if (EXIT_STATUS_1(exitstatus))
+		{
+			HaveCrashedWorker = true;
 			rw->crashed_at = GetCurrentTimestamp();
+		}
 		else
 			rw->crashed_at = 0;
 
@@ -5560,7 +5630,11 @@ StartOneBackgroundWorker(void)
 	TimestampTz	now = 0;
 
 	if (FatalError)
+	{
+		StartWorkerNeeded = false;
+		HaveCrashedWorker = false;
 		return;		/* not yet */
+	}
 
 	HaveCrashedWorker = false;
 
