@@ -298,8 +298,6 @@ static void mXactCachePut(MultiXactId multi, int nmembers,
 			  MultiXactMember *members);
 
 static char *mxstatus_to_string(MultiXactStatus status);
-static char *mxid_to_string(MultiXactId multi, int nmembers,
-			   MultiXactMember *members);
 
 /* management of SLRU infrastructure */
 static int	ZeroMultiXactOffsetPage(int pageno, bool writeXlog);
@@ -1422,7 +1420,7 @@ mxstatus_to_string(MultiXactStatus status)
 	}
 }
 
-static char *
+char *
 mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
 	static char	   *str = NULL;
@@ -2422,39 +2420,6 @@ multixact_redo(XLogRecPtr lsn, XLogRecord *record)
 	}
 	else
 		elog(PANIC, "multixact_redo: unknown op code %u", info);
-}
-
-void
-multixact_desc(StringInfo buf, uint8 xl_info, char *rec)
-{
-	uint8		info = xl_info & ~XLR_INFO_MASK;
-
-	if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE)
-	{
-		int			pageno;
-
-		memcpy(&pageno, rec, sizeof(int));
-		appendStringInfo(buf, "zero offsets page: %d", pageno);
-	}
-	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
-	{
-		int			pageno;
-
-		memcpy(&pageno, rec, sizeof(int));
-		appendStringInfo(buf, "zero members page: %d", pageno);
-	}
-	else if (info == XLOG_MULTIXACT_CREATE_ID)
-	{
-		xl_multixact_create *xlrec = (xl_multixact_create *) rec;
-
-		appendStringInfo(buf, "create multixact %u offset %u",
-						 xlrec->mid, xlrec->moff);
-		appendStringInfo(buf, "members: %s", 
-						 mxid_to_string(xlrec->mid, xlrec->nmembers,
-										xlrec->members));
-	}
-	else
-		appendStringInfo(buf, "UNKNOWN");
 }
 
 Datum

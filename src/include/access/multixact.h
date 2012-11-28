@@ -122,5 +122,7 @@ extern void multixact_twophase_postabort(TransactionId xid, uint16 info,
 
 extern void multixact_redo(XLogRecPtr lsn, XLogRecord *record);
 extern void multixact_desc(StringInfo buf, uint8 xl_info, char *rec);
+extern char *mxid_to_string(MultiXactId multi, int nmembers,
+			   MultiXactMember *members);
 
 #endif   /* MULTIXACT_H */
