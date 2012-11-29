@@ -2042,17 +2042,17 @@ preprocess_rowmarks(PlannerInfo *root)
 		newrc->rowmarkId = ++(root->glob->lastRowMarkId);
 		switch (rc->strength)
 		{
-			case LCS_FORNOKEYUPDATE:
+			case LCS_FORUPDATE:
 				newrc->markType = ROW_MARK_EXCLUSIVE;
+				break;
+			case LCS_FORNOKEYUPDATE:
+				newrc->markType = ROW_MARK_NOKEYEXCLUSIVE;
 				break;
 			case LCS_FORSHARE:
 				newrc->markType = ROW_MARK_SHARE;
 				break;
 			case LCS_FORKEYSHARE:
 				newrc->markType = ROW_MARK_KEYSHARE;
-				break;
-			case LCS_FORUPDATE:
-				newrc->markType = ROW_MARK_KEYEXCLUSIVE;
 				break;
 		}
 		newrc->noWait = rc->noWait;

@@ -762,8 +762,8 @@ typedef struct Limit
  */
 typedef enum RowMarkType
 {
-	ROW_MARK_KEYEXCLUSIVE,		/* obtain key-exclusive tuple lock */
 	ROW_MARK_EXCLUSIVE,			/* obtain exclusive tuple lock */
+	ROW_MARK_NOKEYEXCLUSIVE,	/* obtain no-key exclusive tuple lock */
 	ROW_MARK_SHARE,				/* obtain shared tuple lock */
 	ROW_MARK_KEYSHARE,			/* obtain keyshare tuple lock */
 	ROW_MARK_REFERENCE,			/* just fetch the TID */

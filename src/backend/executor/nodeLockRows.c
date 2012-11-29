@@ -113,10 +113,10 @@ lnext:
 		/* okay, try to lock the tuple */
 		switch (erm->markType)
 		{
-			case ROW_MARK_KEYEXCLUSIVE:
+			case ROW_MARK_EXCLUSIVE:
 				lockmode = LockTupleExclusive;
 				break;
-			case ROW_MARK_EXCLUSIVE:
+			case ROW_MARK_NOKEYEXCLUSIVE:
 				lockmode = LockTupleNoKeyExclusive;
 				break;
 			case ROW_MARK_SHARE:

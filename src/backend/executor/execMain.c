@@ -794,8 +794,8 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 
 		switch (rc->markType)
 		{
-			case ROW_MARK_KEYEXCLUSIVE:
 			case ROW_MARK_EXCLUSIVE:
+			case ROW_MARK_NOKEYEXCLUSIVE:
 			case ROW_MARK_SHARE:
 			case ROW_MARK_KEYSHARE:
 				relid = getrelid(rc->rti, rangeTable);
