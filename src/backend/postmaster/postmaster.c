@@ -2816,10 +2816,16 @@ CleanupBackgroundWorker(int pid,
 		snprintf(namebuf, MAXPGPATH, "%s: %s", _("worker process"),
 				 rw->worker->bgw_name);
 
+		/* Delay restarting any bgworker that exits with a nonzero status. */
+		if (!EXIT_STATUS_0(exitstatus))
+			rw->crashed_at = GetCurrentTimestamp();
+		else
+			rw->crashed_at = 0;
+
 		/*
-		 * For shared-memory-connected workers, just like a backend, any exit
-		 * status other than 0 or 1 is considered a crash and causes a
-		 * system-wide restart.
+		 * Additionally, for shared-memory-connected workers, just like a
+		 * backend, any exit status other than 0 or 1 is considered a crash
+		 * and causes a system-wide restart.
 		 */
 		if (rw->worker->bgw_flags & BGWORKER_SHMEM_ACCESS)
 		{
@@ -2845,6 +2851,7 @@ CleanupBackgroundWorker(int pid,
 		/* Get it out of the BackendList and clear out remaining data */
 		if (rw->backend)
 		{
+			Assert(rw->rworker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION);
 			dlist_delete(&rw->backend->elem);
 #ifdef EXEC_BACKEND
 			ShmemBackendArrayRemove(rw->backend);
@@ -2854,13 +2861,6 @@ CleanupBackgroundWorker(int pid,
 		}
 		rw->pid = 0;
 		rw->child_slot = 0;
-		if (EXIT_STATUS_1(exitstatus))
-		{
-			HaveCrashedWorker = true;
-			rw->crashed_at = GetCurrentTimestamp();
-		}
-		else
-			rw->crashed_at = 0;
 
 		LogChildExit(LOG, namebuf, pid, exitstatus);
 
@@ -5619,9 +5619,11 @@ assign_backendlist_entry(RegisteredBgWorker *rw)
 }
 
 /*
- * If the time is right, start one background worker.  If there are more
- * workers that need to be started, StartWorkerNeeded is set to true;
- * otherwise it is reset.
+ * If the time is right, start one background worker.
+ *
+ * As a side effect, the bgworker control variables are set or reset whenever
+ * there are more workers to start after this one, and whenever the overall
+ * system state requires it.
  */
 static void
 StartOneBackgroundWorker(void)
