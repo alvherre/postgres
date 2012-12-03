@@ -2851,7 +2851,7 @@ CleanupBackgroundWorker(int pid,
 		/* Get it out of the BackendList and clear out remaining data */
 		if (rw->backend)
 		{
-			Assert(rw->rworker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION);
+			Assert(rw->worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION);
 			dlist_delete(&rw->backend->elem);
 #ifdef EXEC_BACKEND
 			ShmemBackendArrayRemove(rw->backend);
@@ -5449,18 +5449,38 @@ do_start_bgworker(void)
 	proc_exit(0);
 }
 
-int
-GetNumRegisteredBackgroundWorkers(void)
+/*
+ * Return the number of background workers registered that have at least
+ * one of the passed flag bits set.
+ */
+static int
+GetNumRegisteredBackgroundWorkers(int flags)
 {
 	slist_iter	iter;
 	int			count = 0;
 
 	slist_foreach(iter, &BackgroundWorkerList)
 	{
+		RegisteredBgWorker *rw;
+
+		rw = slist_container(RegisteredBgWorker, lnode, iter.cur);
+		
+		if (!(rw->worker->bgw_flags & flags))
+			continue;
+
 		count++;
 	}
 
 	return count;
+}
+
+/*
+ * Return the number of bgworkers that need to have PGPROC entries.
+ */
+int
+GetNumShmemAttachedBgworkers(void)
+{
+	return GetNumRegisteredBackgroundWorkers(BGWORKER_SHMEM_ACCESS);
 }
 
 #ifdef EXEC_BACKEND

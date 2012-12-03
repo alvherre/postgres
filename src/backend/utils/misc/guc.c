@@ -8630,8 +8630,8 @@ show_tcp_keepalives_count(void)
 static bool
 check_maxconnections(int *newval, void **extra, GucSource source)
 {
-	if (*newval + GetNumRegisteredBackgroundWorkers() +
-		autovacuum_max_workers + 1 > MAX_BACKENDS)
+	if (*newval + GetNumShmemAttachedBgworkers() + autovacuum_max_workers + 1 >
+		MAX_BACKENDS)
 		return false;
 	return true;
 }
@@ -8640,13 +8640,13 @@ static void
 assign_maxconnections(int newval, void *extra)
 {
 	MaxBackends = newval + autovacuum_max_workers + 1 +
-		GetNumRegisteredBackgroundWorkers();
+		GetNumShmemAttachedBgworkers();
 }
 
 static bool
 check_autovacuum_max_workers(int *newval, void **extra, GucSource source)
 {
-	if (MaxConnections + *newval + 1 + GetNumRegisteredBackgroundWorkers() >
+	if (MaxConnections + *newval + 1 + GetNumShmemAttachedBgworkers() >
 		MAX_BACKENDS)
 		return false;
 	return true;
@@ -8655,8 +8655,7 @@ check_autovacuum_max_workers(int *newval, void **extra, GucSource source)
 static void
 assign_autovacuum_max_workers(int newval, void *extra)
 {
-	MaxBackends = MaxConnections + newval + 1 +
-		GetNumRegisteredBackgroundWorkers();
+	MaxBackends = MaxConnections + newval + 1 + GetNumShmemAttachedBgworkers();
 }
 
 static bool
