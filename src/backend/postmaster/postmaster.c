@@ -375,6 +375,7 @@ static void reaper(SIGNAL_ARGS);
 static void sigusr1_handler(SIGNAL_ARGS);
 static void startup_die(SIGNAL_ARGS);
 static void dummy_handler(SIGNAL_ARGS);
+static int GetNumRegisteredBackgroundWorkers(int flags);
 static void StartupPacketTimeoutHandler(void);
 static void CleanupBackend(int pid, int exitstatus);
 static bool CleanupBackgroundWorker(int pid, int exitstatus);
@@ -886,6 +887,16 @@ PostmasterMain(int argc, char *argv[])
 	 * process any libraries that should be preloaded at postmaster start
 	 */
 	process_shared_preload_libraries();
+
+	/*
+	 * If loadable modules have added background workers, MaxBackends needs to
+	 * be updated.  Do so now.
+	 */
+	// RerunAssignHook("max_connections");
+	if (GetNumShmemAttachedBgworkers() > 0)
+		SetConfigOption("max_connections",
+						GetConfigOption("max_connections", false, false),
+						PGC_POSTMASTER, PGC_S_OVERRIDE);
 
 	/*
 	 * Establish input sockets.
@@ -5126,16 +5137,16 @@ CreateOptsFile(int argc, char *argv[], char *fullprogname)
  * This reports the number of entries needed in per-child-process arrays
  * (the PMChildFlags array, and if EXEC_BACKEND the ShmemBackendArray).
  * These arrays include regular backends, autovac workers, walsenders
- * and background workers,
- * but not special children nor dead_end children.	This allows the arrays
- * to have a fixed maximum size, to wit the same too-many-children limit
- * enforced by canAcceptConnections().	The exact value isn't too critical
- * as long as it's more than MaxBackends.
+ * and background workers, but not special children nor dead_end children.
+ * This allows the arrays to have a fixed maximum size, to wit the same
+ * too-many-children limit enforced by canAcceptConnections().	The exact value
+ * isn't too critical as long as it's more than MaxBackends.
  */
 int
 MaxLivePostmasterChildren(void)
 {
-	return 2 * MaxBackends;
+	return 2 * (MaxConnections + autovacuum_max_workers + 1 +
+				GetNumRegisteredBackgroundWorkers(0));
 }
 
 /*
@@ -5469,7 +5480,8 @@ GetNumRegisteredBackgroundWorkers(int flags)
 
 		rw = slist_container(RegisteredBgWorker, lnode, iter.cur);
 		
-		if (!(rw->worker->bgw_flags & flags))
+		if (flags != 0 &&
+			!(rw->worker->bgw_flags & flags))
 			continue;
 
 		count++;
