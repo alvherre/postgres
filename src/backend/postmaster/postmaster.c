@@ -4408,7 +4408,7 @@ SubPostmasterMain(int argc, char *argv[])
 		strcmp(argv[1], "--forkavlauncher") == 0 ||
 		strcmp(argv[1], "--forkavworker") == 0 ||
 		strcmp(argv[1], "--forkboot") == 0 ||
-		strncmp(argv[1], "--forkbgworker", 14) == 0)
+		strncmp(argv[1], "--forkbgworker=", 15) == 0)
 		PGSharedMemoryReAttach();
 
 	/* autovacuum needs this set before calling InitProcess */
@@ -5150,7 +5150,11 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 	RegisteredBgWorker *rw;
 	int			namelen = strlen(worker->bgw_name);
 #ifdef EXEC_BACKEND
-	static int	BackgroundWorkerCookie = 0;
+	/*
+	 * Use 1 here, not 0, to avoid confusing a possible bogus cookie read
+	 * by atoi() in SubPostmasterMain.
+	 */
+	static int	BackgroundWorkerCookie = 1;
 #endif
 
 	if (!IsUnderPostmaster)
