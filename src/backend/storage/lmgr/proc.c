@@ -341,6 +341,8 @@ InitProcess(void)
 	SHMQueueElemInit(&(MyProc->links));
 	MyProc->waitStatus = STATUS_OK;
 	MyProc->lxid = InvalidLocalTransactionId;
+	MyProc->fpVXIDLock = false;
+	MyProc->fpLocalTransactionId = InvalidLocalTransactionId;
 	MyPgXact->xid = InvalidTransactionId;
 	MyPgXact->xmin = InvalidTransactionId;
 	MyProc->pid = MyProcPid;
@@ -348,7 +350,7 @@ InitProcess(void)
 	MyProc->backendId = InvalidBackendId;
 	MyProc->databaseId = InvalidOid;
 	MyProc->roleId = InvalidOid;
-	MyPgXact->inCommit = false;
+	MyPgXact->delayChkpt = false;
 	MyPgXact->vacuumFlags = 0;
 	/* NB -- autovac launcher intentionally does not set IS_AUTOVACUUM */
 	if (IsAutoVacuumWorkerProcess())
@@ -507,12 +509,14 @@ InitAuxiliaryProcess(void)
 	SHMQueueElemInit(&(MyProc->links));
 	MyProc->waitStatus = STATUS_OK;
 	MyProc->lxid = InvalidLocalTransactionId;
+	MyProc->fpVXIDLock = false;
+	MyProc->fpLocalTransactionId = InvalidLocalTransactionId;
 	MyPgXact->xid = InvalidTransactionId;
 	MyPgXact->xmin = InvalidTransactionId;
 	MyProc->backendId = InvalidBackendId;
 	MyProc->databaseId = InvalidOid;
 	MyProc->roleId = InvalidOid;
-	MyPgXact->inCommit = false;
+	MyPgXact->delayChkpt = false;
 	MyPgXact->vacuumFlags = 0;
 	MyProc->lwWaiting = false;
 	MyProc->lwWaitMode = 0;

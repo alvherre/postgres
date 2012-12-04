@@ -58,10 +58,20 @@ PGDATA=$temp_root/data
 export PGDATA
 rm -rf "$PGDATA" "$PGDATA".old
 
+unset PGDATABASE
+unset PGUSER
+unset PGSERVICE
+unset PGSSLMODE
+unset PGREQUIRESSL
+unset PGCONNECT_TIMEOUT
+unset PGHOST
+unset PGHOSTADDR
+
 logdir=$PWD/log
 rm -rf "$logdir"
 mkdir "$logdir"
 
+# enable echo so the user can see what is being executed
 set -x
 
 $oldbindir/initdb -N
@@ -117,6 +127,11 @@ esac
 
 pg_dumpall -f "$temp_root"/dump2.sql || pg_dumpall2_status=$?
 pg_ctl -m fast stop
+
+# no need to echo commands anymore
+set +x
+echo
+
 if [ -n "$pg_dumpall2_status" ]; then
 	echo "pg_dumpall of post-upgrade database cluster failed"
 	exit 1
