@@ -40,7 +40,6 @@
 #include "access/xact.h"
 #include "miscadmin.h"
 #include "postmaster/autovacuum.h"
-#include "postmaster/bgworker.h"
 #include "replication/syncrep.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
@@ -310,7 +309,7 @@ InitProcess(void)
 
 	if (IsAnyAutoVacuumProcess())
 		MyProc = procglobal->autovacFreeProcs;
-	else if (MyBgworkerEntry)
+	else if (IsBackgroundWorker)
 		MyProc = procglobal->bgworkerFreeProcs;
 	else
 		MyProc = procglobal->freeProcs;
@@ -319,7 +318,7 @@ InitProcess(void)
 	{
 		if (IsAnyAutoVacuumProcess())
 			procglobal->autovacFreeProcs = (PGPROC *) MyProc->links.next;
-		else if (MyBgworkerEntry)
+		else if (IsBackgroundWorker)
 			procglobal->bgworkerFreeProcs = (PGPROC *) MyProc->links.next;
 		else
 			procglobal->freeProcs = (PGPROC *) MyProc->links.next;
@@ -797,7 +796,7 @@ ProcKill(int code, Datum arg)
 		MyProc->links.next = (SHM_QUEUE *) procglobal->autovacFreeProcs;
 		procglobal->autovacFreeProcs = MyProc;
 	}
-	else if (MyBgworkerEntry)
+	else if (IsBackgroundWorker)
 	{
 		MyProc->links.next = (SHM_QUEUE *) procglobal->bgworkerFreeProcs;
 		procglobal->bgworkerFreeProcs = MyProc;
