@@ -168,7 +168,7 @@ static Backend *ShmemBackendArray;
  */
 typedef struct RegisteredBgWorker
 {
-	BackgroundWorker *worker;	/* its registry entry */
+	BackgroundWorker worker;	/* its registry entry */
 	Backend		   *backend;	/* its BackendList entry, or NULL */
 	pid_t			pid;		/* 0 if not running */
 	int				child_slot;
@@ -1452,11 +1452,11 @@ DetermineSleepTime(struct timeval *timeout)
 			if (rw->crashed_at == 0)
 				continue;
 
-			if (rw->worker->bgw_restart_time == BGW_NEVER_RESTART)
+			if (rw->worker.bgw_restart_time == BGW_NEVER_RESTART)
 				continue;
 
 			this_wakeup = TimestampTzPlusMilliseconds(rw->crashed_at,
-										1000L * rw->worker->bgw_restart_time);
+										1000L * rw->worker.bgw_restart_time);
 			if (next_wakeup == 0 || this_wakeup < next_wakeup)
 				next_wakeup = this_wakeup;
 		}
@@ -2825,7 +2825,7 @@ CleanupBackgroundWorker(int pid,
 #endif
 
 		snprintf(namebuf, MAXPGPATH, "%s: %s", _("worker process"),
-				 rw->worker->bgw_name);
+				 rw->worker.bgw_name);
 
 		/* Delay restarting any bgworker that exits with a nonzero status. */
 		if (!EXIT_STATUS_0(exitstatus))
@@ -2838,7 +2838,7 @@ CleanupBackgroundWorker(int pid,
 		 * backend, any exit status other than 0 or 1 is considered a crash
 		 * and causes a system-wide restart.
 		 */
-		if (rw->worker->bgw_flags & BGWORKER_SHMEM_ACCESS)
+		if (rw->worker.bgw_flags & BGWORKER_SHMEM_ACCESS)
 		{
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
 			{
@@ -2862,7 +2862,7 @@ CleanupBackgroundWorker(int pid,
 		/* Get it out of the BackendList and clear out remaining data */
 		if (rw->backend)
 		{
-			Assert(rw->worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION);
+			Assert(rw->worker.bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION);
 			dlist_delete(&rw->backend->elem);
 #ifdef EXEC_BACKEND
 			ShmemBackendArrayRemove(rw->backend);
@@ -5223,8 +5223,7 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 	/*
 	 * Copy the registration data into the registered workers list.
 	 */
-	rw = malloc(MAXALIGN(sizeof(RegisteredBgWorker)) +
-				MAXALIGN(sizeof(BackgroundWorker)) + namelen + 1);
+	rw = malloc(sizeof(RegisteredBgWorker) + namelen + 1);
 	if (rw == NULL)
 	{
 		ereport(LOG,
@@ -5233,12 +5232,9 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 		return;
 	}
 
-	rw->worker = (BackgroundWorker *)
-		MAXALIGN((char *) rw + sizeof(RegisteredBgWorker));
-	memcpy(rw->worker, worker, sizeof(BackgroundWorker));
-	rw->worker->bgw_name = (char *)
-		MAXALIGN((char *) rw->worker + sizeof(BackgroundWorker));
-	strlcpy(rw->worker->bgw_name, worker->bgw_name, namelen + 1);
+	rw->worker = *worker;
+	rw->worker.bgw_name = ((char *) rw) + sizeof(RegisteredBgWorker);
+	strlcpy(rw->worker.bgw_name, worker->bgw_name, namelen + 1);
 
 	rw->backend = NULL;
 	rw->pid = 0;
@@ -5301,7 +5297,7 @@ find_bgworker_entry(int cookie)
 
 		rw = slist_container(RegisteredBgWorker, lnode, iter.cur);
 		if (rw->cookie == cookie)
-			return rw->worker;
+			return &rw->worker;
 	}
 
 	return NULL;
@@ -5479,9 +5475,9 @@ GetNumRegisteredBackgroundWorkers(int flags)
 		RegisteredBgWorker *rw;
 
 		rw = slist_container(RegisteredBgWorker, lnode, iter.cur);
-		
+
 		if (flags != 0 &&
-			!(rw->worker->bgw_flags & flags))
+			!(rw->worker.bgw_flags & flags))
 			continue;
 
 		count++;
@@ -5533,7 +5529,7 @@ start_bgworker(RegisteredBgWorker *rw)
 
 	ereport(LOG,
 			(errmsg("starting background worker process \"%s\"",
-					rw->worker->bgw_name)));
+					rw->worker.bgw_name)));
 
 #ifdef EXEC_BACKEND
 	switch ((worker_pid = bgworker_forkexec(rw->cookie)))
@@ -5557,7 +5553,7 @@ start_bgworker(RegisteredBgWorker *rw)
 
 			/* Do NOT release postmaster's working memory context */
 
-			MyBgworkerEntry = rw->worker;
+			MyBgworkerEntry = &rw->worker;
 			do_start_bgworker();
 			break;
 #endif
@@ -5695,21 +5691,21 @@ StartOneBackgroundWorker(void)
 		 */
 		if (rw->crashed_at != 0)
 		{
-			if (rw->worker->bgw_restart_time == BGW_NEVER_RESTART)
+			if (rw->worker.bgw_restart_time == BGW_NEVER_RESTART)
 				continue;
 
 			if (now == 0)
 				now = GetCurrentTimestamp();
 
 			if (!TimestampDifferenceExceeds(rw->crashed_at, now,
-											rw->worker->bgw_restart_time * 1000))
+											rw->worker.bgw_restart_time * 1000))
 			{
 				HaveCrashedWorker = true;
 				continue;
 			}
 		}
 
-		if (bgworker_should_start_now(rw->worker->bgw_start_time))
+		if (bgworker_should_start_now(rw->worker.bgw_start_time))
 		{
 			/* reset crash time before calling assign_backendlist_entry */
 			rw->crashed_at = 0;
@@ -5722,7 +5718,7 @@ StartOneBackgroundWorker(void)
 			 * If not connected, we don't need a Backend element, but we still
 			 * need a PMChildSlot.
 			 */
-			if (rw->worker->bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION)
+			if (rw->worker.bgw_flags & BGWORKER_BACKEND_DATABASE_CONNECTION)
 			{
 				if (!assign_backendlist_entry(rw))
 					return;
