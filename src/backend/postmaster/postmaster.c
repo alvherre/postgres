@@ -2985,6 +2985,8 @@ HandleChildCrash(int pid, int exitstatus, const char *procname)
 		RegisteredBgWorker *rw;
 
 		rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
+		if (rw->rw_pid == 0)
+			continue;		/* not running */
 		if (rw->rw_pid == pid)
 		{
 			/*
