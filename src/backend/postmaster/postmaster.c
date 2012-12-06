@@ -5332,6 +5332,20 @@ bgworker_quickdie(SIGNAL_ARGS)
 	exit(0);
 }
 
+/*
+ * Standard SIGTERM handler for background workers
+ */
+static void
+bgworker_die(SIGNAL_ARGS)
+{
+	PG_SETMASK(&BlockSig);
+
+	ereport(FATAL,
+			(errcode(ERRCODE_ADMIN_SHUTDOWN),
+			 errmsg("terminating background worker \"%s\" due to administrator command",
+					MyBgworkerEntry->bgw_name)));
+}
+
 static void
 do_start_bgworker(void)
 {
@@ -5392,9 +5406,16 @@ do_start_bgworker(void)
 		pqsignal(SIGFPE, SIG_IGN);
 	}
 
-	/* These are configurable */
-	pqsignal(SIGTERM, worker->bgw_sigterm);
-	pqsignal(SIGHUP, worker->bgw_sighup);
+	/* SIGTERM and SIGHUP are configurable */
+	if (worker->bgw_sigterm)
+		pqsignal(SIGTERM, worker->bgw_sigterm);
+	else
+		pqsignal(SIGTERM, bgworker_die);
+
+	if (worker->bgw_sighup)
+		pqsignal(SIGHUP, worker->bgw_sighup);
+	else
+		pqsignal(SIGHUP, SIG_IGN);
 
 	pqsignal(SIGQUIT, bgworker_quickdie);
 	InitializeTimeouts();		/* establishes SIGALRM handler */
