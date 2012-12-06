@@ -3537,6 +3537,9 @@ signal_child(pid_t pid, int signal)
 
 /*
  * Send a signal to bgworkers that did not request backend connections
+ *
+ * The reason this is interesting is that workers that did request connections
+ * are considered by SignalChildren; this function complements that one.
  */
 static bool
 SignalUnconnectedWorkers(int signal)
@@ -4850,6 +4853,7 @@ PostmasterRandom(void)
 
 /*
  * Count up number of worker processes that did not request backend connections
+ * See SignalUnconnectedWorkers for why this is interesting.
  */
 static int
 CountUnconnectedWorkers(void)
@@ -5600,15 +5604,6 @@ bgworker_should_start_now(BgWorkerStartTime start_time)
 	/* XXX maybe this'd be better as a table */
 	switch (pmState)
 	{
-		case PM_NO_CHILDREN:
-		case PM_WAIT_DEAD_END:
-		case PM_SHUTDOWN_2:
-		case PM_SHUTDOWN:
-		case PM_WAIT_BACKENDS:
-		case PM_WAIT_READONLY:
-		case PM_WAIT_BACKUP:
-			break;
-
 		case PM_RUN:
 			if (start_time == BgWorkerStart_RecoveryFinished)
 				return true;
@@ -5624,6 +5619,15 @@ bgworker_should_start_now(BgWorkerStartTime start_time)
 		case PM_INIT:
 			if (start_time == BgWorkerStart_PostmasterStart)
 				return true;
+			/* fall through */
+
+		case PM_NO_CHILDREN:
+		case PM_WAIT_DEAD_END:
+		case PM_SHUTDOWN_2:
+		case PM_SHUTDOWN:
+		case PM_WAIT_BACKENDS:
+		case PM_WAIT_READONLY:
+		case PM_WAIT_BACKUP:
 			/* fall through */
 	}
 
