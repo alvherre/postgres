@@ -146,25 +146,25 @@
  * children we have and send them appropriate signals when necessary.
  *
  * "Special" children such as the startup, bgwriter and autovacuum launcher
- * tasks are not in this list.	Autovacuum worker, walsender and general
- * background worker processes are
- * in it. Also, "dead_end" children are in it: these are children launched just
- * for the purpose of sending a friendly rejection message to a would-be
- * client.	We must track them because they are attached to shared memory,
- * but we know they will never become live backends.  dead_end children are
- * not assigned a PMChildSlot.
+ * tasks are not in this list.	Autovacuum worker and walsender are in it.
+ * Also, "dead_end" children are in it: these are children launched just for
+ * the purpose of sending a friendly rejection message to a would-be client.
+ * We must track them because they are attached to shared memory, but we know
+ * they will never become live backends.  dead_end children are not assigned a
+ * PMChildSlot.
  */
 typedef struct bkend
 {
 	pid_t		pid;			/* process id of backend */
 	long		cancel_key;		/* cancel key for cancels for this backend */
 	int			child_slot;		/* PMChildSlot for this backend, if any */
-	int			bkend_type;		/* flavor of backend or auxiliary process
-								   Note that BACKEND_TYPE_WALSND backends
-								   initially announce themselves as
-								   BACKEND_TYPE_NORMAL, so if bkend_type is
-								   normal then you should check for a recent
-								   transition. */
+
+	/*
+	 * Flavor of backend or auxiliary process.	Note that BACKEND_TYPE_WALSND
+	 * backends initially announce themselves as BACKEND_TYPE_NORMAL, so if
+	 * bkend_type is normal, you should check for a recent transition.
+	 */
+	int			bkend_type;
 	bool		dead_end;		/* is it going to send an error and quit? */
 	dlist_node	elem;			/* list link in BackendList */
 } Backend;
@@ -181,16 +181,16 @@ static Backend *ShmemBackendArray;
  */
 typedef struct RegisteredBgWorker
 {
-	BackgroundWorker rw_worker;	/* its registry entry */
-	Backend		   *rw_backend;	/* its BackendList entry, or NULL */
-	pid_t			rw_pid;		/* 0 if not running */
-	int				rw_child_slot;
-	TimestampTz		rw_crashed_at;	/* if not 0, time it last crashed */
+	BackgroundWorker rw_worker; /* its registry entry */
+	Backend    *rw_backend;		/* its BackendList entry, or NULL */
+	pid_t		rw_pid;			/* 0 if not running */
+	int			rw_child_slot;
+	TimestampTz rw_crashed_at;	/* if not 0, time it last crashed */
 #ifdef EXEC_BACKEND
-	int				rw_cookie;
+	int			rw_cookie;
 #endif
-	slist_node		rw_lnode;		/* list link */
-} RegisteredBgWorker;
+	slist_node	rw_lnode;		/* list link */
+}	RegisteredBgWorker;
 
 static slist_head BackgroundWorkerList = SLIST_STATIC_INIT(BackgroundWorkerList);
 
@@ -388,7 +388,7 @@ static void reaper(SIGNAL_ARGS);
 static void sigusr1_handler(SIGNAL_ARGS);
 static void startup_die(SIGNAL_ARGS);
 static void dummy_handler(SIGNAL_ARGS);
-static int GetNumRegisteredBackgroundWorkers(int flags);
+static int	GetNumRegisteredBackgroundWorkers(int flags);
 static void StartupPacketTimeoutHandler(void);
 static void CleanupBackend(int pid, int exitstatus);
 static bool CleanupBackgroundWorker(int pid, int exitstatus);
@@ -416,7 +416,7 @@ static bool SignalUnconnectedWorkers(int signal);
 #define SignalChildren(sig)			   SignalSomeChildren(sig, BACKEND_TYPE_ALL)
 
 static int	CountChildren(int target);
-static int CountUnconnectedWorkers(void);
+static int	CountUnconnectedWorkers(void);
 static void StartOneBackgroundWorker(void);
 static bool CreateOptsFile(int argc, char *argv[], char *fullprogname);
 static pid_t StartChildProcess(AuxProcType type);
@@ -1412,7 +1412,7 @@ checkDataDir(void)
 static void
 DetermineSleepTime(struct timeval *timeout)
 {
-	TimestampTz		next_wakeup = 0;
+	TimestampTz next_wakeup = 0;
 
 	/*
 	 * Normal case: either there are no background workers at all, or we're in
@@ -1439,14 +1439,14 @@ DetermineSleepTime(struct timeval *timeout)
 
 		/*
 		 * When there are crashed bgworkers, we sleep just long enough that
-		 * they are restarted when they request to be.  Scan the list to
-		 * determine the minimum of all wakeup times according to most
-		 * recent crash time and requested restart interval.
+		 * they are restarted when they request to be.	Scan the list to
+		 * determine the minimum of all wakeup times according to most recent
+		 * crash time and requested restart interval.
 		 */
 		slist_foreach(siter, &BackgroundWorkerList)
 		{
 			RegisteredBgWorker *rw;
-			TimestampTz		this_wakeup;
+			TimestampTz this_wakeup;
 
 			rw = slist_container(RegisteredBgWorker, rw_lnode, siter.cur);
 
@@ -1457,7 +1457,7 @@ DetermineSleepTime(struct timeval *timeout)
 				continue;
 
 			this_wakeup = TimestampTzPlusMilliseconds(rw->rw_crashed_at,
-										1000L * rw->rw_worker.bgw_restart_time);
+									 1000L * rw->rw_worker.bgw_restart_time);
 			if (next_wakeup == 0 || this_wakeup < next_wakeup)
 				next_wakeup = this_wakeup;
 		}
@@ -1465,7 +1465,7 @@ DetermineSleepTime(struct timeval *timeout)
 
 	if (next_wakeup != 0)
 	{
-		int		microsecs;
+		int			microsecs;
 
 		TimestampDifference(GetCurrentTimestamp(), next_wakeup,
 							&timeout->tv_sec, &microsecs);
@@ -2010,7 +2010,7 @@ processCancelRequest(Port *port, void *pkt)
 	Backend    *bp;
 
 #ifndef EXEC_BACKEND
-	dlist_iter  iter;
+	dlist_iter	iter;
 #else
 	int			i;
 #endif
@@ -2351,7 +2351,7 @@ pmdie(SIGNAL_ARGS)
 				/* autovac workers are told to shut down immediately */
 				/* and bgworkers too; does this need tweaking? */
 				SignalSomeChildren(SIGTERM,
-								   BACKEND_TYPE_AUTOVAC | BACKEND_TYPE_BGWORKER);
+							   BACKEND_TYPE_AUTOVAC | BACKEND_TYPE_BGWORKER);
 				SignalUnconnectedWorkers(SIGTERM);
 				/* and the autovac launcher too */
 				if (AutoVacPID != 0)
@@ -2425,7 +2425,7 @@ pmdie(SIGNAL_ARGS)
 						(errmsg("aborting any active transactions")));
 				/* shut down all backends and workers */
 				SignalSomeChildren(SIGTERM,
-								   BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC |
+								 BACKEND_TYPE_NORMAL | BACKEND_TYPE_AUTOVAC |
 								   BACKEND_TYPE_BGWORKER);
 				/* and the autovac launcher too */
 				if (AutoVacPID != 0)
@@ -2805,14 +2805,14 @@ reaper(SIGNAL_ARGS)
  */
 static bool
 CleanupBackgroundWorker(int pid,
-						int exitstatus)	/* child's exit status */
+						int exitstatus) /* child's exit status */
 {
 	char		namebuf[MAXPGPATH];
 	slist_iter	iter;
 
 	slist_foreach(iter, &BackgroundWorkerList)
 	{
-		RegisteredBgWorker   *rw;
+		RegisteredBgWorker *rw;
 
 		rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
 
@@ -2852,8 +2852,8 @@ CleanupBackgroundWorker(int pid,
 		if (!ReleasePostmasterChildSlot(rw->rw_child_slot))
 		{
 			/*
-			 * Uh-oh, the child failed to clean itself up.	Treat as a
-			 * crash after all.
+			 * Uh-oh, the child failed to clean itself up.	Treat as a crash
+			 * after all.
 			 */
 			rw->rw_crashed_at = GetCurrentTimestamp();
 			HandleChildCrash(pid, exitstatus, namebuf);
@@ -2964,7 +2964,7 @@ static void
 HandleChildCrash(int pid, int exitstatus, const char *procname)
 {
 	dlist_mutable_iter iter;
-	slist_iter siter;
+	slist_iter	siter;
 	Backend    *bp;
 
 	/*
@@ -3007,7 +3007,7 @@ HandleChildCrash(int pid, int exitstatus, const char *procname)
 		else
 		{
 			/*
-			 * This worker is still alive.  Unless we did so already, tell it
+			 * This worker is still alive.	Unless we did so already, tell it
 			 * to commit hara-kiri.
 			 *
 			 * SIGQUIT is the special signal that says exit without proc_exit
@@ -3311,14 +3311,13 @@ PostmasterStateMachine(void)
 		/*
 		 * PM_WAIT_BACKENDS state ends when we have no regular backends
 		 * (including autovac workers), no bgworkers (including unconnected
-		 * ones), and no walwriter, autovac launcher or
-		 * bgwriter.  If we are doing crash recovery then we expect the
-		 * checkpointer to exit as well, otherwise not. The archiver, stats,
-		 * and syslogger processes are disregarded since they are not
-		 * connected to shared memory; we also disregard dead_end children
-		 * here. Walsenders are also disregarded, they will be terminated
-		 * later after writing the checkpoint record, like the archiver
-		 * process.
+		 * ones), and no walwriter, autovac launcher or bgwriter.  If we are
+		 * doing crash recovery then we expect the checkpointer to exit as
+		 * well, otherwise not. The archiver, stats, and syslogger processes
+		 * are disregarded since they are not connected to shared memory; we
+		 * also disregard dead_end children here. Walsenders are also
+		 * disregarded, they will be terminated later after writing the
+		 * checkpoint record, like the archiver process.
 		 */
 		if (CountChildren(BACKEND_TYPE_NORMAL | BACKEND_TYPE_WORKER) == 0 &&
 			CountUnconnectedWorkers() == 0 &&
@@ -3544,7 +3543,7 @@ SignalUnconnectedWorkers(int signal)
 
 	slist_foreach(iter, &BackgroundWorkerList)
 	{
-		RegisteredBgWorker   *rw;
+		RegisteredBgWorker *rw;
 
 		rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
 
@@ -3571,7 +3570,7 @@ SignalUnconnectedWorkers(int signal)
 static bool
 SignalSomeChildren(int signal, int target)
 {
-	dlist_iter  iter;
+	dlist_iter	iter;
 	bool		signaled = false;
 
 	dlist_foreach(iter, &BackendList)
@@ -3588,8 +3587,8 @@ SignalSomeChildren(int signal, int target)
 		if (target != BACKEND_TYPE_ALL)
 		{
 			/*
-			 * Assign bkend_type for any recently announced
-			 * WAL Sender processes.
+			 * Assign bkend_type for any recently announced WAL Sender
+			 * processes.
 			 */
 			if (bp->bkend_type == BACKEND_TYPE_NORMAL &&
 				IsPostmasterChildWalSender(bp->child_slot))
@@ -3713,7 +3712,7 @@ BackendStartup(Port *port)
 	 * of backends.
 	 */
 	bn->pid = pid;
-	bn->bkend_type = BACKEND_TYPE_NORMAL; /* Can change later to WALSND */
+	bn->bkend_type = BACKEND_TYPE_NORMAL;		/* Can change later to WALSND */
 	dlist_push_head(&BackendList, &bn->elem);
 
 #ifdef EXEC_BACKEND
@@ -4557,7 +4556,7 @@ SubPostmasterMain(int argc, char *argv[])
 	}
 	if (strncmp(argv[1], "--forkbgworker=", 15) == 0)
 	{
-		int		cookie;
+		int			cookie;
 
 		/* Close the postmaster's sockets */
 		ClosePostmasterPorts(false);
@@ -4857,7 +4856,7 @@ CountUnconnectedWorkers(void)
 
 	slist_foreach(iter, &BackgroundWorkerList)
 	{
-		RegisteredBgWorker   *rw;
+		RegisteredBgWorker *rw;
 
 		rw = slist_container(RegisteredBgWorker, rw_lnode, iter.cur);
 
@@ -4879,7 +4878,7 @@ CountUnconnectedWorkers(void)
 static int
 CountChildren(int target)
 {
-	dlist_iter  iter;
+	dlist_iter	iter;
 	int			cnt = 0;
 
 	dlist_foreach(iter, &BackendList)
@@ -4896,8 +4895,8 @@ CountChildren(int target)
 		if (target != BACKEND_TYPE_ALL)
 		{
 			/*
-			 * Assign bkend_type for any recently announced
-			 * WAL Sender processes.
+			 * Assign bkend_type for any recently announced WAL Sender
+			 * processes.
 			 */
 			if (bp->bkend_type == BACKEND_TYPE_NORMAL &&
 				IsPostmasterChildWalSender(bp->child_slot))
@@ -5161,17 +5160,19 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 {
 	RegisteredBgWorker *rw;
 	int			namelen = strlen(worker->bgw_name);
+
 #ifdef EXEC_BACKEND
+
 	/*
-	 * Use 1 here, not 0, to avoid confusing a possible bogus cookie read
-	 * by atoi() in SubPostmasterMain.
+	 * Use 1 here, not 0, to avoid confusing a possible bogus cookie read by
+	 * atoi() in SubPostmasterMain.
 	 */
 	static int	BackgroundWorkerCookie = 1;
 #endif
 
 	if (!IsUnderPostmaster)
 		ereport(LOG,
-				(errmsg("registering background worker: %s", worker->bgw_name)));
+			(errmsg("registering background worker: %s", worker->bgw_name)));
 
 	if (!process_shared_preload_libraries_in_progress)
 	{
@@ -5211,13 +5212,13 @@ RegisterBackgroundWorker(BackgroundWorker *worker)
 
 	if ((worker->bgw_restart_time < 0 &&
 		 worker->bgw_restart_time != BGW_NEVER_RESTART) ||
-		 (worker->bgw_restart_time > USECS_PER_DAY / 1000))
+		(worker->bgw_restart_time > USECS_PER_DAY / 1000))
 	{
 		if (!IsUnderPostmaster)
 			ereport(LOG,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("background worker \"%s\": invalid restart interval",
-							worker->bgw_name)));
+				 errmsg("background worker \"%s\": invalid restart interval",
+						worker->bgw_name)));
 		return;
 	}
 
@@ -5322,9 +5323,9 @@ bgworker_quickdie(SIGNAL_ARGS)
 	on_exit_reset();
 
 	/*
-	 * Note we do exit(0) here, not exit(2) like quickdie.  The reason is that
+	 * Note we do exit(0) here, not exit(2) like quickdie.	The reason is that
 	 * we don't want to be seen this worker as independently crashed, because
-	 * then postmaster would delay restarting it again afterwards.  If some
+	 * then postmaster would delay restarting it again afterwards.	If some
 	 * idiot DBA manually sends SIGQUIT to a random bgworker, the "dead man
 	 * switch" will ensure that postmaster sees this as a crash.
 	 */
@@ -5419,9 +5420,9 @@ do_start_bgworker(void)
 		EmitErrorReport();
 
 		/*
-		 * we might need more cleanup here ... LWLockReleaseAll, etc.
-		 * Note that in some cases we will call InitPocess which will register
-		 * ProcKill as exit callback.
+		 * Do we need more cleanup here?  For shmem-connected bgworkers, we
+		 * will call InitProcess below, which will install ProcKill as exit
+		 * callback.  That will take care of releasing locks, etc.
 		 */
 
 		/* and go away */
@@ -5437,8 +5438,8 @@ do_start_bgworker(void)
 	/*
 	 * If necessary, create a per-backend PGPROC struct in shared memory,
 	 * except in the EXEC_BACKEND case where this was done in
-	 * SubPostmasterMain. We must do this before we can use LWLocks (and in the
-	 * EXEC_BACKEND case we already had to do some stuff with LWLocks).
+	 * SubPostmasterMain. We must do this before we can use LWLocks (and in
+	 * the EXEC_BACKEND case we already had to do some stuff with LWLocks).
 	 */
 #ifndef EXEC_BACKEND
 	if (worker->bgw_flags & BGWORKER_SHMEM_ACCESS)
@@ -5446,8 +5447,8 @@ do_start_bgworker(void)
 #endif
 
 	/*
-	 * Note that in normal processes, we would call InitPostgres here.  For
-	 * a worker, however, we don't know what database to connect to, yet; so we
+	 * Note that in normal processes, we would call InitPostgres here.	For a
+	 * worker, however, we don't know what database to connect to, yet; so we
 	 * need to wait until the user code does it via
 	 * BackgroundWorkerInitializeConnection().
 	 */
@@ -5614,7 +5615,7 @@ bgworker_should_start_now(BgWorkerStartTime start_time)
 static bool
 assign_backendlist_entry(RegisteredBgWorker *rw)
 {
-	Backend *bn = malloc(sizeof(Backend));
+	Backend    *bn = malloc(sizeof(Backend));
 
 	if (bn == NULL)
 	{
@@ -5633,10 +5634,10 @@ assign_backendlist_entry(RegisteredBgWorker *rw)
 	}
 
 	/*
-	 * Compute the cancel key that will be assigned to this session.
-	 * We probably don't need cancel keys for background workers, but
-	 * we'd better have something random in the field to prevent
-	 * unfriendly people from sending cancels to them.
+	 * Compute the cancel key that will be assigned to this session. We
+	 * probably don't need cancel keys for background workers, but we'd better
+	 * have something random in the field to prevent unfriendly people from
+	 * sending cancels to them.
 	 */
 	MyCancelKey = PostmasterRandom();
 	bn->cancel_key = MyCancelKey;
@@ -5662,13 +5663,13 @@ static void
 StartOneBackgroundWorker(void)
 {
 	slist_iter	iter;
-	TimestampTz	now = 0;
+	TimestampTz now = 0;
 
 	if (FatalError)
 	{
 		StartWorkerNeeded = false;
 		HaveCrashedWorker = false;
-		return;		/* not yet */
+		return;					/* not yet */
 	}
 
 	HaveCrashedWorker = false;
@@ -5685,10 +5686,10 @@ StartOneBackgroundWorker(void)
 
 		/*
 		 * If this worker has crashed previously, maybe it needs to be
-		 * restarted (unless on registration it specified it doesn't want to be
-		 * restarted at all).  Check how long ago did a crash last happen.  If
-		 * the last crash is too recent, don't start it right away; let it be
-		 * restarted once enough time has passed.
+		 * restarted (unless on registration it specified it doesn't want to
+		 * be restarted at all).  Check how long ago did a crash last happen.
+		 * If the last crash is too recent, don't start it right away; let it
+		 * be restarted once enough time has passed.
 		 */
 		if (rw->rw_crashed_at != 0)
 		{
@@ -5699,7 +5700,7 @@ StartOneBackgroundWorker(void)
 				now = GetCurrentTimestamp();
 
 			if (!TimestampDifferenceExceeds(rw->rw_crashed_at, now,
-											rw->rw_worker.bgw_restart_time * 1000))
+									  rw->rw_worker.bgw_restart_time * 1000))
 			{
 				HaveCrashedWorker = true;
 				continue;
@@ -5713,8 +5714,8 @@ StartOneBackgroundWorker(void)
 
 			/*
 			 * If necessary, allocate and assign the Backend element.  Note we
-			 * must do this before forking, so that we can handle out of memory
-			 * properly.
+			 * must do this before forking, so that we can handle out of
+			 * memory properly.
 			 *
 			 * If not connected, we don't need a Backend element, but we still
 			 * need a PMChildSlot.
@@ -5727,7 +5728,7 @@ StartOneBackgroundWorker(void)
 			else
 				rw->rw_child_slot = MyPMChildSlot = AssignPostmasterChildSlot();
 
-			start_bgworker(rw);	/* sets rw->rw_pid */
+			start_bgworker(rw); /* sets rw->rw_pid */
 
 			if (rw->rw_backend)
 			{
