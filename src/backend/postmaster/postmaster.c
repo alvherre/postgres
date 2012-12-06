@@ -891,9 +891,10 @@ PostmasterMain(int argc, char *argv[])
 
 	/*
 	 * If loadable modules have added background workers, MaxBackends needs to
-	 * be updated.  Do so now.
+	 * be updated.	Do so now by forcing a no-op update of max_connections.
+	 * XXX This is a pretty ugly way to do it, but it doesn't seem worth
+	 * introducing a new entry point in guc.c to do it in a cleaner fashion.
 	 */
-	// RerunAssignHook("max_connections");
 	if (GetNumShmemAttachedBgworkers() > 0)
 		SetConfigOption("max_connections",
 						GetConfigOption("max_connections", false, false),
