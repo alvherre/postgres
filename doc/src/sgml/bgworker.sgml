@@ -12,7 +12,10 @@
   Such processes are started, stopped and monitored by <command>postgres</command>,
   which permits them to have a lifetime closely linked to the server's status.
   These processes have the option to attach to <productname>PostgreSQL</>'s
-  shared memory area and to connect to databases internally.
+  shared memory area and to connect to databases internally; they can also run
+  multiple transactions serially, just like a regular client-connected server
+  process.  Also, by linking to <application>libpq</> they can connect to the
+  server and behave like a regular client application.
  </para>
 
  <warning>
@@ -28,12 +31,14 @@
 
  <para>
   Only modules listed in <varname>shared_preload_libraries</> can run
-  background workers.  A module wishing to register a background worker needs
+  background workers.  A module wishing to run a background worker needs
   to register it by calling
   <function>RegisterBackgroundWorker(<type>BackgroundWorker *worker</type>)</function>
-  from it's <function>_PG_Init()</>.
+  from its <function>_PG_init()</>.
   The structure <structname>BackgroundWorker</structname> is defined thus:
 <programlisting>
+typedef void (*bgworker_main_type)(void *main_arg);
+typedef void (*bgworker_sighdlr_type)(SIGNAL_ARGS);
 typedef struct BackgroundWorker
 {
     char       *bgw_name;
@@ -73,7 +78,9 @@ typedef struct BackgroundWorker
    databases and run read-only queries), and
    <literal>BgWorkerStart_RecoveryFinished</> (start as soon as the system has
    entered normal read-write state).  Note the last two values are equivalent
-   in a server that's not a HOT standby.
+   in a server that's not a HOT standby.  Note that this setting only indicates
+   when the processes are to be started; they do not stop when a different state
+   is reached.
   </para>
 
   <para>
@@ -85,18 +92,21 @@ typedef struct BackgroundWorker
   </para>
 
   <para>
-   <structfield>bgw_main</structfield> is a pointer to the function to run once
-   the process is started.  <structfield>bgw_main_arg</structfield> will be
-   passed to it as its only argument.  Note that the global variable
-   <literal>MyBgworkerEntry</literal> points to a copy of the
-   <structname>BackgroundWorker</structname> structure passed at registration
-   time.
+   <structfield>bgw_main</structfield> is a pointer to the function to run when
+   the process is started.  This function must take a single argument of type
+   <type>void *</> and return <type>void</>.
+   <structfield>bgw_main_arg</structfield> will be passed to it as its only
+   argument.  Note that the global variable <literal>MyBgworkerEntry</literal>
+   points to a copy of the <structname>BackgroundWorker</structname> structure
+   passed at registration time.
   </para>
 
   <para>
    <structfield>bgw_sighup</structfield> and <structfield>bgw_sigterm</> are
    pointers to functions that will be installed as signal handlers for the new
-   process. XXX: Can they be NULL?
+   process.  If <structfield>bgw_sighup</> is NULL, then <literal>SIG_IGN</>
+   is used; if <structfield>bgw_sigterm</> is NULL, a handler is installed that
+   will terminate the process after logging a suitable message.
   </para>
 
   <para>Once running, the process can connect to a database by calling
@@ -117,6 +127,16 @@ typedef struct BackgroundWorker
    Signals can be unblocked in the new process by calling
    <function>BackgroundWorkerUnblockSignals</> and blocked by calling
    <function>BackgroundWorkerBlockSignals</>.
+  </para>
+
+  <para>
+   Background workers are expected to be continuously running; if they exit
+   cleanly, <command>postgres</> will restart them immediately.  Consider doing
+   interruptible sleep when they have nothing to do; this can be achieved by
+   calling <function>WaitLatch()</function>.  Make sure the
+   <literal>WL_POSTMASTER_DEATH</> flag is set when calling that function, and
+   verify the return code for a prompt exit in the emergency case that
+   <command>postgres</> itself has terminated.
   </para>
 
   <para>
