@@ -104,7 +104,7 @@ static void process_owned_by(Relation seqrel, List *owned_by);
  * DefineSequence
  *				Creates a new sequence relation
  */
-void
+Oid
 DefineSequence(CreateSeqStmt *seq)
 {
 	FormData_pg_sequence new;
@@ -229,6 +229,8 @@ DefineSequence(CreateSeqStmt *seq)
 		process_owned_by(rel, owned_by);
 
 	heap_close(rel, NoLock);
+
+	return seqoid;
 }
 
 /*
@@ -403,7 +405,7 @@ fill_seq_with_data(Relation rel, HeapTuple tuple)
  *
  * Modify the definition of a sequence relation
  */
-void
+Oid
 AlterSequence(AlterSeqStmt *stmt)
 {
 	Oid			relid;
@@ -422,7 +424,7 @@ AlterSequence(AlterSeqStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->sequence->relname)));
-		return;
+		return InvalidOid;
 	}
 
 	init_sequence(relid, &elm, &seqrel);
@@ -486,6 +488,8 @@ AlterSequence(AlterSeqStmt *stmt)
 		process_owned_by(seqrel, owned_by);
 
 	relation_close(seqrel, NoLock);
+
+	return relid;
 }
 
 
@@ -556,7 +560,7 @@ nextval_internal(Oid relid)
 						RelationGetRelationName(seqrel))));
 
 	/* read-only transactions may only modify temp sequences */
-	if (seqrel->rd_backend != MyBackendId)
+	if (!seqrel->rd_islocaltemp)
 		PreventCommandIfReadOnly("nextval()");
 
 	if (elm->last != elm->cached)		/* some numbers were cached */
@@ -849,7 +853,7 @@ do_setval(Oid relid, int64 next, bool iscalled)
 						RelationGetRelationName(seqrel))));
 
 	/* read-only transactions may only modify temp sequences */
-	if (seqrel->rd_backend != MyBackendId)
+	if (!seqrel->rd_islocaltemp)
 		PreventCommandIfReadOnly("setval()");
 
 	/* lock page' buffer and read tuple */

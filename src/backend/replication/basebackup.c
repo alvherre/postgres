@@ -44,8 +44,8 @@ typedef struct
 
 
 static int64 sendDir(char *path, int basepathlen, bool sizeonly);
-static void sendFile(char *readfilename, char *tarfilename,
-		 struct stat * statbuf);
+static bool sendFile(char *readfilename, char *tarfilename,
+		 struct stat * statbuf, bool missing_ok);
 static void sendFileWithContent(const char *filename, const char *content);
 static void _tarWriteHeader(const char *filename, const char *linktarget,
 				struct stat * statbuf);
@@ -55,6 +55,9 @@ static void base_backup_cleanup(int code, Datum arg);
 static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir);
 static void parse_basebackup_options(List *options, basebackup_options *opt);
 static void SendXlogRecPtrResult(XLogRecPtr ptr);
+
+/* Was the backup currently in-progress initiated in recovery mode? */
+static bool backup_started_in_recovery = false;
 
 /*
  * Size of each block sent into the tar stream for larger files.
@@ -93,6 +96,8 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 	XLogRecPtr	startptr;
 	XLogRecPtr	endptr;
 	char	   *labelfile;
+
+	backup_started_in_recovery = RecoveryInProgress();
 
 	startptr = do_pg_start_backup(opt->label, opt->fastcheckpoint, &labelfile);
 	SendXlogRecPtrResult(startptr);
@@ -194,7 +199,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 									XLOG_CONTROL_FILE)));
 				}
 
-				sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf);
+				sendFile(XLOG_CONTROL_FILE, XLOG_CONTROL_FILE, &statbuf, false);
 			}
 
 			/*
@@ -261,7 +266,7 @@ perform_base_backup(basebackup_options *opt, DIR *tblspcdir)
 				 * http://lists.apple.com/archives/xcode-users/2003/Dec//msg000
 				 * 51.html
 				 */
-				XLogRead(buf, ptr, TAR_SEND_SIZE);
+				XLogRead(buf, ThisTimeLineID, ptr, TAR_SEND_SIZE);
 				if (pq_putmessage('d', buf, TAR_SEND_SIZE))
 					ereport(ERROR,
 							(errmsg("base backup could not send data, aborting backup")));
@@ -592,11 +597,19 @@ sendDir(char *path, int basepathlen, bool sizeonly)
 		/*
 		 * Check if the postmaster has signaled us to exit, and abort with an
 		 * error in that case. The error handler further up will call
-		 * do_pg_abort_backup() for us.
+		 * do_pg_abort_backup() for us. Also check that if the backup was
+		 * started while still in recovery, the server wasn't promoted.
+		 * dp_pg_stop_backup() will check that too, but it's better to stop
+		 * the backup early than continue to the end and fail there.
 		 */
-		if (ProcDiePending || walsender_ready_to_stop)
+		CHECK_FOR_INTERRUPTS();
+		if (RecoveryInProgress() != backup_started_in_recovery)
 			ereport(ERROR,
-				(errmsg("shutdown requested, aborting active base backup")));
+					(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					 errmsg("the standby was promoted during online backup"),
+					 errhint("This means that the backup being taken is corrupt "
+							 "and should not be used. "
+							 "Try taking another online backup.")));
 
 		snprintf(pathbuf, MAXPGPATH, "%s/%s", path, de->d_name);
 
@@ -699,11 +712,18 @@ sendDir(char *path, int basepathlen, bool sizeonly)
 		}
 		else if (S_ISREG(statbuf.st_mode))
 		{
-			/* Add size, rounded up to 512byte block */
-			size += ((statbuf.st_size + 511) & ~511);
+			bool sent = false;
+
 			if (!sizeonly)
-				sendFile(pathbuf, pathbuf + basepathlen + 1, &statbuf);
-			size += 512;		/* Size of the header of the file */
+				sent = sendFile(pathbuf, pathbuf + basepathlen + 1, &statbuf,
+								true);
+
+			if (sent || sizeonly)
+			{
+				/* Add size, rounded up to 512byte block */
+				size += ((statbuf.st_size + 511) & ~511);
+				size += 512;		/* Size of the header of the file */
+			}
 		}
 		else
 			ereport(WARNING,
@@ -763,9 +783,17 @@ _tarChecksum(char *header)
 	return sum;
 }
 
-/* Given the member, write the TAR header & send the file */
-static void
-sendFile(char *readfilename, char *tarfilename, struct stat * statbuf)
+/*
+ * Given the member, write the TAR header & send the file.
+ *
+ * If 'missing_ok' is true, will not throw an error if the file is not found.
+ *
+ * Returns true if the file was successfully sent, false if 'missing_ok',
+ * and the file did not exist.
+ */
+static bool
+sendFile(char *readfilename, char *tarfilename, struct stat *statbuf,
+		 bool missing_ok)
 {
 	FILE	   *fp;
 	char		buf[TAR_SEND_SIZE];
@@ -775,9 +803,13 @@ sendFile(char *readfilename, char *tarfilename, struct stat * statbuf)
 
 	fp = AllocateFile(readfilename, "rb");
 	if (fp == NULL)
+	{
+		if (errno == ENOENT && missing_ok)
+			return false;
 		ereport(ERROR,
 				(errcode_for_file_access(),
 				 errmsg("could not open file \"%s\": %m", readfilename)));
+	}
 
 	/*
 	 * Some compilers will throw a warning knowing this test can never be true
@@ -831,6 +863,8 @@ sendFile(char *readfilename, char *tarfilename, struct stat * statbuf)
 	}
 
 	FreeFile(fp);
+
+	return true;
 }
 
 

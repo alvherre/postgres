@@ -24,17 +24,16 @@
 
 #define MIGRATOR_API_VERSION	1
 
-#define MESSAGE_WIDTH		"60"
+#define MESSAGE_WIDTH		60
 
-#define OVERWRITE_MESSAGE	"  %-" MESSAGE_WIDTH "." MESSAGE_WIDTH "s\r"
 #define GET_MAJOR_VERSION(v)	((v) / 100)
 
 /* contains both global db information and CREATE DATABASE commands */
 #define GLOBALS_DUMP_FILE	"pg_upgrade_dump_globals.sql"
 #define DB_DUMP_FILE_MASK	"pg_upgrade_dump_%u.custom"
 
+#define DB_DUMP_LOG_FILE_MASK	"pg_upgrade_dump_%u.log"
 #define SERVER_LOG_FILE		"pg_upgrade_server.log"
-#define RESTORE_LOG_FILE	"pg_upgrade_restore.log"
 #define UTILITY_LOG_FILE	"pg_upgrade_utility.log"
 #define INTERNAL_LOG_FILE	"pg_upgrade_internal.log"
 
@@ -112,15 +111,16 @@ extern char *output_files[];
 /*
  * pg_multixact format changed in this catversion:
  */
-#define MULTIXACT_FORMATCHANGE_CAT_VER 201211291
+#define MULTIXACT_FORMATCHANGE_CAT_VER 201212281
 
 /*
  * Each relation is represented by a relinfo structure.
  */
 typedef struct
 {
-	char		nspname[NAMEDATALEN];	/* namespace name */
-	char		relname[NAMEDATALEN];	/* relation name */
+	/* Can't use NAMEDATALEN;  not guaranteed to fit on client */
+	char		*nspname;		/* namespace name */
+	char		*relname;		/* relation name */
 	Oid			reloid;			/* relation oid */
 	Oid			relfilenode;	/* relation relfile node */
 	/* relation tablespace path, or "" for the cluster default */
@@ -148,8 +148,8 @@ typedef struct
 	Oid			old_relfilenode;
 	Oid			new_relfilenode;
 	/* the rest are used only for logging and error reporting */
-	char		nspname[NAMEDATALEN];	/* namespaces */
-	char		relname[NAMEDATALEN];
+	char		*nspname;		/* namespaces */
+	char		*relname;
 } FileNameMap;
 
 /*
@@ -158,7 +158,7 @@ typedef struct
 typedef struct
 {
 	Oid			db_oid;			/* oid of the database */
-	char		db_name[NAMEDATALEN];	/* database name */
+	char		*db_name;		/* database name */
 	char		db_tblspace[MAXPGPATH]; /* database default tablespace path */
 	RelInfoArr	rel_arr;		/* array of all user relinfos */
 } DbInfo;
@@ -215,6 +215,7 @@ typedef enum
 typedef enum
 {
 	PG_VERBOSE,
+	PG_STATUS,
 	PG_REPORT,
 	PG_WARNING,
 	PG_FATAL
@@ -270,6 +271,7 @@ typedef struct
 	bool		check;			/* TRUE -> ask user for permission to make
 								 * changes */
 	transferMode transfer_mode; /* copy files or link them? */
+	int			jobs;
 } UserOpts;
 
 
@@ -467,3 +469,11 @@ void		old_8_3_invalidate_hash_gin_indexes(ClusterInfo *cluster, bool check_mode)
 void old_8_3_invalidate_bpchar_pattern_ops_indexes(ClusterInfo *cluster,
 											  bool check_mode);
 char	   *old_8_3_create_sequence_script(ClusterInfo *cluster);
+
+/* parallel.c */
+void parallel_exec_prog(const char *log_file, const char *opt_log_file,
+		  const char *fmt,...)
+__attribute__((format(PG_PRINTF_ATTRIBUTE, 3, 4)));
+
+bool reap_child(bool wait_for_child);
+

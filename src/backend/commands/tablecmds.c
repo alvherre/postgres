@@ -1456,12 +1456,19 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					 errmsg("inherited relation \"%s\" is not a table",
 							parent->relname)));
 		/* Permanent rels cannot inherit from temporary ones */
-		if (relpersistence != RELPERSISTENCE_TEMP
-			&& RelationUsesTempNamespace(relation))
+		if (relpersistence != RELPERSISTENCE_TEMP &&
+			relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("cannot inherit from temporary relation \"%s\"",
 							parent->relname)));
+
+		/* If existing rel is temp, it must belong to this session */
+		if (relation->rd_rel->relpersistence == RELPERSISTENCE_TEMP &&
+			!relation->rd_islocaltemp)
+			ereport(ERROR,
+					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+					 errmsg("cannot inherit from temporary relation of another session")));
 
 		/*
 		 * We should have an UNDER permission flag for this, but for now,
@@ -2096,7 +2103,7 @@ renameatt_internal(Oid myrelid,
 	Relation	targetrelation;
 	Relation	attrelation;
 	HeapTuple	atttup;
-	Form_pg_attribute attform;
+	Form_pg_attribute	attform;
 	int			attnum;
 
 	/*
@@ -2246,7 +2253,7 @@ RangeVarCallbackForRenameAttribute(const RangeVar *rv, Oid relid, Oid oldrelid,
 /*
  *		renameatt		- changes the name of a attribute in a relation
  */
-void
+Oid
 renameatt(RenameStmt *stmt)
 {
 	Oid			relid;
@@ -2262,7 +2269,7 @@ renameatt(RenameStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return;
+		return InvalidOid;
 	}
 
 	renameatt_internal(relid,
@@ -2272,13 +2279,16 @@ renameatt(RenameStmt *stmt)
 					   false,	/* recursing? */
 					   0,		/* expected inhcount */
 					   stmt->behavior);
+
+	/* This is an ALTER TABLE command so it's about the relid */
+	return relid;
 }
 
 
 /*
  * same logic as renameatt_internal
  */
-static void
+static Oid
 rename_constraint_internal(Oid myrelid,
 						   Oid mytypid,
 						   const char *oldconname,
@@ -2370,9 +2380,11 @@ rename_constraint_internal(Oid myrelid,
 
 	if (targetrelation)
 		relation_close(targetrelation, NoLock); /* close rel but keep lock */
+
+	return constraintOid;
 }
 
-void
+Oid
 RenameConstraint(RenameStmt *stmt)
 {
 	Oid			relid = InvalidOid;
@@ -2401,18 +2413,20 @@ RenameConstraint(RenameStmt *stmt)
 										 NULL);
 	}
 
-	rename_constraint_internal(relid, typid,
-							   stmt->subname,
-							   stmt->newname,
-		 stmt->relation ? interpretInhOption(stmt->relation->inhOpt) : false,	/* recursive? */
-							   false,	/* recursing? */
-							   0 /* expected inhcount */ );
+	return
+		rename_constraint_internal(relid, typid,
+								   stmt->subname,
+								   stmt->newname,
+								   stmt->relation ? interpretInhOption(stmt->relation->inhOpt) : false,	/* recursive? */
+								   false,	/* recursing? */
+								   0 /* expected inhcount */ );
+
 }
 
 /*
  * Execute ALTER TABLE/INDEX/SEQUENCE/VIEW/FOREIGN TABLE RENAME
  */
-void
+Oid
 RenameRelation(RenameStmt *stmt)
 {
 	Oid			relid;
@@ -2434,11 +2448,13 @@ RenameRelation(RenameStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return;
+		return InvalidOid;
 	}
 
 	/* Do the work */
 	RenameRelationInternal(relid, stmt->newname);
+
+	return relid;
 }
 
 /*
@@ -5774,6 +5790,10 @@ ATAddForeignKeyConstraint(AlteredTableInfo *tab, Relation rel,
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 						 errmsg("constraints on temporary tables may reference only temporary tables")));
+			if (!pkrel->rd_islocaltemp || !rel->rd_islocaltemp)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+						 errmsg("constraints on temporary tables must involve temporary tables of this session")));
 			break;
 	}
 
@@ -8890,12 +8910,26 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	ATSimplePermissions(parent_rel, ATT_TABLE);
 
 	/* Permanent rels cannot inherit from temporary ones */
-	if (RelationUsesTempNamespace(parent_rel)
-		&& !RelationUsesTempNamespace(child_rel))
+	if (parent_rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP &&
+		child_rel->rd_rel->relpersistence != RELPERSISTENCE_TEMP)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("cannot inherit from temporary relation \"%s\"",
 						RelationGetRelationName(parent_rel))));
+
+	/* If parent rel is temp, it must belong to this session */
+	if (parent_rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP &&
+		!parent_rel->rd_islocaltemp)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("cannot inherit from temporary relation of another session")));
+
+	/* Ditto for the child */
+	if (child_rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP &&
+		!child_rel->rd_islocaltemp)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("cannot inherit to temporary relation of another session")));
 
 	/*
 	 * Check for duplicates in the list of parents, and determine the highest
@@ -9727,7 +9761,7 @@ ATExecGenericOptions(Relation rel, List *options)
 /*
  * Execute ALTER TABLE SET SCHEMA
  */
-void
+Oid
 AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 {
 	Relation	rel;
@@ -9747,7 +9781,7 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 		ereport(NOTICE,
 				(errmsg("relation \"%s\" does not exist, skipping",
 						stmt->relation->relname)));
-		return;
+		return InvalidOid;
 	}
 
 	rel = relation_open(relid, NoLock);
@@ -9782,6 +9816,8 @@ AlterTableNamespace(AlterObjectSchemaStmt *stmt)
 
 	/* close rel, but keep lock until commit */
 	relation_close(rel, NoLock);
+
+	return relid;
 }
 
 /*

@@ -903,7 +903,7 @@ dropdb(const char *dbname, bool missing_ok)
 /*
  * Rename database
  */
-void
+Oid
 RenameDatabase(const char *oldname, const char *newname)
 {
 	Oid			db_id;
@@ -980,6 +980,8 @@ RenameDatabase(const char *oldname, const char *newname)
 	 * Close pg_database, but keep lock till commit.
 	 */
 	heap_close(rel, NoLock);
+
+	return db_id;
 }
 
 
@@ -1439,9 +1441,10 @@ AlterDatabaseSet(AlterDatabaseSetStmt *stmt)
 /*
  * ALTER DATABASE name OWNER TO newowner
  */
-void
+Oid
 AlterDatabaseOwner(const char *dbname, Oid newOwnerId)
 {
+	Oid			db_id;
 	HeapTuple	tuple;
 	Relation	rel;
 	ScanKeyData scankey;
@@ -1466,6 +1469,7 @@ AlterDatabaseOwner(const char *dbname, Oid newOwnerId)
 				(errcode(ERRCODE_UNDEFINED_DATABASE),
 				 errmsg("database \"%s\" does not exist", dbname)));
 
+	db_id = HeapTupleGetOid(tuple);
 	datForm = (Form_pg_database) GETSTRUCT(tuple);
 
 	/*
@@ -1542,6 +1546,8 @@ AlterDatabaseOwner(const char *dbname, Oid newOwnerId)
 
 	/* Close pg_database, but keep lock till commit */
 	heap_close(rel, NoLock);
+
+	return db_id;
 }
 
 

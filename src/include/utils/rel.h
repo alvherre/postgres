@@ -81,6 +81,7 @@ typedef struct RelationData
 	struct SMgrRelationData *rd_smgr;	/* cached file handle, or NULL */
 	int			rd_refcnt;		/* reference count */
 	BackendId	rd_backend;		/* owning backend id, if temporary relation */
+	bool		rd_islocaltemp; /* rel is a temp rel of this session */
 	bool		rd_isnailed;	/* rel is nailed in cache */
 	bool		rd_isvalid;		/* relcache entry is valid */
 	char		rd_indexvalid;	/* state of rd_indexlist: 0 = not valid, 1 =
@@ -89,11 +90,20 @@ typedef struct RelationData
 	/*
 	 * rd_createSubid is the ID of the highest subtransaction the rel has
 	 * survived into; or zero if the rel was not created in the current top
-	 * transaction.  This should be relied on only for optimization purposes;
-	 * it is possible for new-ness to be "forgotten" (eg, after CLUSTER).
+	 * transaction.  This can be now be relied on, whereas previously it
+	 * could be "forgotten" in earlier releases.
 	 * Likewise, rd_newRelfilenodeSubid is the ID of the highest
 	 * subtransaction the relfilenode change has survived into, or zero if not
 	 * changed in the current transaction (or we have forgotten changing it).
+	 * rd_newRelfilenodeSubid can be forgotten when a relation has multiple
+	 * new relfilenodes within a single transaction, with one of them occuring
+	 * in a subsequently aborted subtransaction, e.g.
+	 * 		BEGIN;
+	 * 		TRUNCATE t;
+	 * 		SAVEPOINT save;
+	 * 		TRUNCATE t;
+	 * 		ROLLBACK TO save;
+	 * 		-- rd_newRelfilenode is now forgotten
 	 */
 	SubTransactionId rd_createSubid;	/* rel was created in current xact */
 	SubTransactionId rd_newRelfilenodeSubid;	/* new relfilenode assigned in
@@ -364,21 +374,15 @@ typedef struct StdRdOptions
 	((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 
 /*
- * RelationUsesTempNamespace
- *		True if relation's catalog entries live in a private namespace.
- */
-#define RelationUsesTempNamespace(relation) \
-	((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
-
-/*
  * RELATION_IS_LOCAL
  *		If a rel is either temp or newly created in the current transaction,
- *		it can be assumed to be visible only to the current backend.
+ *		it can be assumed to be accessible only to the current backend.
+ *		This is typically used to decide that we can skip acquiring locks.
  *
  * Beware of multiple eval of argument
  */
 #define RELATION_IS_LOCAL(relation) \
-	((relation)->rd_backend == MyBackendId || \
+	((relation)->rd_islocaltemp || \
 	 (relation)->rd_createSubid != InvalidSubTransactionId)
 
 /*
@@ -388,8 +392,8 @@ typedef struct StdRdOptions
  * Beware of multiple eval of argument
  */
 #define RELATION_IS_OTHER_TEMP(relation) \
-	((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP \
-	&& (relation)->rd_backend != MyBackendId)
+	((relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP && \
+	 !(relation)->rd_islocaltemp)
 
 /* routines in utils/cache/relcache.c */
 extern void RelationIncrementReferenceCount(Relation rel);

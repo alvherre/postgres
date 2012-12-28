@@ -413,9 +413,10 @@ AlterEventTrigger(AlterEventTrigStmt *stmt)
 /*
  * Rename event trigger
  */
-void
+Oid
 RenameEventTrigger(const char *trigname, const char *newname)
 {
+	Oid			evtId;
 	HeapTuple	tup;
 	Relation	rel;
 	Form_pg_event_trigger evtForm;
@@ -438,6 +439,8 @@ RenameEventTrigger(const char *trigname, const char *newname)
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_EVENT_TRIGGER,
 					   trigname);
 
+	evtId = HeapTupleGetOid(tup);
+
 	evtForm = (Form_pg_event_trigger) GETSTRUCT(tup);
 
 	/* tuple is a copy, so we can rename it now */
@@ -447,15 +450,18 @@ RenameEventTrigger(const char *trigname, const char *newname)
 
 	heap_freetuple(tup);
 	heap_close(rel, RowExclusiveLock);
+
+	return evtId;
 }
 
 
 /*
  * Change event trigger's owner -- by name
  */
-void
+Oid
 AlterEventTriggerOwner(const char *name, Oid newOwnerId)
 {
+	Oid			evtOid;
 	HeapTuple	tup;
 	Relation	rel;
 
@@ -468,11 +474,15 @@ AlterEventTriggerOwner(const char *name, Oid newOwnerId)
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				 errmsg("event trigger \"%s\" does not exist", name)));
 
+	evtOid = HeapTupleGetOid(tup);
+
 	AlterEventTriggerOwner_internal(rel, tup, newOwnerId);
 
 	heap_freetuple(tup);
 
 	heap_close(rel, RowExclusiveLock);
+
+	return evtOid;
 }
 
 /*
@@ -565,6 +575,25 @@ EventTriggerDDLCommandStart(Node *parsetree)
 	ListCell   *lc;
 	const char *tag;
 	EventTriggerData	trigdata;
+
+	/*
+	 * Event Triggers are completely disabled in standalone mode.  There are
+	 * (at least) two reasons for this:
+	 *
+	 * 1. A sufficiently broken event trigger might not only render the
+	 * database unusable, but prevent disabling itself to fix the situation.
+	 * In this scenario, restarting in standalone mode provides an escape
+	 * hatch.
+	 *
+	 * 2. BuildEventTriggerCache relies on systable_beginscan_ordered, and
+	 * therefore will malfunction if pg_event_trigger's indexes are damaged.
+	 * To allow recovery from a damaged index, we need some operating mode
+	 * wherein event triggers are disabled.  (Or we could implement
+	 * heapscan-and-sort logic for that case, but having disaster recovery
+	 * scenarios depend on code that's otherwise untested isn't appetizing.)
+	 */
+	if (!IsUnderPostmaster)
+		return;
 
 	/*
 	 * We want the list of command tags for which this procedure is actually
