@@ -5984,7 +5984,7 @@ heap_xlog_clean(XLogRecPtr lsn, XLogRecord *record)
 	LockBufferForCleanup(buffer);
 	page = (Page) BufferGetPage(buffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))
+	if (lsn <= PageGetLSN(page))
 	{
 		UnlockReleaseBuffer(buffer);
 		return;
@@ -6055,7 +6055,7 @@ heap_xlog_freeze(XLogRecPtr lsn, XLogRecord *record)
 		return;
 	page = (Page) BufferGetPage(buffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))
+	if (lsn <= PageGetLSN(page))
 	{
 		UnlockReleaseBuffer(buffer);
 		return;
@@ -6139,7 +6139,7 @@ heap_xlog_visible(XLogRecPtr lsn, XLogRecord *record)
 		 * XLOG record's LSN, we mustn't mark the page all-visible, because
 		 * the subsequent update won't be replayed to clear the flag.
 		 */
-		if (!XLByteLE(lsn, PageGetLSN(page)))
+		if (lsn > PageGetLSN(page))
 		{
 			PageSetAllVisible(page);
 			MarkBufferDirty(buffer);
@@ -6176,7 +6176,7 @@ heap_xlog_visible(XLogRecPtr lsn, XLogRecord *record)
 		 * we did for the heap page.  If this results in a dropped bit, no
 		 * real harm is done; and the next VACUUM will fix it.
 		 */
-		if (!XLByteLE(lsn, PageGetLSN(BufferGetPage(vmbuffer))))
+		if (lsn > PageGetLSN(BufferGetPage(vmbuffer)))
 			visibilitymap_set(reln, xlrec->block, lsn, vmbuffer,
 							  xlrec->cutoff_xid);
 
@@ -6289,7 +6289,7 @@ heap_xlog_delete(XLogRecPtr lsn, XLogRecord *record)
 		return;
 	page = (Page) BufferGetPage(buffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))		/* changes are applied */
+	if (lsn <= PageGetLSN(page))		/* changes are applied */
 	{
 		UnlockReleaseBuffer(buffer);
 		return;
@@ -6383,7 +6383,7 @@ heap_xlog_insert(XLogRecPtr lsn, XLogRecord *record)
 			return;
 		page = (Page) BufferGetPage(buffer);
 
-		if (XLByteLE(lsn, PageGetLSN(page)))	/* changes are applied */
+		if (lsn <= PageGetLSN(page))	/* changes are applied */
 		{
 			UnlockReleaseBuffer(buffer);
 			return;
@@ -6518,7 +6518,7 @@ heap_xlog_multi_insert(XLogRecPtr lsn, XLogRecord *record)
 			return;
 		page = (Page) BufferGetPage(buffer);
 
-		if (XLByteLE(lsn, PageGetLSN(page)))	/* changes are applied */
+		if (lsn <= PageGetLSN(page))	/* changes are applied */
 		{
 			UnlockReleaseBuffer(buffer);
 			return;
@@ -6660,7 +6660,7 @@ heap_xlog_update(XLogRecPtr lsn, XLogRecord *record, bool hot_update)
 		goto newt;
 	page = (Page) BufferGetPage(obuffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))		/* changes are applied */
+	if (lsn <= PageGetLSN(page))		/* changes are applied */
 	{
 		if (samepage)
 		{
@@ -6759,7 +6759,7 @@ newt:;
 			return;
 		page = (Page) BufferGetPage(nbuffer);
 
-		if (XLByteLE(lsn, PageGetLSN(page)))	/* changes are applied */
+		if (lsn <= PageGetLSN(page))	/* changes are applied */
 		{
 			UnlockReleaseBuffer(nbuffer);
 			if (BufferIsValid(obuffer))
@@ -6859,7 +6859,7 @@ heap_xlog_lock(XLogRecPtr lsn, XLogRecord *record)
 		return;
 	page = (Page) BufferGetPage(buffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))		/* changes are applied */
+	if (lsn <= PageGetLSN(page))		/* changes are applied */
 	{
 		UnlockReleaseBuffer(buffer);
 		return;
@@ -6963,7 +6963,7 @@ heap_xlog_inplace(XLogRecPtr lsn, XLogRecord *record)
 		return;
 	page = (Page) BufferGetPage(buffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))		/* changes are applied */
+	if (lsn <= PageGetLSN(page))		/* changes are applied */
 	{
 		UnlockReleaseBuffer(buffer);
 		return;
