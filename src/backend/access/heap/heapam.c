@@ -6912,7 +6912,7 @@ heap_xlog_lock_updated(XLogRecPtr lsn, XLogRecord *record)
 		return;
 	page = (Page) BufferGetPage(buffer);
 
-	if (XLByteLE(lsn, PageGetLSN(page)))		/* changes are applied */
+	if (lsn <= PageGetLSN(page))		/* changes are applied */
 	{
 		UnlockReleaseBuffer(buffer);
 		return;
