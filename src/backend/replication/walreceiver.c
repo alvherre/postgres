@@ -33,7 +33,7 @@
  * specific parts are in the libpqwalreceiver module. It's loaded
  * dynamically to avoid linking the server with libpq.
  *
- * Portions Copyright (c) 2010-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2010-2013, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -338,7 +338,7 @@ WalReceiverMain(void)
 		 * ensure that a unique timeline id is chosen in every case, but let's
 		 * avoid the confusion of timeline id collisions where we can.
 		 */
-		WalRcvFetchTimeLineHistoryFiles(startpointTLI + 1, primaryTLI);
+		WalRcvFetchTimeLineHistoryFiles(startpointTLI, primaryTLI);
 
 		/*
 		 * Start streaming.
@@ -627,7 +627,8 @@ WalRcvFetchTimeLineHistoryFiles(TimeLineID first, TimeLineID last)
 
 	for (tli = first; tli <= last; tli++)
 	{
-		if (!existsTimeLineHistory(tli))
+		/* there's no history file for timeline 1 */
+		if (tli != 1 && !existsTimeLineHistory(tli))
 		{
 			char	   *fname;
 			char	   *content;

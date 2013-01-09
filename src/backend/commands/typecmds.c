@@ -3,7 +3,7 @@
  * typecmds.c
  *	  Routines for SQL commands that manipulate types (and domains).
  *
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -888,9 +888,7 @@ DefineDomain(CreateDomainStmt *stmt)
 						 */
 						defaultValue =
 							deparse_expression(defaultExpr,
-											   deparse_context_for(domainName,
-																 InvalidOid),
-											   false, false);
+											   NIL, false, false);
 						defaultValueBin = nodeToString(defaultExpr);
 					}
 				}
@@ -931,7 +929,7 @@ DefineDomain(CreateDomainStmt *stmt)
 				if (constr->is_no_inherit)
 					ereport(ERROR,
 							(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-							 errmsg("CHECK constraints for domains cannot be marked NO INHERIT")));
+							 errmsg("check constraints for domains cannot be marked NO INHERIT")));
 				break;
 
 				/*
@@ -1053,7 +1051,7 @@ DefineDomain(CreateDomainStmt *stmt)
  * DefineEnum
  *		Registers a new enum.
  */
-void
+Oid
 DefineEnum(CreateEnumStmt *stmt)
 {
 	char	   *enumName;
@@ -1166,13 +1164,15 @@ DefineEnum(CreateEnumStmt *stmt)
 			   InvalidOid);		/* type's collation */
 
 	pfree(enumArrayName);
+
+	return enumTypeOid;
 }
 
 /*
  * AlterEnum
  *		Adds a new label to an existing enum.
  */
-void
+Oid
 AlterEnum(AlterEnumStmt *stmt, bool isTopLevel)
 {
 	Oid			enum_type_oid;
@@ -1215,6 +1215,8 @@ AlterEnum(AlterEnumStmt *stmt, bool isTopLevel)
 				 stmt->skipIfExists);
 
 	ReleaseSysCache(tup);
+
+	return enum_type_oid;
 }
 
 
@@ -1246,7 +1248,7 @@ checkEnumOwner(HeapTuple tup)
  * DefineRange
  *		Registers a new range type.
  */
-void
+Oid
 DefineRange(CreateRangeStmt *stmt)
 {
 	char	   *typeName;
@@ -1498,6 +1500,8 @@ DefineRange(CreateRangeStmt *stmt)
 
 	/* And create the constructor functions for this range type */
 	makeRangeConstructors(typeName, typeNamespace, typoid, rangeSubtype);
+
+	return typoid;
 }
 
 /*
@@ -2064,7 +2068,7 @@ DefineCompositeType(RangeVar *typevar, List *coldeflist)
  *
  * Routine implementing ALTER DOMAIN SET/DROP DEFAULT statements.
  */
-void
+Oid
 AlterDomainDefault(List *names, Node *defaultRaw)
 {
 	TypeName   *typename;
@@ -2137,9 +2141,7 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 			 * easier for pg_dump).
 			 */
 			defaultValue = deparse_expression(defaultExpr,
-								deparse_context_for(NameStr(typTup->typname),
-													InvalidOid),
-											  false, false);
+											  NIL, false, false);
 
 			/*
 			 * Form an updated tuple with the new default and write it back.
@@ -2191,6 +2193,8 @@ AlterDomainDefault(List *names, Node *defaultRaw)
 	/* Clean up */
 	heap_close(rel, NoLock);
 	heap_freetuple(newtuple);
+
+	return domainoid;
 }
 
 /*
@@ -2198,7 +2202,7 @@ AlterDomainDefault(List *names, Node *defaultRaw)
  *
  * Routine implementing ALTER DOMAIN SET/DROP NOT NULL statements.
  */
-void
+Oid
 AlterDomainNotNull(List *names, bool notNull)
 {
 	TypeName   *typename;
@@ -2226,7 +2230,7 @@ AlterDomainNotNull(List *names, bool notNull)
 	if (typTup->typnotnull == notNull)
 	{
 		heap_close(typrel, RowExclusiveLock);
-		return;
+		return InvalidOid;
 	}
 
 	/* Adding a NOT NULL constraint requires checking existing columns */
@@ -2287,6 +2291,8 @@ AlterDomainNotNull(List *names, bool notNull)
 	/* Clean up */
 	heap_freetuple(tup);
 	heap_close(typrel, RowExclusiveLock);
+
+	return domainoid;
 }
 
 /*
@@ -2294,7 +2300,7 @@ AlterDomainNotNull(List *names, bool notNull)
  *
  * Implements the ALTER DOMAIN DROP CONSTRAINT statement
  */
-void
+Oid
 AlterDomainDropConstraint(List *names, const char *constrName,
 						  DropBehavior behavior, bool missing_ok)
 {
@@ -2371,6 +2377,8 @@ AlterDomainDropConstraint(List *names, const char *constrName,
 					(errmsg("constraint \"%s\" of domain \"%s\" does not exist, skipping",
 							constrName, TypeNameToString(typename))));
 	}
+
+	return domainoid;
 }
 
 /*
@@ -2378,7 +2386,7 @@ AlterDomainDropConstraint(List *names, const char *constrName,
  *
  * Implements the ALTER DOMAIN .. ADD CONSTRAINT statement.
  */
-void
+Oid
 AlterDomainAddConstraint(List *names, Node *newConstraint)
 {
 	TypeName   *typename;
@@ -2474,6 +2482,8 @@ AlterDomainAddConstraint(List *names, Node *newConstraint)
 
 	/* Clean up */
 	heap_close(typrel, RowExclusiveLock);
+
+	return domainoid;
 }
 
 /*
@@ -2481,7 +2491,7 @@ AlterDomainAddConstraint(List *names, Node *newConstraint)
  *
  * Implements the ALTER DOMAIN .. VALIDATE CONSTRAINT statement.
  */
-void
+Oid
 AlterDomainValidateConstraint(List *names, char *constrName)
 {
 	TypeName   *typename;
@@ -2573,6 +2583,8 @@ AlterDomainValidateConstraint(List *names, char *constrName)
 	heap_close(conrel, RowExclusiveLock);
 
 	ReleaseSysCache(tup);
+
+	return domainoid;
 }
 
 static void
@@ -2925,14 +2937,9 @@ domainAddConstraint(Oid domainOid, Oid domainNamespace, Oid baseTypeOid,
 
 	/*
 	 * Deparse it to produce text for consrc.
-	 *
-	 * Since VARNOs aren't allowed in domain constraints, relation context
-	 * isn't required as anything other than a shell.
 	 */
 	ccsrc = deparse_expression(expr,
-							   deparse_context_for(domainName,
-												   InvalidOid),
-							   false, false);
+							   NIL, false, false);
 
 	/*
 	 * Store the constraint in pg_constraint

@@ -8,7 +8,7 @@
  * stepping on each others' toes.  Formerly we used table-level locks
  * on pg_database, but that's too coarse-grained.
  *
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -91,7 +91,7 @@ static int	errdetail_busy_db(int notherbackends, int npreparedxacts);
 /*
  * CREATE DATABASE
  */
-void
+Oid
 createdb(const CreatedbStmt *stmt)
 {
 	HeapScanDesc scan;
@@ -658,6 +658,8 @@ createdb(const CreatedbStmt *stmt)
 	}
 	PG_END_ENSURE_ERROR_CLEANUP(createdb_failure_callback,
 								PointerGetDatum(&fparms));
+
+	return dboid;
 }
 
 /*
@@ -1304,10 +1306,11 @@ movedb_failure_callback(int code, Datum arg)
 /*
  * ALTER DATABASE name ...
  */
-void
+Oid
 AlterDatabase(AlterDatabaseStmt *stmt, bool isTopLevel)
 {
 	Relation	rel;
+	Oid         dboid;
 	HeapTuple	tuple,
 				newtuple;
 	ScanKeyData scankey;
@@ -1353,7 +1356,7 @@ AlterDatabase(AlterDatabaseStmt *stmt, bool isTopLevel)
 		/* this case isn't allowed within a transaction block */
 		PreventTransactionChain(isTopLevel, "ALTER DATABASE SET TABLESPACE");
 		movedb(stmt->dbname, strVal(dtablespace->arg));
-		return;
+		return InvalidOid;
 	}
 
 	if (dconnlimit)
@@ -1383,6 +1386,8 @@ AlterDatabase(AlterDatabaseStmt *stmt, bool isTopLevel)
 				(errcode(ERRCODE_UNDEFINED_DATABASE),
 				 errmsg("database \"%s\" does not exist", stmt->dbname)));
 
+	dboid = HeapTupleGetOid(tuple);
+
 	if (!pg_database_ownercheck(HeapTupleGetOid(tuple), GetUserId()))
 		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE,
 					   stmt->dbname);
@@ -1411,13 +1416,15 @@ AlterDatabase(AlterDatabaseStmt *stmt, bool isTopLevel)
 
 	/* Close pg_database, but keep lock till commit */
 	heap_close(rel, NoLock);
+
+	return dboid;
 }
 
 
 /*
  * ALTER DATABASE name SET ...
  */
-void
+Oid
 AlterDatabaseSet(AlterDatabaseSetStmt *stmt)
 {
 	Oid			datid = get_database_oid(stmt->dbname, false);
@@ -1435,6 +1442,8 @@ AlterDatabaseSet(AlterDatabaseSetStmt *stmt)
 	AlterSetting(datid, InvalidOid, stmt->setstmt);
 
 	UnlockSharedObject(DatabaseRelationId, datid, 0, AccessShareLock);
+
+	return datid;
 }
 
 

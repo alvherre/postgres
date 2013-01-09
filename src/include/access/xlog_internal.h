@@ -11,7 +11,7 @@
  * Note: This file must be includable in both frontend and backend contexts,
  * to allow stand-alone tools like pg_receivexlog to deal with WAL files.
  *
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/xlog_internal.h
@@ -265,6 +265,7 @@ extern bool RestoreArchivedFile(char *path, const char *xlogfname,
 					bool cleanupEnabled);
 extern void ExecuteRecoveryCommand(char *command, char *commandName,
 					   bool failOnerror);
+extern void KeepFileRestoredFromArchive(char  *path, char *xlogfname);
 extern void XLogArchiveNotify(const char *xlog);
 extern void XLogArchiveNotifySeg(XLogSegNo segno);
 extern bool XLogArchiveCheckDone(const char *xlog);

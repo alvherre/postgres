@@ -3,7 +3,7 @@
  * event_trigger.h
  *	  Declarations for command trigger handling.
  *
- * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/event_trigger.h
@@ -31,11 +31,11 @@ typedef struct EventTriggerData
 #define CALLED_AS_EVENT_TRIGGER(fcinfo) \
 	((fcinfo)->context != NULL && IsA((fcinfo)->context, EventTriggerData))
 
-extern void CreateEventTrigger(CreateEventTrigStmt *stmt);
+extern Oid CreateEventTrigger(CreateEventTrigStmt *stmt);
 extern void RemoveEventTriggerById(Oid ctrigOid);
 extern Oid	get_event_trigger_oid(const char *trigname, bool missing_ok);
 
-extern void AlterEventTrigger(AlterEventTrigStmt *stmt);
+extern Oid AlterEventTrigger(AlterEventTrigStmt *stmt);
 extern Oid RenameEventTrigger(const char* trigname, const char *newname);
 extern Oid AlterEventTriggerOwner(const char *name, Oid newOwnerId);
 extern void AlterEventTriggerOwner_oid(Oid, Oid newOwnerId);

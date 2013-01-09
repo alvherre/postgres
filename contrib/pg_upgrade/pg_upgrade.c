@@ -3,7 +3,7 @@
  *
  *	main source file
  *
- *	Copyright (c) 2010-2012, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2013, PostgreSQL Global Development Group
  *	contrib/pg_upgrade/pg_upgrade.c
  */
 
@@ -133,7 +133,7 @@ main(int argc, char **argv)
 	if (user_opts.transfer_mode == TRANSFER_MODE_LINK)
 		disable_old_cluster();
 
-	transfer_all_new_dbs(&old_cluster.dbarr, &new_cluster.dbarr,
+	transfer_all_new_tablespaces(&old_cluster.dbarr, &new_cluster.dbarr,
 						 old_cluster.pgdata, new_cluster.pgdata);
 
 	/*

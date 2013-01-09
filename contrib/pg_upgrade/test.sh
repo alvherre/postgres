@@ -6,7 +6,7 @@
 # runs the regression tests (to put in some data), runs pg_dumpall,
 # runs pg_upgrade, runs pg_dumpall again, compares the dumps.
 #
-# Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 
 set -e
@@ -16,6 +16,13 @@ set -e
 export PGPORT
 
 testhost=`uname -s`
+
+case $testhost in
+	MINGW*)	LISTEN_ADDRESSES="localhost" ;;
+	*)		LISTEN_ADDRESSES="" ;;
+esac
+
+POSTMASTER_OPTS="-F -c listen_addresses=$LISTEN_ADDRESSES"
 
 temp_root=$PWD/tmp_check
 
@@ -75,7 +82,7 @@ mkdir "$logdir"
 set -x
 
 $oldbindir/initdb -N
-$oldbindir/pg_ctl start -l "$logdir/postmaster1.log" -o '-F' -w
+$oldbindir/pg_ctl start -l "$logdir/postmaster1.log" -o "$POSTMASTER_OPTS" -w
 if "$MAKE" -C "$oldsrc" installcheck; then
 	pg_dumpall -f "$temp_root"/dump1.sql || pg_dumpall1_status=$?
 	if [ "$newsrc" != "$oldsrc" ]; then
@@ -118,7 +125,7 @@ initdb -N
 
 pg_upgrade -d "${PGDATA}.old" -D "${PGDATA}" -b "$oldbindir" -B "$bindir"
 
-pg_ctl start -l "$logdir/postmaster2.log" -o '-F' -w
+pg_ctl start -l "$logdir/postmaster2.log" -o "$POSTMASTER_OPTS" -w
 
 case $testhost in
 	MINGW*)	cmd /c analyze_new_cluster.bat ;;
