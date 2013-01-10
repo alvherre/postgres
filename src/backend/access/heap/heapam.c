@@ -2879,6 +2879,7 @@ simple_heap_delete(Relation relation, ItemPointer tid)
  *	crosscheck - if not InvalidSnapshot, also check old tuple against this
  *	wait - true if should wait for any conflicting update to commit/abort
  *	hufd - output parameter, filled in failure cases (see below)
+ *	lockmode - output parameter, filled with lock mode acquired on tuple
  *
  * Normal, successful return value is HeapTupleMayBeUpdated, which
  * actually means we *did* update it.  Failure return codes are
@@ -2900,7 +2901,7 @@ simple_heap_delete(Relation relation, ItemPointer tid)
 HTSU_Result
 heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 			CommandId cid, Snapshot crosscheck, bool wait,
-			HeapUpdateFailureData *hufd)
+			HeapUpdateFailureData *hufd, LockTupleMode *lockmode)
 {
 	HTSU_Result result;
 	TransactionId xid = GetCurrentTransactionId();
@@ -2911,7 +2912,6 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	HeapTuple	heaptup;
 	Page		page;
 	BlockNumber block;
-	LockTupleMode tuplock;
 	MultiXactStatus mxact_status;
 	Buffer		buffer,
 				newbuf,
@@ -2993,7 +2993,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 								 &oldtup, newtup);
 	if (satisfies_key)
 	{
-		tuplock = LockTupleNoKeyExclusive;
+		*lockmode = LockTupleNoKeyExclusive;
 		mxact_status = MultiXactStatusNoKeyUpdate;
 		key_intact = true;
 
@@ -3010,7 +3010,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 	}
 	else
 	{
-		tuplock = LockTupleExclusive;
+		*lockmode = LockTupleExclusive;
 		mxact_status = MultiXactStatusUpdate;
 		key_intact = false;
 	}
@@ -3072,7 +3072,7 @@ l2:
 		 */
 		if (!have_tuple_lock)
 		{
-			LockTupleTuplock(relation, &(oldtup.t_self), tuplock);
+			LockTupleTuplock(relation, &(oldtup.t_self), *lockmode);
 			have_tuple_lock = true;
 		}
 
@@ -3207,7 +3207,7 @@ l2:
 			hufd->cmax = 0;		/* for lack of an InvalidCommandId value */
 		UnlockReleaseBuffer(buffer);
 		if (have_tuple_lock)
-			UnlockTupleTuplock(relation, &(oldtup.t_self), tuplock);
+			UnlockTupleTuplock(relation, &(oldtup.t_self), *lockmode);
 		if (vmbuffer != InvalidBuffer)
 			ReleaseBuffer(vmbuffer);
 		bms_free(hot_attrs);
@@ -3260,7 +3260,7 @@ l2:
 	compute_new_xmax_infomask(HeapTupleHeaderGetRawXmax(oldtup.t_data),
 							  oldtup.t_data->t_infomask,
 							  oldtup.t_data->t_infomask2,
-							  xid, tuplock, true,
+							  xid, *lockmode, true,
 							  &xmax_old_tuple, &infomask_old_tuple,
 							  &infomask2_old_tuple);
 
@@ -3576,7 +3576,7 @@ l2:
 	 * Release the lmgr tuple lock, if we had it.
 	 */
 	if (have_tuple_lock)
-		UnlockTupleTuplock(relation, &(oldtup.t_self), tuplock);
+		UnlockTupleTuplock(relation, &(oldtup.t_self), *lockmode);
 
 	pgstat_count_heap_update(relation, use_hot_update);
 
@@ -3785,11 +3785,12 @@ simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup)
 {
 	HTSU_Result result;
 	HeapUpdateFailureData hufd;
+	LockTupleMode lockmode;
 
 	result = heap_update(relation, otid, tup,
 						 GetCurrentCommandId(true), InvalidSnapshot,
 						 true /* wait for commit */,
-						 &hufd);
+						 &hufd, &lockmode);
 	switch (result)
 	{
 		case HeapTupleSelfUpdated:
