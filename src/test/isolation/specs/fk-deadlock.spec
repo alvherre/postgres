@@ -29,4 +29,3 @@ setup		{ BEGIN; SET deadlock_timeout = '10s'; }
 step "s2i"	{ INSERT INTO child VALUES (2, 1); }
 step "s2u"	{ UPDATE parent SET aux = 'baz'; }
 step "s2c"	{ COMMIT; }
-

@@ -5266,7 +5266,7 @@ TransactionId
 HeapTupleGetUpdateXid(HeapTupleHeader tuple)
 {
 	return MultiXactIdGetUpdateXid(HeapTupleHeaderGetRawXmax(tuple),
-						   		   tuple->t_infomask);
+								   tuple->t_infomask);
 }
 
 /*

@@ -34,4 +34,3 @@ setup		{ BEGIN; SET deadlock_timeout = '10s'; }
 step "s2u1"	{ UPDATE B SET Col2 = 1 WHERE BID = 2; }
 step "s2u2"	{ UPDATE B SET Col2 = 1 WHERE BID = 2; }
 step "s2c"	{ COMMIT; }
-
