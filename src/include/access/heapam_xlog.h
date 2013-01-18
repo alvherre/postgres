@@ -144,9 +144,10 @@ typedef struct xl_multi_insert_tuple
 typedef struct xl_heap_update
 {
 	xl_heaptid	target;			/* deleted tuple id */
-	TransactionId xmax;			/* xmax of the old tuple */
+	TransactionId old_xmax;		/* xmax of the old tuple */
+	TransactionId new_xmax;		/* xmax of the new tuple */
 	ItemPointerData newtid;		/* new inserted tuple id */
-	uint8		infobits_set;	/* infomask bits to set on old tuple */
+	uint8		old_infobits_set;	/* infomask bits to set on old tuple */
 	bool		all_visible_cleared;	/* PD_ALL_VISIBLE was cleared */
 	bool		new_all_visible_cleared;		/* same for the page of newtid */
 	/* NEW TUPLE xl_heap_header AND TUPLE DATA FOLLOWS AT END OF STRUCT */

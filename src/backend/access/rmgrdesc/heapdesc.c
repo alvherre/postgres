@@ -74,11 +74,12 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 		else
 			appendStringInfo(buf, "update: ");
 		out_target(buf, &(xlrec->target));
-		appendStringInfoChar(buf, ' ');
-		out_infobits(buf, xlrec->infobits_set);
-		appendStringInfo(buf, "; new %u/%u",
+		appendStringInfo(buf, " xmax %u ", xlrec->old_xmax);
+		out_infobits(buf, xlrec->old_infobits_set);
+		appendStringInfo(buf, "; new tid %u/%u xmax %u",
 						 ItemPointerGetBlockNumber(&(xlrec->newtid)),
-						 ItemPointerGetOffsetNumber(&(xlrec->newtid)));
+						 ItemPointerGetOffsetNumber(&(xlrec->newtid)),
+						 xlrec->new_xmax);
 	}
 	else if (info == XLOG_HEAP_HOT_UPDATE)
 	{
@@ -89,11 +90,12 @@ heap_desc(StringInfo buf, uint8 xl_info, char *rec)
 		else
 			appendStringInfo(buf, "hot_update: ");
 		out_target(buf, &(xlrec->target));
-		appendStringInfoChar(buf, ' ');
-		out_infobits(buf, xlrec->infobits_set);
-		appendStringInfo(buf, "; new %u/%u",
+		appendStringInfo(buf, " xmax %u ", xlrec->old_xmax);
+		out_infobits(buf, xlrec->old_infobits_set);
+		appendStringInfo(buf, "; new tid %u/%u xmax %u",
 						 ItemPointerGetBlockNumber(&(xlrec->newtid)),
-						 ItemPointerGetOffsetNumber(&(xlrec->newtid)));
+						 ItemPointerGetOffsetNumber(&(xlrec->newtid)),
+						 xlrec->new_xmax);
 	}
 	else if (info == XLOG_HEAP_NEWPAGE)
 	{

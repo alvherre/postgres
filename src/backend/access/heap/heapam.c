@@ -5771,9 +5771,10 @@ log_heap_update(Relation reln, Buffer oldbuf,
 
 	xlrec.target.node = reln->rd_node;
 	xlrec.target.tid = oldtup->t_self;
-	xlrec.xmax = HeapTupleHeaderGetRawXmax(oldtup->t_data);
-	xlrec.infobits_set = compute_infobits(oldtup->t_data->t_infomask,
-										  oldtup->t_data->t_infomask2);
+	xlrec.old_xmax = HeapTupleHeaderGetRawXmax(oldtup->t_data);
+	xlrec.old_infobits_set = compute_infobits(oldtup->t_data->t_infomask,
+											  oldtup->t_data->t_infomask2);
+	xlrec.new_xmax = HeapTupleHeaderGetRawXmax(newtup->t_data);
 	xlrec.all_visible_cleared = all_visible_cleared;
 	xlrec.newtid = newtup->t_self;
 	xlrec.new_all_visible_cleared = new_all_visible_cleared;
@@ -6691,9 +6692,9 @@ heap_xlog_update(XLogRecPtr lsn, XLogRecord *record, bool hot_update)
 		HeapTupleHeaderSetHotUpdated(htup);
 	else
 		HeapTupleHeaderClearHotUpdated(htup);
-	fix_infomask_from_infobits(xlrec->infobits_set, &htup->t_infomask,
+	fix_infomask_from_infobits(xlrec->old_infobits_set, &htup->t_infomask,
 							   &htup->t_infomask2);
-	HeapTupleHeaderSetXmax(htup, xlrec->xmax);
+	HeapTupleHeaderSetXmax(htup, xlrec->old_xmax);
 	HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
 	/* Set forward chain link in t_ctid */
 	htup->t_ctid = xlrec->newtid;
@@ -6800,6 +6801,7 @@ newsame:;
 
 	HeapTupleHeaderSetXmin(htup, record->xl_xid);
 	HeapTupleHeaderSetCmin(htup, FirstCommandId);
+	HeapTupleHeaderSetXmax(htup, xlrec->new_xmax);
 	/* Make sure there is no forward chain link in t_ctid */
 	htup->t_ctid = xlrec->newtid;
 
