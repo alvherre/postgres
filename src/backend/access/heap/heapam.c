@@ -4838,7 +4838,7 @@ l4:
 		{
 			xl_heap_lock_updated xlrec;
 			XLogRecPtr	recptr;
-			XLogRecData	rdata;
+			XLogRecData	rdata[2];
 			Page		page = BufferGetPage(buf);
 
 			xlrec.target.node = rel->rd_node;
@@ -4846,13 +4846,18 @@ l4:
 			xlrec.xmax = new_xmax;
 			xlrec.infobits_set = compute_infobits(new_infomask, new_infomask2);
 
-			rdata.data = (char *) &xlrec;
-			rdata.len = SizeOfHeapLockUpdated;
-			rdata.buffer = buf;
-			rdata.buffer_std = true;
-			rdata.next = NULL;
+			rdata[0].data = (char *) &xlrec;
+			rdata[0].len = SizeOfHeapLockUpdated;
+			rdata[0].buffer = InvalidBuffer;
+			rdata[0].next = &(rdata[1]);
 
-			recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOCK_UPDATED, &rdata);
+			rdata[1].data = NULL;
+			rdata[1].len = 0;
+			rdata[1].buffer = buf;
+			rdata[1].buffer_std = true;
+			rdata[1].next = NULL;
+
+			recptr = XLogInsert(RM_HEAP2_ID, XLOG_HEAP2_LOCK_UPDATED, rdata);
 
 			PageSetLSN(page, recptr);
 			PageSetTLI(page, ThisTimeLineID);
