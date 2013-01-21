@@ -1106,6 +1106,9 @@ AC_C_VOLATILE
 PGAC_C_FUNCNAME_SUPPORT
 PGAC_C_STATIC_ASSERT
 PGAC_C_TYPES_COMPATIBLE
+PGAC_C_BUILTIN_CONSTANT_P
+PGAC_C_BUILTIN_UNREACHABLE
+PGAC_C_VA_ARGS
 PGAC_STRUCT_TIMEZONE
 PGAC_UNION_SEMUN
 PGAC_STRUCT_SOCKADDR_UN
@@ -1795,7 +1798,7 @@ fi
 # check for <perl.h>
 if test "$with_perl" = yes; then
   ac_save_CPPFLAGS=$CPPFLAGS
-  CPPFLAGS="-I$perl_archlibexp/CORE $CPPFLAGS"
+  CPPFLAGS="$CPPFLAGS -I$perl_archlibexp/CORE"
   AC_CHECK_HEADER(perl.h, [], [AC_MSG_ERROR([header file <perl.h> is required for Perl])],
                   [#include <EXTERN.h>])
   # While we're at it, check that we can link to libperl.

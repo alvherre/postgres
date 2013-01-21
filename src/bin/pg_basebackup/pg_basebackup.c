@@ -243,7 +243,7 @@ LogStreamerMain(logstreamer_param *param)
 	if (!ReceiveXlogStream(param->bgconn, param->startptr, param->timeline,
 						   param->sysidentifier, param->xlogdir,
 						   reached_end_position, standby_message_timeout,
-						   true))
+						   NULL))
 
 		/*
 		 * Any errors will already have been reported in the function process,
@@ -422,6 +422,7 @@ progress_report(int tablespacenum, const char *filename)
 			 totaldone / 1024);
 	snprintf(totalsize_str, sizeof(totalsize_str), INT64_FORMAT, totalsize);
 
+#define VERBOSE_FILENAME_LENGTH 35
 	if (verbose)
 	{
 		if (!filename)
@@ -431,24 +432,38 @@ progress_report(int tablespacenum, const char *filename)
 			 * call)
 			 */
 			fprintf(stderr,
-					ngettext("%s/%s kB (100%%), %d/%d tablespace %35s",
-							 "%s/%s kB (100%%), %d/%d tablespaces %35s",
+					ngettext("%*s/%s kB (100%%), %d/%d tablespace %*s",
+							 "%*s/%s kB (100%%), %d/%d tablespaces %*s",
 							 tablespacecount),
+					(int) strlen(totalsize_str),
 					totaldone_str, totalsize_str,
-					tablespacenum, tablespacecount, "");
+					tablespacenum, tablespacecount,
+					VERBOSE_FILENAME_LENGTH + 5, "");
 		else
+		{
+			bool truncate = (strlen(filename) > VERBOSE_FILENAME_LENGTH);
+
 			fprintf(stderr,
-					ngettext("%s/%s kB (%d%%), %d/%d tablespace (%-30.30s)",
-							 "%s/%s kB (%d%%), %d/%d tablespaces (%-30.30s)",
+					ngettext("%*s/%s kB (%d%%), %d/%d tablespace (%s%-*.*s)",
+							 "%*s/%s kB (%d%%), %d/%d tablespaces (%s%-*.*s)",
 							 tablespacecount),
+					(int) strlen(totalsize_str),
 					totaldone_str, totalsize_str, percent,
-					tablespacenum, tablespacecount, filename);
+					tablespacenum, tablespacecount,
+					/* Prefix with "..." if we do leading truncation */
+					truncate ? "..." : "",
+					truncate ? VERBOSE_FILENAME_LENGTH - 3 : VERBOSE_FILENAME_LENGTH,
+					truncate ? VERBOSE_FILENAME_LENGTH - 3 : VERBOSE_FILENAME_LENGTH,
+					/* Truncate filename at beginning if it's too long */
+					truncate ? filename + strlen(filename) - VERBOSE_FILENAME_LENGTH + 3 : filename);
+		}
 	}
 	else
 		fprintf(stderr,
-				ngettext("%s/%s kB (%d%%), %d/%d tablespace",
-						 "%s/%s kB (%d%%), %d/%d tablespaces",
+				ngettext("%*s/%s kB (%d%%), %d/%d tablespace",
+						 "%*s/%s kB (%d%%), %d/%d tablespaces",
 						 tablespacecount),
+				(int) strlen(totalsize_str),
 				totaldone_str, totalsize_str, percent,
 				tablespacenum, tablespacecount);
 
@@ -1205,7 +1220,7 @@ BaseBackup(void)
 {
 	PGresult   *res;
 	char	   *sysidentifier;
-	uint32		timeline;
+	uint32		starttli;
 	char		current_path[MAXPGPATH];
 	char		escaped_label[MAXPGPATH];
 	int			i;
@@ -1244,7 +1259,6 @@ BaseBackup(void)
 		disconnect_and_exit(1);
 	}
 	sysidentifier = pg_strdup(PQgetvalue(res, 0, 0));
-	timeline = atoi(PQgetvalue(res, 0, 1));
 	PQclear(res);
 
 	/*
@@ -1276,17 +1290,23 @@ BaseBackup(void)
 				progname, PQerrorMessage(conn));
 		disconnect_and_exit(1);
 	}
-	if (PQntuples(res) != 1)
+	if (PQntuples(res) != 1 || PQnfields(res) < 2)
 	{
-		fprintf(stderr, _("%s: no start point returned from server\n"),
-				progname);
+		fprintf(stderr,
+				_("%s: server returned unexpected response to BASE_BACKUP command; got %d rows and %d fields, expected %d rows and %d fields\n"),
+				progname, PQntuples(res), PQnfields(res), 1, 2);
 		disconnect_and_exit(1);
 	}
+
 	strcpy(xlogstart, PQgetvalue(res, 0, 0));
-	if (verbose && includewal)
-		fprintf(stderr, "transaction log start point: %s\n", xlogstart);
+	starttli = atoi(PQgetvalue(res, 0, 1));
+
 	PQclear(res);
 	MemSet(xlogend, 0, sizeof(xlogend));
+
+	if (verbose && includewal)
+		fprintf(stderr, _("transaction log start point: %s on timeline %u\n"),
+				xlogstart, starttli);
 
 	/*
 	 * Get the header
@@ -1343,7 +1363,7 @@ BaseBackup(void)
 		if (verbose)
 			fprintf(stderr, _("%s: starting background WAL receiver\n"),
 					progname);
-		StartLogStreamer(xlogstart, timeline, sysidentifier);
+		StartLogStreamer(xlogstart, starttli, sysidentifier);
 	}
 
 	/*
