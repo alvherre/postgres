@@ -1920,8 +1920,10 @@ heap_get_latest_tid(Relation relation,
  * If the transaction aborted, we guarantee the XMAX_INVALID hint bit will
  * be set on exit.	If the transaction committed, we set the XMAX_COMMITTED
  * hint bit if possible --- but beware that that may not yet be possible,
- * if the transaction committed asynchronously.  Hence callers should look
- * only at XMAX_INVALID.
+ * if the transaction committed asynchronously.  Also, we don't set
+ * XMAX_COMMITTED if the finishing transaction was a locker and not an update.
+ *
+ * Hence callers should look only at XMAX_INVALID.
  *
  * Note this is not allowed for tuples whose xmax is a multixact.
  */
@@ -1933,7 +1935,8 @@ UpdateXmaxHintBits(HeapTupleHeader tuple, Buffer buffer, TransactionId xid)
 
 	if (!(tuple->t_infomask & (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID)))
 	{
-		if (TransactionIdDidCommit(xid))
+		if (TransactionIdDidCommit(xid) &&
+			!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))
 			HeapTupleSetHintBits(tuple, buffer, HEAP_XMAX_COMMITTED,
 								 xid);
 		else
