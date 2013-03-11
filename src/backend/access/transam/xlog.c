@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include "access/clog.h"
+#include "access/committs.h"
 #include "access/multixact.h"
 #include "access/subtrans.h"
 #include "access/timeline.h"
@@ -4134,6 +4135,7 @@ BootStrapXLOG(void)
 
 	/* Bootstrap the commit log, too */
 	BootStrapCLOG();
+	BootStrapCommitTs();
 	BootStrapSUBTRANS();
 	BootStrapMultiXact();
 
@@ -5397,10 +5399,12 @@ StartupXLOG(void)
 			Assert(TransactionIdIsValid(oldestActiveXID));
 
 			/*
-			 * Startup commit log and subtrans only. Other SLRUs are not
-			 * maintained during recovery and need not be started yet.
+			 * Startup commit log, commit timestamp, and subtrans only. Other
+			 * SLRUs are not maintained during recovery and need not be started
+			 * yet.
 			 */
 			StartupCLOG();
+			StartupCommitTs();
 			StartupSUBTRANS(oldestActiveXID);
 
 			/*
@@ -6043,6 +6047,7 @@ StartupXLOG(void)
 	if (standbyState == STANDBY_DISABLED)
 	{
 		StartupCLOG();
+		StartupCommitTs();
 		StartupSUBTRANS(oldestActiveXID);
 	}
 
@@ -6051,6 +6056,7 @@ StartupXLOG(void)
 	 */
 	StartupMultiXact();
 	TrimCLOG();
+	TrimCommitTs();
 
 	/* Reload shared-memory state for prepared transactions */
 	RecoverPreparedTransactions();
@@ -6603,6 +6609,7 @@ ShutdownXLOG(int code, Datum arg)
 		CreateCheckPoint(CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_IMMEDIATE);
 	}
 	ShutdownCLOG();
+	ShutdownCommitTs();
 	ShutdownSUBTRANS();
 	ShutdownMultiXact();
 
@@ -7237,6 +7244,7 @@ static void
 CheckPointGuts(XLogRecPtr checkPointRedo, int flags)
 {
 	CheckPointCLOG();
+	CheckPointCommitTs();
 	CheckPointSUBTRANS();
 	CheckPointMultiXact();
 	CheckPointPredicate();

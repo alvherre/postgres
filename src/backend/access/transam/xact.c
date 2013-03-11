@@ -20,6 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "access/committs.h"
 #include "access/multixact.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
@@ -1116,6 +1117,9 @@ RecordTransactionCommit(void)
 			(void) XLogInsert(RM_XACT_ID, XLOG_XACT_COMMIT_COMPACT, rdata);
 		}
 	}
+
+	TransactionTreeSetCommitTimestamp(xid, nchildren, children,
+									  xactStopTimestamp);
 
 	/*
 	 * Check if we want to commit asynchronously.  We can allow the XLOG flush
@@ -4563,6 +4567,7 @@ xactGetCommittedChildren(TransactionId **ptr)
  */
 static void
 xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
+						  TimestampTz commit_time,
 						  TransactionId *sub_xids, int nsubxacts,
 						  SharedInvalidationMessage *inval_msgs, int nmsgs,
 						  RelFileNode *xnodes, int nrels,
@@ -4589,6 +4594,10 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 		TransactionIdAdvance(ShmemVariableCache->nextXid);
 		LWLockRelease(XidGenLock);
 	}
+
+	/* Set the transaction commit time */
+	TransactionTreeSetCommitTimestamp(xid, nsubxacts, sub_xids,
+									  commit_time);
 
 	if (standbyState == STANDBY_DISABLED)
 	{
@@ -4710,7 +4719,8 @@ xact_redo_commit(xl_xact_commit *xlrec,
 	/* invalidation messages array follows subxids */
 	inval_msgs = (SharedInvalidationMessage *) &(subxacts[xlrec->nsubxacts]);
 
-	xact_redo_commit_internal(xid, lsn, subxacts, xlrec->nsubxacts,
+	xact_redo_commit_internal(xid, lsn, xlrec->xact_time,
+							  subxacts, xlrec->nsubxacts,
 							  inval_msgs, xlrec->nmsgs,
 							  xlrec->xnodes, xlrec->nrels,
 							  xlrec->dbId,
@@ -4725,7 +4735,8 @@ static void
 xact_redo_commit_compact(xl_xact_commit_compact *xlrec,
 						 TransactionId xid, XLogRecPtr lsn)
 {
-	xact_redo_commit_internal(xid, lsn, xlrec->subxacts, xlrec->nsubxacts,
+	xact_redo_commit_internal(xid, lsn, xlrec->xact_time,
+							  xlrec->subxacts, xlrec->nsubxacts,
 							  NULL, 0,	/* inval msgs */
 							  NULL, 0,	/* relfilenodes */
 							  InvalidOid,		/* dbId */
