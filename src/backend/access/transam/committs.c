@@ -12,17 +12,6 @@
  * records for these events and will re-perform the status update on redo;
  * so we need make no additional XLOG entry here.
  *
- * XXX do we need this stuff? << EOT
- * For synchronous
- * transaction commits, the XLOG is guaranteed flushed through the XLOG commit
- * record before we are called to log a commit, so the WAL rule "write xlog
- * before data" is satisfied automatically.  However, for async commits we
- * must track the latest LSN affecting each CLOG page, so that we can flush
- * XLOG that far and satisfy the WAL rule.	We don't have to worry about this
- * for aborts (whether sync or async), since the post-crash assumption would
- * be that such transactions failed anyway.
- * EOT
- *
  * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
