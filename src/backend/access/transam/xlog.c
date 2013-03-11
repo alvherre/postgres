@@ -6056,7 +6056,6 @@ StartupXLOG(void)
 	 */
 	StartupMultiXact();
 	TrimCLOG();
-	TrimCommitTs();
 
 	/* Reload shared-memory state for prepared transactions */
 	RecoverPreparedTransactions();

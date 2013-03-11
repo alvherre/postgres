@@ -25,7 +25,6 @@ extern Size CommitTsShmemSize(void);
 extern void CommitTsShmemInit(void);
 extern void BootStrapCommitTs(void);
 extern void StartupCommitTs(void);
-extern void TrimCommitTs(void);
 extern void ShutdownCommitTs(void);
 extern void CheckPointCommitTs(void);
 extern void ExtendCommitTs(TransactionId newestXact);

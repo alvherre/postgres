@@ -294,45 +294,6 @@ StartupCommitTs(void)
 }
 
 /*
- * This must be called ONCE at the end of startup/recovery.
- */
-void
-TrimCommitTs(void)
-{
-	TransactionId xid = ShmemVariableCache->nextXid;
-	int			pageno = TransactionIdToCTsPage(xid);
-
-	LWLockAcquire(CommitTsControlLock, LW_EXCLUSIVE);
-
-	/*
-	 * Re-Initialize our idea of the latest page number.
-	 */
-	CommitTsCtl->shared->latest_page_number = pageno;
-
-	/*
-	 * Zero out the remainder of the current committs page; see TrimCLOG
-	 * for rationale.
-	 */
-	if (TransactionIdToCTsEntry(xid) != 0)
-	{
-		int			entryno = TransactionIdToCTsEntry(xid);
-		int			slotno;
-		TimestampTz *timeptr;
-
-		slotno = SimpleLruReadPage(CommitTsCtl, pageno, false, xid);
-		timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
-		timeptr += entryno;
-
-		/* Zero the rest of the page */
-		MemSet(timeptr + sizeof(TimestampTz), 0, 0 /* FIXME size here */);
-
-		CommitTsCtl->shared->page_dirty[slotno] = true;
-	}
-
-	LWLockRelease(CommitTsControlLock);
-}
-
-/*
  * This must be called ONCE during postmaster or standalone-backend shutdown
  */
 void
