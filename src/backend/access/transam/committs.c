@@ -214,13 +214,13 @@ pg_get_transaction_committime(PG_FUNCTION_ARGS)
 /*
  * Number of shared CommitTS buffers.
  *
- * We use the same logic as for the number of CLOG buffers; see comments on
- * CLOGShmemBuffers.
+ * We use a very similar logic as for the number of CLOG buffers; see comments
+ * in CLOGShmemBuffers.
  */
 Size
 CommitTsShmemBuffers(void)
 {
-	return Min(32, Max(4, NBuffers / 512));
+	return Min(16, Max(4, NBuffers / 1024));
 }
 
 /*
