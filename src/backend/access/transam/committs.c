@@ -28,6 +28,7 @@
 #include "miscadmin.h"
 #include "pg_trace.h"
 #include "utils/builtins.h"
+#include "utils/snapmgr.h"
 #include "utils/timestamp.h"
 
 /*
@@ -57,6 +58,8 @@ static SlruCtlData CommitTsCtlData;
 
 #define CommitTsCtl (&CommitTsCtlData)
 
+/* GUC variables */
+bool	commit_ts_enabled;
 
 static void SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 					 TransactionId *subxids, TimestampTz committs, int pageno);
@@ -85,6 +88,9 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 {
 	int			i = 0;
 	TransactionId headxid = xid;
+
+	if (!commit_ts_enabled)
+		return;
 
 	/*
 	 * We split the xids to set the timestamp to in groups belonging to the
@@ -172,6 +178,19 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 	int			slotno;
 	TimestampTz *timeptr;
 	TimestampTz	committs;
+
+	if (!commit_ts_enabled)
+		return 0;
+
+	/*
+	 * FIXME -- we need a more useful lower bound here.  For now, we use
+	 * RecentGlobalXmin which is ensured to be sane if set.  (RecentXmin might
+	 * be set to FirstNormalTransactionId if no snapshot has been taken by this
+	 * session, so avoid that).
+	 */
+	if (!TransactionIdIsValid(RecentGlobalXmin) ||
+		TransactionIdPrecedes(xid, RecentGlobalXmin))
+		return 0;
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
 
@@ -276,12 +295,18 @@ ZeroCommitTsPage(int pageno, bool writeXlog)
 /*
  * This must be called ONCE during postmaster or standalone-backend startup,
  * after StartupXLOG has initialized ShmemVariableCache->nextXid.
+ *
+ * This is in charge of creating the currently active segment, if it's not
+ * already there.  The reason for this is that the server might have been
+ * running with this module disabled for a while and thus might have skipped
+ * the normal creation point.
  */
 void
 StartupCommitTs(void)
 {
 	TransactionId xid = ShmemVariableCache->nextXid;
 	int			pageno = TransactionIdToCTsPage(xid);
+	SlruCtl		ctl = CommitTsCtl;
 
 	LWLockAcquire(CommitTsControlLock, LW_EXCLUSIVE);
 
@@ -291,6 +316,12 @@ StartupCommitTs(void)
 	CommitTsCtl->shared->latest_page_number = pageno;
 
 	LWLockRelease(CommitTsControlLock);
+
+	if (!commit_ts_enabled)
+		return;
+
+	if (!SimpleLruDoesPhysicalPageExist(ctl, pageno))
+		SimpleLruZeroPage(ctl, pageno);
 }
 
 /*

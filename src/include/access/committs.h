@@ -15,6 +15,9 @@
 #include "datatype/timestamp.h"
 
 
+extern bool	commit_ts_enabled;
+
+
 extern void TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 								  TransactionId *subxids,
 								  TimestampTz timestamp);
