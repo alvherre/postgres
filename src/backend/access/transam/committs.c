@@ -46,8 +46,9 @@
  * and page numbers in TruncateCommitTs (see CommitTsPagePrecedes).
  */
 
-/* We need eight bytes per xact */
-#define COMMITTS_XACTS_PER_PAGE (BLCKSZ / sizeof(TimestampTz))
+/* We need 8+4 bytes per xact */
+#define COMMITTS_XACTS_PER_PAGE \
+	(BLCKSZ / (sizeof(TimestampTz) + sizeof(CommitExtraData)))
 
 #define TransactionIdToCTsPage(xid)	\
 	((xid) / (TransactionId) COMMITTS_XACTS_PER_PAGE)
@@ -65,15 +66,17 @@ static SlruCtlData CommitTsCtlData;
 bool	commit_ts_enabled;
 
 static void SetXidCommitTsInPage(TransactionId xid, int nsubxids,
-					 TransactionId *subxids, TimestampTz committs, int pageno);
+					 TransactionId *subxids, TimestampTz committs,
+					 CommitExtraData extra, int pageno);
 static void TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs,
-						  int slotno);
+						  CommitExtraData extra, int slotno);
 static int	ZeroCommitTsPage(int pageno, bool writeXlog);
 static bool CommitTsPagePrecedes(int page1, int page2);
 static void WriteZeroPageXlogRec(int pageno);
 static void WriteTruncateXlogRec(int pageno);
 static void WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
-						 TransactionId *subxids, TimestampTz timestamp);
+						 TransactionId *subxids, TimestampTz timestamp,
+						 CommitExtraData data);
 
 
 /*
@@ -86,11 +89,17 @@ static void WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
  *
  * subxids is an array of xids of length nsubxids, representing subtransactions
  * in the tree of xid. In various cases nsubxids may be zero.
+ *
+ * The do_xlog parameter tells us whether to include a XLog record of this
+ * or not.  Normal path through RecordTransactionCommit() will be related
+ * to a transaction commit XLog record, and so should pass "false" here.
+ * Other callers probably want to pass true, so that the given values persist
+ * in case of crashes.
  */
 void
 TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 								  TransactionId *subxids, TimestampTz timestamp,
-								  bool do_xlog)
+								  CommitExtraData extra, bool do_xlog)
 {
 	int			i;
 	TransactionId headxid;
@@ -100,10 +109,10 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 
 	/*
 	 * Comply with the WAL-before-data rule: if caller specified it wants
-	 * this value to be recorded in WAL, do so now.
+	 * this value to be recorded in WAL, do so before touching the data.
 	 */
 	if (do_xlog)
-		WriteSetTimestampXlogRec(xid, nsubxids, subxids, timestamp);
+		WriteSetTimestampXlogRec(xid, nsubxids, subxids, timestamp, extra);
 
 	/*
 	 * We split the xids to set the timestamp to in groups belonging to the
@@ -124,7 +133,8 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 		}
 		/* subxids[i..j] are on the same page as the head */
 
-		SetXidCommitTsInPage(headxid, j - i, subxids + i, timestamp, pageno);
+		SetXidCommitTsInPage(headxid, j - i, subxids + i, timestamp, extra,
+							 pageno);
 
 		/* if we wrote out all subxids, we're done. */
 		if (j + 1 >= nsubxids)
@@ -145,7 +155,8 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
  */
 static void
 SetXidCommitTsInPage(TransactionId xid, int nsubxids,
-					 TransactionId *subxids, TimestampTz committs, int pageno)
+					 TransactionId *subxids, TimestampTz committs,
+					 CommitExtraData extra, int pageno)
 {
 	int			slotno;
 	int			i;
@@ -154,9 +165,9 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 
 	slotno = SimpleLruReadPage(CommitTsCtl, pageno, true, xid);
 
-	TransactionIdSetCommitTs(xid, committs, slotno);
+	TransactionIdSetCommitTs(xid, committs, slotno, extra);
 	for (i = 0; i < nsubxids; i++)
-		TransactionIdSetCommitTs(subxids[i], committs, slotno);
+		TransactionIdSetCommitTs(subxids[i], committs, extra, slotno);
 
 	CommitTsCtl->shared->page_dirty[slotno] = true;
 
@@ -169,31 +180,42 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
  * Must be called with CommitTsControlLock held
  */
 static void
-TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs, int slotno)
+TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs,
+						 CommitExtraData extra, int slotno)
 {
 	int			entryno = TransactionIdToCTsEntry(xid);
 	TimestampTz *timeptr;
+	CommitExtraData	*dataptr;
 
 	timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
 	timeptr += entryno;
-
 	*timeptr = committs;
+
+	dataptr = (CommitExtraData *) ((char *) timeptr + sizeof(TimestampTz));
+	*dataptr = extra;
 }
 
 /*
  * Interrogate the commit timestamp of a transaction.
  */
-TimestampTz
-TransactionIdGetCommitTimestamp(TransactionId xid)
+static void
+TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
+							 CommitExtraData *data)
 {
 	int			pageno = TransactionIdToCTsPage(xid);
 	int			entryno = TransactionIdToCTsEntry(xid);
 	int			slotno;
 	TimestampTz *timeptr;
-	TimestampTz	committs;
+	CommitExtraData	   *dataptr;
 
 	if (!commit_ts_enabled)
-		return 0;
+	{
+		if (ts)
+			*ts = InvalidTransactionId;
+		if (data)
+			*data = (CommitExtraData) 0;
+		return;
+	}
 
 	/*
 	 * FIXME -- we need a more useful lower bound here.  For now, we use
@@ -203,18 +225,49 @@ TransactionIdGetCommitTimestamp(TransactionId xid)
 	 */
 	if (!TransactionIdIsValid(RecentGlobalXmin) ||
 		TransactionIdPrecedes(xid, RecentGlobalXmin))
-		return 0;
+	{
+		if (ts)
+			*ts = InvalidTransactionId;
+		if (data)
+			*data = (CommitExtraData) 0;
+		return;
+	}
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
 
 	slotno = SimpleLruReadPage_ReadOnly(CommitTsCtl, pageno, xid);
 	timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
 	timeptr += entryno;
-	committs = *timeptr;
+	if (ts)
+		*ts = *timeptr;
+
+	if (data)
+	{
+		dataptr = (CommitExtraData *) ((char *) timeptr + sizeof(TimestampTz));
+		*data = *dataptr;
+	}
 
 	LWLockRelease(CommitTsControlLock);
+}
+
+TimestampTz
+TransactionIdGetCommitTimestamp(TransactionId xid)
+{
+	TimestampTz		committs;
+
+	TransactionIdGetCommitTsData(xid, &committs, NULL);
 
 	return committs;
+}
+
+CommitExtraData
+TransactionIdGetCommitData(TransactionId xid)
+{
+	CommitExtraData		data;
+
+	TransactionIdGetCommitTsData(xid, NULL, &data);
+
+	return data;
 }
 
 /*
@@ -477,16 +530,18 @@ WriteTruncateXlogRec(int pageno)
  */
 static void
 WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
-						 TransactionId *subxids, TimestampTz timestamp)
+						 TransactionId *subxids, TimestampTz timestamp,
+						 CommitExtraData data)
 {
 	XLogRecData	rdata;
 	XLogRecPtr	recptr;
 	xl_committs_set	record;
 
+	record.timestamp = timestamp;
+	record.data = data;
 	record.mainxid = mainxid;
 	record.nsubxids = nsubxids;
 	memcpy(record.subxids, subxids, sizeof(TransactionId) * nsubxids);
-	record.timestamp = timestamp;
 
 	rdata.data = (char *) &record;
 	rdata.len = offsetof(xl_committs_set, subxids) +
@@ -543,7 +598,7 @@ committs_redo(XLogRecPtr lsn, XLogRecord *record)
 
 		TransactionTreeSetCommitTimestamp(setts->mainxid, setts->nsubxids,
 										  setts->subxids, setts->timestamp,
-										  false);
+										  setts->data, false);
 	}
 	else
 		elog(PANIC, "committs_redo: unknown op code %u", info);

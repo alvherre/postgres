@@ -17,12 +17,15 @@
 
 extern bool	commit_ts_enabled;
 
+typedef uint32 CommitExtraData;
 
 extern void TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 								  TransactionId *subxids,
 								  TimestampTz timestamp,
+								  CommitExtraData data,
 								  bool do_xlog);
 extern TimestampTz TransactionIdGetCommitTimestamp(TransactionId xid);
+extern CommitExtraData TransactionIdGetCommitData(TransactionId xid);
 
 extern Size CommitTsShmemBuffers(void);
 extern Size CommitTsShmemSize(void);
@@ -42,6 +45,7 @@ extern void TruncateCommitTs(TransactionId oldestXact);
 typedef struct xl_committs_set
 {
 	TimestampTz		timestamp;
+	CommitExtraData	data;
 	TransactionId	mainxid;
 	int				nsubxids;
 	TransactionId	subxids[FLEXIBLE_ARRAY_MEMBER];
