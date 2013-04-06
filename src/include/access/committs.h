@@ -20,7 +20,8 @@ extern bool	commit_ts_enabled;
 
 extern void TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 								  TransactionId *subxids,
-								  TimestampTz timestamp);
+								  TimestampTz timestamp,
+								  bool do_xlog);
 extern TimestampTz TransactionIdGetCommitTimestamp(TransactionId xid);
 
 extern Size CommitTsShmemBuffers(void);
@@ -36,6 +37,16 @@ extern void TruncateCommitTs(TransactionId oldestXact);
 /* XLOG stuff */
 #define COMMITTS_ZEROPAGE		0x00
 #define COMMITTS_TRUNCATE		0x10
+#define COMMITTS_SETTS			0x20
+
+typedef struct xl_committs_set
+{
+	TimestampTz		timestamp;
+	TransactionId	mainxid;
+	int				nsubxids;
+	TransactionId	subxids[FLEXIBLE_ARRAY_MEMBER];
+} xl_committs_set;
+
 
 extern void committs_redo(XLogRecPtr lsn, XLogRecord *record);
 extern void committs_desc(StringInfo buf, uint8 xl_info, char *rec);

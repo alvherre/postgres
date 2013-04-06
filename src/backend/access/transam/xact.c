@@ -1119,7 +1119,7 @@ RecordTransactionCommit(void)
 	}
 
 	TransactionTreeSetCommitTimestamp(xid, nchildren, children,
-									  xactStopTimestamp);
+									  xactStopTimestamp, false);
 
 	/*
 	 * Check if we want to commit asynchronously.  We can allow the XLOG flush
@@ -4597,7 +4597,7 @@ xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn,
 
 	/* Set the transaction commit time */
 	TransactionTreeSetCommitTimestamp(xid, nsubxacts, sub_xids,
-									  commit_time);
+									  commit_time, false);
 
 	if (standbyState == STANDBY_DISABLED)
 	{

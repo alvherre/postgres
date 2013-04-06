@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #include "access/committs.h"
+#include "utils/timestamp.h"
 
 
 void
@@ -35,6 +36,17 @@ committs_desc(StringInfo buf, uint8 xl_info, char *rec)
 
 		memcpy(&pageno, rec, sizeof(int));
 		appendStringInfo(buf, "truncate before: %d", pageno);
+	}
+	else if (info == COMMITTS_SETTS)
+	{
+		xl_committs_set *xlrec = (xl_committs_set *) rec;
+		int		i;
+
+		appendStringInfo(buf, "set committs %s for: %u",
+						 timestamptz_to_str(xlrec->timestamp),
+						 xlrec->mainxid);
+		for (i = 0; i < xlrec->nsubxids; i++)
+			appendStringInfo(buf, ", %u", xlrec->subxids[i]);
 	}
 	else
 		appendStringInfo(buf, "UNKNOWN");

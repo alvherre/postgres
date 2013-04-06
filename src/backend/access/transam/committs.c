@@ -7,10 +7,13 @@
  * for each transaction.
  *
  * XLOG interactions: this module generates an XLOG record whenever a new
- * CLOG page is initialized to zeroes.	Other writes of CommitTS come from
- * recording of transaction commit in xact.c, which generates its own XLOG
- * records for these events and will re-perform the status update on redo;
- * so we need make no additional XLOG entry here.
+ * CommitTs page is initialized to zeroes.  Also, one XLOG record is
+ * generated for setting of values when the caller requests it; this allows
+ * us to support values coming from places other than transaction commit.
+ * Other writes of CommitTS come from recording of transaction commit in
+ * xact.c, which generates its own XLOG records for these events and will
+ * re-perform the status update on redo; so we need make no additional XLOG
+ * entry here.
  *
  * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -69,6 +72,8 @@ static int	ZeroCommitTsPage(int pageno, bool writeXlog);
 static bool CommitTsPagePrecedes(int page1, int page2);
 static void WriteZeroPageXlogRec(int pageno);
 static void WriteTruncateXlogRec(int pageno);
+static void WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
+						 TransactionId *subxids, TimestampTz timestamp);
 
 
 /*
@@ -84,13 +89,21 @@ static void WriteTruncateXlogRec(int pageno);
  */
 void
 TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
-								  TransactionId *subxids, TimestampTz timestamp)
+								  TransactionId *subxids, TimestampTz timestamp,
+								  bool do_xlog)
 {
-	int			i = 0;
-	TransactionId headxid = xid;
+	int			i;
+	TransactionId headxid;
 
 	if (!commit_ts_enabled)
 		return;
+
+	/*
+	 * Comply with the WAL-before-data rule: if caller specified it wants
+	 * this value to be recorded in WAL, do so now.
+	 */
+	if (do_xlog)
+		WriteSetTimestampXlogRec(xid, nsubxids, subxids, timestamp);
 
 	/*
 	 * We split the xids to set the timestamp to in groups belonging to the
@@ -99,7 +112,7 @@ TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 	 * first subxid not on the previous page as head.  This way, we only have
 	 * to lock/modify each SLRU page once.
 	 */
-	for (;;)
+	for (i = 0, headxid = xid;;)
 	{
 		int			pageno = TransactionIdToCTsPage(headxid);
 		int			j;
@@ -460,6 +473,31 @@ WriteTruncateXlogRec(int pageno)
 }
 
 /*
+ * Write a SETTS xlog record
+ */
+static void
+WriteSetTimestampXlogRec(TransactionId mainxid, int nsubxids,
+						 TransactionId *subxids, TimestampTz timestamp)
+{
+	XLogRecData	rdata;
+	XLogRecPtr	recptr;
+	xl_committs_set	record;
+
+	record.mainxid = mainxid;
+	record.nsubxids = nsubxids;
+	memcpy(record.subxids, subxids, sizeof(TransactionId) * nsubxids);
+	record.timestamp = timestamp;
+
+	rdata.data = (char *) &record;
+	rdata.len = offsetof(xl_committs_set, subxids) +
+		nsubxids * sizeof(TransactionId);
+	rdata.buffer = InvalidBuffer;
+	rdata.next = NULL;
+	recptr = XLogInsert(RM_COMMITTS_ID, COMMITTS_SETTS, &rdata);
+}
+
+
+/*
  * CommitTS resource manager's routines
  */
 void
@@ -498,6 +536,14 @@ committs_redo(XLogRecPtr lsn, XLogRecord *record)
 		CommitTsCtl->shared->latest_page_number = pageno;
 
 		SimpleLruTruncate(CommitTsCtl, pageno);
+	}
+	else if (info == COMMITTS_SETTS)
+	{
+		xl_committs_set *setts = (xl_committs_set *) XLogRecGetData(record);
+
+		TransactionTreeSetCommitTimestamp(setts->mainxid, setts->nsubxids,
+										  setts->subxids, setts->timestamp,
+										  false);
 	}
 	else
 		elog(PANIC, "committs_redo: unknown op code %u", info);
