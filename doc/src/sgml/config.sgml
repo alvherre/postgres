@@ -2272,10 +2272,10 @@ include 'filename'
       </listitem>
      </varlistentry>
 
-     <varlistentry id="guc-enable-commit-timestamp" xreflabel="enable_commit_timestamp">
-      <term><varname>enable_commit_timestamp</varname> (<type>bool</type>)</term>
+     <varlistentry id="guc-track-commit-timestamp" xreflabel="track_commit_timestamp">
+      <term><varname>track_commit_timestamp</varname> (<type>bool</type>)</term>
       <indexterm>
-       <primary><varname>enable_commit_timestamp</> configuration parameter</primary>
+       <primary><varname>track_commit_timestamp</> configuration parameter</primary>
       </indexterm>
       <listitem>
        <para>
