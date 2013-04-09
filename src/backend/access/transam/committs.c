@@ -207,6 +207,7 @@ TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 	int			slotno;
 	TimestampTz *timeptr;
 	CommitExtraData	   *dataptr;
+	TransactionId oldestCommitTs;
 
 	if (!commit_ts_enabled)
 	{
@@ -217,14 +218,12 @@ TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 		return;
 	}
 
-	/*
-	 * FIXME -- we need a more useful lower bound here.  For now, we use
-	 * RecentGlobalXmin which is ensured to be sane if set.  (RecentXmin might
-	 * be set to FirstNormalTransactionId if no snapshot has been taken by this
-	 * session, so avoid that).
-	 */
-	if (!TransactionIdIsValid(RecentGlobalXmin) ||
-		TransactionIdPrecedes(xid, RecentGlobalXmin))
+	LWLockAcquire(CommitTsControlLock, LW_SHARED);
+	oldestCommitTs = ShmemVariableCache->oldestCommitTs;
+	LWLockRelease(CommitTsControlLock);
+
+	if (!TransactionIdIsValid(oldestCommitTs) ||
+		TransactionIdPrecedes(xid, oldestCommitTs))
 	{
 		if (ts)
 			*ts = InvalidTransactionId;
@@ -315,25 +314,19 @@ CommitTsShmemInit(void)
 }
 
 /*
- * This func must be called ONCE on system install.  It creates the initial
- * CommitTs segment.  (The CommitTs directory is assumed to have been created
- * by initdb, and CommitTsShmemInit must have been called already.)
+ * This func must be called ONCE on system install.
+ *
+ * (The CommitTs directory is assumed to have been created by initdb, and
+ * CommitTsShmemInit must have been called already.)
  */
 void
 BootStrapCommitTs(void)
 {
-	int			slotno;
-
-	LWLockAcquire(CommitTsControlLock, LW_EXCLUSIVE);
-
-	/* Create and zero the first page of the commit log */
-	slotno = ZeroCommitTsPage(0, false);
-
-	/* Make sure it's written out */
-	SimpleLruWritePage(CommitTsCtl, slotno);
-	Assert(!CommitTsCtl->shared->page_dirty[slotno]);
-
-	LWLockRelease(CommitTsControlLock);
+	/*
+	 * Nothing to do here at present, unlike most other SLRU modules; segments
+	 * are created when the server is started with this module enabled.
+	 * See StartupCommitTs.
+	 */
 }
 
 /*
@@ -381,13 +374,47 @@ StartupCommitTs(void)
 	 */
 	CommitTsCtl->shared->latest_page_number = pageno;
 
-	LWLockRelease(CommitTsControlLock);
-
+	/*
+	 * If this module is not currently enabled, make sure we don't hand back
+	 * possibly-invalid data; also remove segments of old data.
+	 */
 	if (!commit_ts_enabled)
-		return;
+	{
+		ShmemVariableCache->oldestCommitTs = InvalidTransactionId;
+		LWLockRelease(CommitTsControlLock);
 
+		TruncateCommitTs(ReadNewTransactionId());
+
+		return;
+	}
+
+	/*
+	 * If CommitTs is enabled, but it wasn't in the previous server run, we
+	 * need to set the oldest value to the next Xid; that way, we will not try
+	 * to read data that might not have been set.
+	 *
+	 * XXX does this have a problem if a server is started with commitTs
+	 * enabled, then started with commitTs disabled, then restarted with it
+	 * enabled again?  It doesn't look like it does, because there should be a
+	 * checkpoint that sets the value to InvalidTransactionId at end of
+	 * recovery; and so any chance of injecting new transactions without
+	 * CommitTs values would occur after the oldestCommitTs has been set to
+	 * Invalid temporarily.
+	 */
+	if (ShmemVariableCache->oldestCommitTs == InvalidTransactionId)
+		ShmemVariableCache->oldestCommitTs = ReadNewTransactionId();
+
+	/* Finally, create the current segment file, if necessary */
 	if (!SimpleLruDoesPhysicalPageExist(ctl, pageno))
-		SimpleLruZeroPage(ctl, pageno);
+	{
+		int		slotno;
+
+		slotno = ZeroCommitTsPage(pageno, false);
+		SimpleLruWritePage(CommitTsCtl, slotno);
+		Assert(!CommitTsCtl->shared->page_dirty[slotno]);
+	}
+
+	LWLockRelease(CommitTsControlLock);
 }
 
 /*
@@ -423,6 +450,10 @@ void
 ExtendCommitTs(TransactionId newestXact)
 {
 	int			pageno;
+
+	/* nothing to do if module not enabled */
+	if (!commit_ts_enabled)
+		return;
 
 	/*
 	 * No work except at first XID of a page.  But beware: just after
@@ -468,6 +499,17 @@ TruncateCommitTs(TransactionId oldestXact)
 
 	/* Now we can remove the old CommitTs segment(s) */
 	SimpleLruTruncate(CommitTsCtl, cutoffPage);
+}
+
+/*
+ * Set the earliest value for which commit TS can be consulted.
+ */
+void
+SetCommitTsLimit(TransactionId oldestXact)
+{
+	LWLockAcquire(CommitTsControlLock, LW_EXCLUSIVE);
+	ShmemVariableCache->oldestCommitTs = oldestXact;
+	LWLockRelease(CommitTsControlLock);
 }
 
 /*

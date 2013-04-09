@@ -36,6 +36,7 @@ extern void ShutdownCommitTs(void);
 extern void CheckPointCommitTs(void);
 extern void ExtendCommitTs(TransactionId newestXact);
 extern void TruncateCommitTs(TransactionId oldestXact);
+extern void SetCommitTsLimit(TransactionId oldestXact);
 
 /* XLOG stuff */
 #define COMMITTS_ZEROPAGE		0x00
