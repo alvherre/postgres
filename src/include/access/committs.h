@@ -26,6 +26,8 @@ extern void TransactionTreeSetCommitTimestamp(TransactionId xid, int nsubxids,
 								  bool do_xlog);
 extern TimestampTz TransactionIdGetCommitTimestamp(TransactionId xid);
 extern CommitExtraData TransactionIdGetCommitData(TransactionId xid);
+extern void TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
+							 CommitExtraData *data);
 
 extern Size CommitTsShmemBuffers(void);
 extern Size CommitTsShmemSize(void);

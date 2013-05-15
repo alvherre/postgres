@@ -25,8 +25,10 @@
 #include "postgres.h"
 
 #include "access/committs.h"
+#include "access/htup_details.h"
 #include "access/slru.h"
 #include "access/transam.h"
+#include "catalog/pg_type.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
@@ -198,7 +200,7 @@ TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs,
 /*
  * Interrogate the commit timestamp of a transaction.
  */
-static void
+void
 TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 							 CommitExtraData *data)
 {
@@ -282,6 +284,55 @@ pg_get_transaction_committime(PG_FUNCTION_ARGS)
 	committs = TransactionIdGetCommitTimestamp(xid);
 
 	PG_RETURN_TIMESTAMPTZ(committs);
+}
+
+PG_FUNCTION_INFO_V1(pg_get_transaction_extradata);
+Datum
+pg_get_transaction_extradata(PG_FUNCTION_ARGS)
+{
+	TransactionId	xid = PG_GETARG_UINT32(0);
+	CommitExtraData	data;
+
+	data = TransactionIdGetCommitData(xid);
+
+	PG_RETURN_INT32(data);
+}
+
+PG_FUNCTION_INFO_V1(pg_get_transaction_committime_data);
+Datum
+pg_get_transaction_committime_data(PG_FUNCTION_ARGS)
+{
+	TransactionId	xid = PG_GETARG_UINT32(0);
+	TimestampTz		committs;
+	CommitExtraData	data;
+	Datum       values[2];
+	bool        nulls[2];
+	TupleDesc   tupdesc;
+	HeapTuple	htup;
+
+	/*
+	 * Construct a tuple descriptor for the result row.  This must match this
+	 * function's pg_proc entry!
+	 */
+	tupdesc = CreateTemplateTupleDesc(2, false);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 1, "timestamp",
+					   TIMESTAMPTZOID, -1, 0);
+	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "extra",
+					   INT4OID, -1, 0);
+	tupdesc = BlessTupleDesc(tupdesc);
+
+	/* and construct a tuple with our data */
+	TransactionIdGetCommitTsData(xid, &committs, &data);
+
+	values[0] = TimestampTzGetDatum(committs);
+	nulls[0] = false;
+
+	values[1] = Int32GetDatum(data);
+	nulls[1] = false;
+
+	htup = heap_form_tuple(tupdesc, values, nulls);
+
+	PG_RETURN_DATUM(HeapTupleGetDatum(htup));
 }
 
 /*
