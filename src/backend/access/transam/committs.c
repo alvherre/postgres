@@ -165,7 +165,7 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 
 	slotno = SimpleLruReadPage(CommitTsCtl, pageno, true, xid);
 
-	TransactionIdSetCommitTs(xid, committs, slotno, extra);
+	TransactionIdSetCommitTs(xid, committs, extra, slotno);
 	for (i = 0; i < nsubxids; i++)
 		TransactionIdSetCommitTs(subxids[i], committs, extra, slotno);
 
