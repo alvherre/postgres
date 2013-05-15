@@ -15,7 +15,7 @@
 #include "datatype/timestamp.h"
 
 
-extern bool	commit_ts_enabled;
+extern PGDLLIMPORT bool	commit_ts_enabled;
 
 typedef uint32 CommitExtraData;
 
