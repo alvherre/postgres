@@ -1,0 +1,123 @@
+* record_cmp and record_eq must handle columns in correct order
+
+* SQL functions are not working correctly.
+  Fixing probably requires saving state about logically ordered columns, 
+  either in the TupleTableSlot or Tuplestore state.  Probably TTS is the one 
+  that makes more sense to modify ...  the other one doesn't have an 
+  associated tupledesc, I think.
+
+* fix COPY [:COMPLETED:]
+  Seems complete now.
+
+  Old notes:
+  Partially done, but COPY FROM fails; needs heap_form_tuple signature change 
+  to fix.  This has implications on backwards compatibilty of that function; 
+  probably a good idea to ask hackers about it.  What about default values?  
+  Apparently cstate contains various arrays that are sorted 
+  in the wrong order.
+  After playing with this for a while, I think the problem with COPY is that
+  it's mixing usage of attnums in various ways.  The in_functions, typioparams, 
+  out_functions arrays need to be sorted in canonical order; whereas 
+  attnumlist is sorted in logical order.  The problem with this whole 
+  arrangement is that the current code iterates on "attrs" indexes, which is 
+  fine for the arrays, but then it uses this index to check membership in the 
+  attnumlist, which is wrong.  We probably need another int here to be 
+  compared to attnumlist.
+  The "defmap" thingy is probably completely broken now.
+
+* fix heaptuple.c
+  this file contains various routines that might need fixing; start from 
+  nocachegetattr down.
+
+** compatibility functions (heap_deformtuple etc) should probably always work 
+  in logical order, because old code is not going to cope with 
+  differently-sorted attributes.  Maybe we should rather remove those 
+  functions, because we're going to break the API anyway?  Ask -hackers
+
+* Dropped columns
+Need to test the various modified functionalities with dropped columns in the 
+middle.
+* ExecEvalVar probably needs fixes
+** as ExecEvalWholeRowSlow
+** what about tupledesc_match?
+   this one should probably match in logical order.
+
+* Projections
+    I changed tlist_matches_tupdesc to consider logical column ordering.  This 
+    makes the "quux" test from test.sql work:
+    select * from quux where (a,c) in ( select a,c from quux );
+    However, this doesn't seem good.  Moreover I think this means I need to
+    make SQL functions use a projection step; in fact projection steps are 
+    going to be needed in all places that logical column order is going to 
+    pass through ExecProcNode, I think.  Find out what this means and how to 
+    implement it.  Does this have anything to do with the setrefs.c thing that 
+    Tom mentioned?
+
+* tlist_matches_tupdesc
+
+* ExecBuildProjectionInfo ?
+
+* archivos en que aparece el patron ->attrs
+contrib/dblink/dblink.c
+contrib/file_fdw/file_fdw.c
+contrib/hstore/hstore_io.c
+contrib/tablefunc/tablefunc.c
+src/backend/access/common/heaptuple.c
+src/backend/access/common/indextuple.c
+src/backend/access/common/printtup.c
+src/backend/access/common/tupconvert.c
+src/backend/access/common/tupdesc.c
+src/backend/access/gin/ginbulk.c
+src/backend/access/gin/ginget.c
+src/backend/access/gin/ginutil.c
+src/backend/access/gist/gistbuild.c
+src/backend/access/heap/heapam.c
+src/backend/access/heap/tuptoaster.c
+src/backend/access/spgist/spgutils.c
+src/backend/bootstrap/bootstrap.c
+src/backend/catalog/heap.c
+src/backend/catalog/index.c
+src/backend/catalog/toasting.c
+src/backend/commands/analyze.c
+src/backend/commands/cluster.c
+src/backend/commands/copy.c
+src/backend/commands/tablecmds.c
+src/backend/commands/typecmds.c
+src/backend/commands/view.c         maybe change
+src/backend/executor/execJunk.c     maybe useful to tweak
+src/backend/executor/execMain.c     ExecBuildSlotValueDescription, OpenIntoRel needs fix
+src/backend/executor/execQual.c     ExecEvalVar ??  ExecEvalWholeRowSlow, tupledesc_match needs fix
+src/backend/executor/execScan.c     tlist_matches_tupdesc
+src/backend/executor/execTuples.c   TupleDescGetAttInMetadata and BuildTupleFromCStrings
+src/backend/executor/execUtils.c    ExecBuildProjectionInfo !!!
+src/backend/executor/nodeAgg.c
+src/backend/executor/nodeModifyTable.c
+src/backend/executor/nodeSubplan.c
+src/backend/executor/spi.c
+src/backend/executor/tstoreReceiver.c
+src/backend/optimizer/prep/preptlist.c
+src/backend/optimizer/prep/prepunion.c
+src/backend/optimizer/util/clauses.c
+src/backend/optimizer/util/plancat.c
+src/backend/parser/parse_relation.c
+src/backend/parser/parse_target.c
+src/backend/parser/parse_utilcmd.c
+src/backend/rewrite/rewriteDefine.c
+src/backend/rewrite/rewriteHandler.c
+src/backend/utils/adt/rowtypes.c
+src/backend/utils/adt/ruleutils.c
+src/backend/utils/adt/tid.c
+src/backend/utils/adt/xml.c
+src/backend/utils/cache/catcache.c
+src/backend/utils/cache/relcache.c
+src/backend/utils/cache/typcache.c
+src/backend/utils/fmgr/funcapi.c
+src/include/access/htup.h
+src/include/access/itup.h
+src/pl/plperl/plperl.c
+src/pl/plpgsql/src/pl_comp.c
+src/pl/plpgsql/src/pl_exec.c
+src/pl/plpython/plpy_exec.c
+src/pl/plpython/plpy_typeio.c
+src/pl/tcl/pltcl.c
+
