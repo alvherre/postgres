@@ -49,8 +49,17 @@
  */
 
 /* We need 8+4 bytes per xact */
+typedef struct CommitTimestampEntry
+{
+	TimestampTz		time;
+	CommitExtraData	extra;
+} CommitTimestampEntry;
+
+#define SizeOfCommitTimestampEntry (offsetof(CommitTimestampEntry, extra) + \
+									sizeof(CommitExtraData))
+
 #define COMMITTS_XACTS_PER_PAGE \
-	(BLCKSZ / (sizeof(TimestampTz) + sizeof(CommitExtraData)))
+	(BLCKSZ / SizeOfCommitTimestampEntry)
 
 #define TransactionIdToCTsPage(xid)	\
 	((xid) / (TransactionId) COMMITTS_XACTS_PER_PAGE)
@@ -186,15 +195,14 @@ TransactionIdSetCommitTs(TransactionId xid, TimestampTz committs,
 						 CommitExtraData extra, int slotno)
 {
 	int			entryno = TransactionIdToCTsEntry(xid);
-	TimestampTz *timeptr;
-	CommitExtraData	*dataptr;
+	CommitTimestampEntry *entry;
 
-	timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
-	timeptr += entryno;
-	*timeptr = committs;
+	entry = (CommitTimestampEntry *)
+		(CommitTsCtl->shared->page_buffer[slotno] +
+		 SizeOfCommitTimestampEntry * entryno);
 
-	dataptr = (CommitExtraData *) ((char *) timeptr + sizeof(TimestampTz));
-	*dataptr = extra;
+	entry->time = committs;
+	entry->extra = extra;
 }
 
 /*
@@ -207,8 +215,7 @@ TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 	int			pageno = TransactionIdToCTsPage(xid);
 	int			entryno = TransactionIdToCTsEntry(xid);
 	int			slotno;
-	TimestampTz *timeptr;
-	CommitExtraData	   *dataptr;
+	CommitTimestampEntry *entry;
 	TransactionId oldestCommitTs;
 
 	if (!commit_ts_enabled)
@@ -235,18 +242,16 @@ TransactionIdGetCommitTsData(TransactionId xid, TimestampTz *ts,
 	}
 
 	/* lock is acquired by SimpleLruReadPage_ReadOnly */
-
 	slotno = SimpleLruReadPage_ReadOnly(CommitTsCtl, pageno, xid);
-	timeptr = (TimestampTz *) CommitTsCtl->shared->page_buffer[slotno];
-	timeptr += entryno;
+	entry = (CommitTimestampEntry *)
+		(CommitTsCtl->shared->page_buffer[slotno] +
+		 SizeOfCommitTimestampEntry * entryno);
+
 	if (ts)
-		*ts = *timeptr;
+		*ts = entry->time;
 
 	if (data)
-	{
-		dataptr = (CommitExtraData *) ((char *) timeptr + sizeof(TimestampTz));
-		*data = *dataptr;
-	}
+		*data = entry->extra;
 
 	LWLockRelease(CommitTsControlLock);
 }
