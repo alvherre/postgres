@@ -2419,6 +2419,7 @@ xl_heap_clean
 xl_heap_cleanup_info
 xl_heap_delete
 xl_heap_freeze
+xl_heap_freeze_tuple
 xl_heap_header
 xl_heap_inplace
 xl_heap_insert

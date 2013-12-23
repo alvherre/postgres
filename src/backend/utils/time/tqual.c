@@ -688,7 +688,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 			if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))
 			{
-				TransactionId	xmax;
+				TransactionId xmax;
 
 				xmax = HeapTupleHeaderGetRawXmax(tuple);
 
@@ -701,20 +701,20 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 				if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 				{
-					if (MultiXactHasRunningRemoteMembers(xmax))
+					if (MultiXactIdIsRunning(xmax))
 						return HeapTupleBeingUpdated;
 					else
 						return HeapTupleMayBeUpdated;
 				}
 
-				/* if locker is gone, all's well */
+				/*
+				 * If the locker is gone, then there is nothing of interest
+				 * left in this Xmax; otherwise, report the tuple as
+				 * locked/updated.
+				 */
 				if (!TransactionIdIsInProgress(xmax))
 					return HeapTupleMayBeUpdated;
-
-				if (!TransactionIdIsCurrentTransactionId(xmax))
-					return HeapTupleBeingUpdated;
-				else
-					return HeapTupleMayBeUpdated;
+				return HeapTupleBeingUpdated;
 			}
 
 			if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
@@ -726,10 +726,10 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 				/* not LOCKED_ONLY, so it has to have an xmax */
 				Assert(TransactionIdIsValid(xmax));
 
-				/* updating subtransaction must have aborted */
+				/* deleting subtransaction must have aborted */
 				if (!TransactionIdIsCurrentTransactionId(xmax))
 				{
-					if (MultiXactHasRunningRemoteMembers(HeapTupleHeaderGetRawXmax(tuple)))
+					if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
 						return HeapTupleBeingUpdated;
 					return HeapTupleMayBeUpdated;
 				}
@@ -846,7 +846,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 	if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmax(tuple)))
 	{
 		if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask))
-			return HeapTupleMayBeUpdated;
+			return HeapTupleBeingUpdated;
 		if (HeapTupleHeaderGetCmax(tuple) >= curcid)
 			return HeapTupleSelfUpdated;		/* updated after scan started */
 		else
