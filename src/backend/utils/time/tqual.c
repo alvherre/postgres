@@ -701,7 +701,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 
 				if (tuple->t_infomask & HEAP_XMAX_IS_MULTI)
 				{
-					if (MultiXactIdIsRunning(xmax))
+					if (MultiXactIdIsRunning(xmax, true))
 						return HeapTupleBeingUpdated;
 					else
 						return HeapTupleMayBeUpdated;
@@ -729,7 +729,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 				/* deleting subtransaction must have aborted */
 				if (!TransactionIdIsCurrentTransactionId(xmax))
 				{
-					if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+					if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple), false))
 						return HeapTupleBeingUpdated;
 					return HeapTupleMayBeUpdated;
 				}
@@ -795,7 +795,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 			 */
 			if ((tuple->t_infomask & (HEAP_XMAX_EXCL_LOCK |
 									  HEAP_XMAX_KEYSHR_LOCK)) &&
-				MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+				MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple), true))
 				return HeapTupleBeingUpdated;
 
 			SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
@@ -826,7 +826,7 @@ HeapTupleSatisfiesUpdate(HeapTupleHeader tuple, CommandId curcid,
 		 * what about the other members?
 		 */
 
-		if (!MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+		if (!MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple), false))
 		{
 			/*
 			 * There's no member, even just a locker, alive anymore, so we can
@@ -1401,7 +1401,8 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 				 */
 				if ((tuple->t_infomask & (HEAP_XMAX_EXCL_LOCK |
 										  HEAP_XMAX_KEYSHR_LOCK)) &&
-					MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+					MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple),
+										 true))
 					return HEAPTUPLE_LIVE;
 				SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
 
@@ -1428,7 +1429,7 @@ HeapTupleSatisfiesVacuum(HeapTupleHeader tuple, TransactionId OldestXmin,
 	{
 		TransactionId xmax;
 
-		if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple)))
+		if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(tuple), false))
 		{
 			/* already checked above */
 			Assert(!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask));
