@@ -105,11 +105,6 @@ brininsert(PG_FUNCTION_ARGS)
 		BrinMemTuple *dtup;
 		BlockNumber heapBlk;
 		int			keyno;
-#ifdef USE_ASSERT_CHECKING
-		BrinTuple  *tmptup;
-		BrinMemTuple *tmpdtup;
-		Size 		tmpsiz;
-#endif
 
 		CHECK_FOR_INTERRUPTS();
 
@@ -137,45 +132,6 @@ brininsert(PG_FUNCTION_ARGS)
 
 		dtup = brin_deform_tuple(bdesc, brtup);
 
-#ifdef USE_ASSERT_CHECKING
-		{
-			/*
-			 * When assertions are enabled, we use this as an opportunity to
-			 * test the "union" method, which would otherwise be used very
-			 * rarely: first create a placeholder tuple, and addValue the
-			 * value we just got into it.  Then union the existing index tuple
-			 * with the updated placeholder tuple.  The tuple resulting from
-			 * that union should be identical to the one resulting from the
-			 * regular operation (straight addValue) below.
-			 *
-			 * Here we create the tuple to compare with; the actual comparison
-			 * is below.
-			 */
-			tmptup = brin_form_placeholder_tuple(bdesc, heapBlk, &tmpsiz);
-			tmpdtup = brin_deform_tuple(bdesc, tmptup);
-			for (keyno = 0; keyno < bdesc->bd_tupdesc->natts; keyno++)
-			{
-				BrinValues *bval;
-				FmgrInfo   *addValue;
-
-				bval = &tmpdtup->bt_columns[keyno];
-				addValue = index_getprocinfo(idxRel, keyno + 1,
-											 BRIN_PROCNUM_ADDVALUE);
-				FunctionCall4Coll(addValue,
-								  idxRel->rd_indcollation[keyno],
-								  PointerGetDatum(bdesc),
-								  PointerGetDatum(bval),
-								  values[keyno],
-								  nulls[keyno]);
-			}
-
-			union_tuples(bdesc, tmpdtup, brtup);
-
-			tmpdtup->bt_placeholder = dtup->bt_placeholder;
-			tmptup = brin_form_tuple(bdesc, heapBlk, tmpdtup, &tmpsiz);
-		}
-#endif
-
 		/*
 		 * Compare the key values of the new tuple to the stored index values;
 		 * our deformed tuple will get updated if the new tuple doesn't fit
@@ -201,20 +157,6 @@ brininsert(PG_FUNCTION_ARGS)
 			/* if that returned true, we need to insert the updated tuple */
 			need_insert |= DatumGetBool(result);
 		}
-
-#ifdef USE_ASSERT_CHECKING
-		{
-			/*
-			 * Now we can compare the tuple produced by the union function
-			 * with the one from plain addValue.
-			 */
-			BrinTuple  *cmptup;
-			Size		cmpsz;
-
-			cmptup = brin_form_tuple(bdesc, heapBlk, dtup, &cmpsz);
-			Assert(brin_tuples_equal(tmptup, tmpsiz, cmptup, cmpsz));
-		}
-#endif
 
 		if (!need_insert)
 		{
