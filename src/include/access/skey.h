@@ -41,6 +41,40 @@ typedef uint16 StrategyNumber;
 
 
 /*
+ * Strategy numbers for opclasses that want to implement the old RTREE behavior.
+ * Operator strategy numbers used in the GiST, SP-GiST, GIN, BRIN  opclasses.
+ * New numbers are chosen to match up operator names with existing usages.
+ */
+#define RTLeftStrategyNumber			1		/* for << */
+#define RTOverLeftStrategyNumber		2		/* for &< */
+#define RTOverlapStrategyNumber			3		/* for && */
+#define RTOverRightStrategyNumber		4		/* for &> */
+#define RTRightStrategyNumber			5		/* for >> */
+#define RTSameStrategyNumber			6		/* for ~= */
+#define RTContainsStrategyNumber		7		/* for @> */
+#define RTContainedByStrategyNumber		8		/* for <@ */
+#define RTOverBelowStrategyNumber		9		/* for &<| */
+#define RTBelowStrategyNumber			10		/* for <<| */
+#define RTAboveStrategyNumber			11		/* for |>> */
+#define RTOverAboveStrategyNumber		12		/* for |&> */
+#define RTOldContainsStrategyNumber		13		/* for old spelling of @> */
+#define RTOldContainedByStrategyNumber	14		/* for old spelling of <@ */
+#define RTKNNSearchStrategyNumber		15
+#define RTContainsElemStrategyNumber	16		/* for range types @> elem */
+#define RTAdjacentStrategyNumber		17		/* for -|- */
+#define RTEqualStrategyNumber			18		/* for = */
+#define RTNotEqualStrategyNumber		19		/* for != */
+#define RTLessStrategyNumber			20		/* for < */
+#define RTLessEqualStrategyNumber		21		/* for <= */
+#define RTGreaterStrategyNumber			22		/* for > */
+#define RTGreaterEqualStrategyNumber	23		/* for >= */
+#define RTContainsNotEqualStrategyNumber	24	/* for inet >> */
+#define RTContainedByNotEqualStrategyNumber	26	/* for inet << */
+
+#define RTMaxStrategyNumber				26
+
+
+/*
  * A ScanKey represents the application of a comparison operator between
  * a table or index column and a constant.  When it's part of an array of
  * ScanKeys, the comparison conditions are implicitly ANDed.  The index
