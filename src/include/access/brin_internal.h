@@ -92,4 +92,10 @@ extern Datum brin_minmax_add_value(PG_FUNCTION_ARGS);
 extern Datum brin_minmax_consistent(PG_FUNCTION_ARGS);
 extern Datum brin_minmax_union(PG_FUNCTION_ARGS);
 
+/* brin_inclusion.c */
+extern Datum brin_inclusion_opcinfo(PG_FUNCTION_ARGS);
+extern Datum brin_inclusion_add_value(PG_FUNCTION_ARGS);
+extern Datum brin_inclusion_consistent(PG_FUNCTION_ARGS);
+extern Datum brin_inclusion_union(PG_FUNCTION_ARGS);
+
 #endif   /* BRIN_INTERNAL_H */
