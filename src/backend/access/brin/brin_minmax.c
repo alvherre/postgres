@@ -303,8 +303,8 @@ brin_minmax_union(PG_FUNCTION_ARGS)
 /*
  * Cache and return the procedure for the given strategy.
  *
- * This function has the same structure with inclusion_get_strategy_procinfo()
- * on brin_inclusion.c.
+ * Note: this function mirrors inclusion_get_strategy_procinfo; see notes
+ * there.  If changes are made here, see that function too.
  */
 static FmgrInfo *
 minmax_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno, Oid subtype,

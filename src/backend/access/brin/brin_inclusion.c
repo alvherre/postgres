@@ -2,9 +2,9 @@
  * brin_inclusion.c
  *		Implementation of inclusion opclasses for BRIN
  *
- * This module provides C level BRIN support functions for the *_inclusion_ops
- * operator classes.  A few SQL level support functions are also required to
- * the opclasses.
+ * This module provides framework BRIN support functions for the "inclusion"
+ * operator classes.  A few SQL-level support functions are also required for
+ * each opclass.
  *
  * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -14,12 +14,12 @@
  */
 #include "postgres.h"
 
-#include "access/genam.h"
 #include "access/brin_internal.h"
 #include "access/brin_tuple.h"
+#include "access/genam.h"
 #include "access/skey.h"
-#include "catalog/pg_type.h"
 #include "catalog/pg_amop.h"
+#include "catalog/pg_type.h"
 #include "utils/datum.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -29,7 +29,7 @@
 /*
  * Additional SQL level support functions
  *
- * Procedure numbers must not collide with BRIN_PROCNUM defines in
+ * Procedure numbers must not use values reserved for BRIN itself; see
  * brin_internal.h.
  */
 #define		INCLUSION_MAX_PROCNUMS	5	/* maximum support procs we need */
@@ -42,18 +42,22 @@
 
 /*
  * Subtract this from procnum to obtain index in InclusionOpaque arrays
- * (Must be equal to minimum of private procnums)
+ * (Must be equal to minimum of private procnums).
  */
 #define		PROCNUM_BASE			11
 
 typedef struct InclusionOpaque
 {
 	FmgrInfo	extra_procinfos[INCLUSION_MAX_PROCNUMS];
-	bool		extra_proc_exists[INCLUSION_MAX_PROCNUMS];
-	bool		extra_proc_inited[INCLUSION_MAX_PROCNUMS];
+	bool		extra_proc_missing[INCLUSION_MAX_PROCNUMS];
 	Oid			cached_subtype;
 	FmgrInfo	strategy_procinfos[RTMaxStrategyNumber];
 } InclusionOpaque;
+
+Datum brin_inclusion_opcinfo(PG_FUNCTION_ARGS);
+Datum brin_inclusion_add_value(PG_FUNCTION_ARGS);
+Datum brin_inclusion_consistent(PG_FUNCTION_ARGS);
+Datum brin_inclusion_union(PG_FUNCTION_ARGS);
 
 static FmgrInfo *inclusion_get_procinfo(BrinDesc *bdesc, uint16 attno,
 					uint16 procnum);
@@ -72,8 +76,12 @@ brin_inclusion_opcinfo(PG_FUNCTION_ARGS)
 	TypeCacheEntry *bool_typcache = lookup_type_cache(BOOLOID, 0);
 
 	/*
-	 * opaque->procinfos is initialized lazily, as indicated by 'inited'
-	 * which is initialized to all false by palloc0.
+	 * All members of opaque are initialized lazily; both procinfo arrays start
+	 * out as non-initialized by having fn_oid be InvalidOid, and "missing" to
+	 * false, by zeroing here.  strategy_procinfos elements can be invalidated
+	 * when cached_subtype changes by zeroing fn_oid.  extra_procinfo entries
+	 * are never invalidated, but if a lookup fails (which is expected),
+	 * extra_proc_missing is set to true, indicating not to look it up agian.
 	 */
 	result = palloc0(MAXALIGN(SizeofBrinOpcInfo(3)) + sizeof(InclusionOpaque));
 	result->oi_nstored = 3;
@@ -91,9 +99,9 @@ brin_inclusion_opcinfo(PG_FUNCTION_ARGS)
  *
  * Examine the given index tuple (which contains partial status of a certain
  * page range) by comparing it to the given value that comes from another heap
- * tuple.  If the new value is outside the union specified by the
- * existing tuple values, update the index tuple and return true.  Otherwise,
- * return false and do not modify in this case.
+ * tuple.  If the new value is outside the union specified by the existing
+ * tuple values, update the index tuple and return true.  Otherwise, return
+ * false and do not modify in this case.
  */
 Datum
 brin_inclusion_add_value(PG_FUNCTION_ARGS)
@@ -250,9 +258,10 @@ brin_inclusion_consistent(PG_FUNCTION_ARGS)
 		 * Placement strategies
 		 *
 		 * They are implemented by using logical negation of the other
-		 * placement operators.  So the other strategies are required for
-		 * them to be used.  An error will be thrown by inclusion_get_strategy_procinfo()
-		 * if the required strategy does not exists.
+		 * placement operators.  So the other strategies are required for them
+		 * to be used.  An error will be thrown by
+		 * inclusion_get_strategy_procinfo() if the required strategy does not
+		 * exists.
 		 *
 		 * These all return false if either argument is empty, so there is
 		 * no need to check for empty elements.
@@ -545,13 +554,20 @@ inclusion_get_procinfo(BrinDesc *bdesc, uint16 attno, uint16 procnum)
 	InclusionOpaque *opaque;
 	uint16		basenum = procnum - PROCNUM_BASE;
 
-	opaque = (InclusionOpaque *) bdesc->bd_info[attno - 1]->oi_opaque;
-
 	/*
 	 * We cache these in the opaque struct, to avoid repetitive syscache
 	 * lookups.
 	 */
-	if (!opaque->extra_proc_inited[basenum])
+	opaque = (InclusionOpaque *) bdesc->bd_info[attno - 1]->oi_opaque;
+
+	/*
+	 * If we already searched for this proc and didn't find it, don't bother
+	 * searching again.
+	 */
+	if (opaque->extra_proc_missing[basenum])
+		return NULL;
+
+	if (opaque->extra_procinfos[basenum].fn_oid == InvalidOid)
 	{
 		if (RegProcedureIsValid(index_getprocid(bdesc->bd_index, attno,
 												procnum)))
@@ -559,35 +575,36 @@ inclusion_get_procinfo(BrinDesc *bdesc, uint16 attno, uint16 procnum)
 			fmgr_info_copy(&opaque->extra_procinfos[basenum],
 						   index_getprocinfo(bdesc->bd_index, attno, procnum),
 						   bdesc->bd_context);
-
-			opaque->extra_proc_exists[basenum] = true;
 		}
-
-		opaque->extra_proc_inited[basenum] = true;
+		else
+		{
+			opaque->extra_proc_missing[basenum] = true;
+			return NULL;
+		}
 	}
 
-	if (opaque->extra_proc_exists[basenum])
-		return &opaque->extra_procinfos[basenum];
-	else
-		return NULL;
+	return &opaque->extra_procinfos[basenum];
 }
 
 /*
  * Cache and return the procedure of the given strategy
  *
  * Return the procedure corresponding to the given sub-type and strategy
- * number.  The data type of the index will be used as the left hand side
- * of the operator and the given sub-type will be used as the right hand side.
- * Throws an error, if the pg_amop row is not exists, but it should not happen
- * on a properly configured opclass.
+ * number.  The data type of the index will be used as the left hand side of
+ * the operator and the given sub-type will be used as the right hand side.
+ * Throws an error if the pg_amop row does not exist, but that should not
+ * happen with a properly configured opclass.
  *
  * It always throws an error when the data type of the opclass is different
- * from the data type of the column or the expression.  It happens when
- * the column data type has implicit cast to the opclass data type.  We don't
+ * from the data type of the column or the expression.  That happens when the
+ * column data type has implicit cast to the opclass data type.  We don't
  * bother casting types, because this situation can easily be avoided by
- * setting storage data type to the opclass.  Same problem does not apply
- * to the data type of the right hand side, because the type from ScanKey
- * is always the one which fits the opclass.
+ * setting storage data type to that of the opclass.  The same problem does not
+ * apply to the data type of the right hand side, because the type in the
+ * ScanKey always matches the opclass' one.
+ *
+ * Note: this function mirrors minmax_get_strategy_procinfo; if changes are
+ * made here, see that function too.
  */
 static FmgrInfo *
 inclusion_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno, Oid subtype,
