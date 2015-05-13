@@ -80,9 +80,9 @@ Datum		brin_inclusion_add_value(PG_FUNCTION_ARGS);
 Datum		brin_inclusion_consistent(PG_FUNCTION_ARGS);
 Datum		brin_inclusion_union(PG_FUNCTION_ARGS);
 static FmgrInfo *inclusion_get_procinfo(BrinDesc *bdesc, uint16 attno,
-					uint16 procnum);
+					   uint16 procnum);
 static FmgrInfo *inclusion_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno,
-					Oid subtype, uint16 strategynum);
+								Oid subtype, uint16 strategynum);
 
 
 /*
@@ -91,17 +91,18 @@ static FmgrInfo *inclusion_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno,
 Datum
 brin_inclusion_opcinfo(PG_FUNCTION_ARGS)
 {
-	Oid		typoid = PG_GETARG_OID(0);
+	Oid			typoid = PG_GETARG_OID(0);
 	BrinOpcInfo *result;
 	TypeCacheEntry *bool_typcache = lookup_type_cache(BOOLOID, 0);
 
 	/*
-	 * All members of opaque are initialized lazily; both procinfo arrays start
-	 * out as non-initialized by having fn_oid be InvalidOid, and "missing" to
-	 * false, by zeroing here.  strategy_procinfos elements can be invalidated
-	 * when cached_subtype changes by zeroing fn_oid.  extra_procinfo entries
-	 * are never invalidated, but if a lookup fails (which is expected),
-	 * extra_proc_missing is set to true, indicating not to look it up agian.
+	 * All members of opaque are initialized lazily; both procinfo arrays
+	 * start out as non-initialized by having fn_oid be InvalidOid, and
+	 * "missing" to false, by zeroing here.  strategy_procinfos elements can
+	 * be invalidated when cached_subtype changes by zeroing fn_oid.
+	 * extra_procinfo entries are never invalidated, but if a lookup fails
+	 * (which is expected), extra_proc_missing is set to true, indicating not
+	 * to look it up again.
 	 */
 	result = palloc0(MAXALIGN(SizeofBrinOpcInfo(3)) + sizeof(InclusionOpaque));
 	result->oi_nstored = 3;
@@ -182,9 +183,9 @@ brin_inclusion_add_value(PG_FUNCTION_ARGS)
 		PG_RETURN_BOOL(false);
 
 	/*
-	 * If the opclass supports the concept of empty values, test the passed new
-	 * value for emptiness; if it returns true, we need to set the "contains
-	 * empty" flag in the element (unless already set).
+	 * If the opclass supports the concept of empty values, test the passed
+	 * new value for emptiness; if it returns true, we need to set the
+	 * "contains empty" flag in the element (unless already set).
 	 */
 	frmg = inclusion_get_procinfo(bdesc, attno, PROCNUM_EMPTY);
 	if (frmg != NULL && DatumGetBool(FunctionCall1Coll(frmg, colloid, newval)))
@@ -213,9 +214,9 @@ brin_inclusion_add_value(PG_FUNCTION_ARGS)
 	 * Check if the new value is mergeable to the existing union.  If it is
 	 * not, mark the value as containing unmergeable elements and get out.
 	 *
-	 * Note: at this point we could remove the value from the union, since it's
-	 * not going to be used any longer.  However, the BRIN framework doesn't
-	 * allow for the value not being present.  Improve someday.
+	 * Note: at this point we could remove the value from the union, since
+	 * it's not going to be used any longer.  However, the BRIN framework
+	 * doesn't allow for the value not being present.  Improve someday.
 	 */
 	frmg = inclusion_get_procinfo(bdesc, attno, PROCNUM_MERGEABLE);
 	if (frmg != NULL &&
@@ -511,10 +512,10 @@ brin_inclusion_union(PG_FUNCTION_ARGS)
 	attr = bdesc->bd_tupdesc->attrs[attno - 1];
 
 	/*
-	 * Adjust "allnulls".  If A doesn't have values, just copy the values
-	 * from B into A, and we're done.  We cannot run the operators in this
-	 * case, because values in A might contain garbage.  Note we already
-	 * established that B contains values.
+	 * Adjust "allnulls".  If A doesn't have values, just copy the values from
+	 * B into A, and we're done.  We cannot run the operators in this case,
+	 * because values in A might contain garbage.  Note we already established
+	 * that B contains values.
 	 */
 	if (col_a->bv_allnulls)
 	{
@@ -645,8 +646,8 @@ inclusion_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno, Oid subtype,
 	opaque = (InclusionOpaque *) bdesc->bd_info[attno - 1]->oi_opaque;
 
 	/*
-	 * We cache the procedures for the last sub-type in the opaque struct,
-	 * to avoid repetitive syscache lookups.  If the sub-type is changed,
+	 * We cache the procedures for the last sub-type in the opaque struct, to
+	 * avoid repetitive syscache lookups.  If the sub-type is changed,
 	 * invalidate all the cached entries.
 	 */
 	if (opaque->cached_subtype != subtype)
@@ -678,7 +679,7 @@ inclusion_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno, Oid subtype,
 				 strategynum, attr->atttypid, subtype, opfamily);
 
 		oprid = DatumGetObjectId(SysCacheGetAttr(AMOPSTRATEGY, tuple,
-												 Anum_pg_amop_amopopr, &isNull));
+											 Anum_pg_amop_amopopr, &isNull));
 		ReleaseSysCache(tuple);
 		Assert(!isNull && RegProcedureIsValid(oprid));
 
