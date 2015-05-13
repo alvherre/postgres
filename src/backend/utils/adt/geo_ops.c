@@ -785,7 +785,7 @@ box_left_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->high.x < pt->x);
+	PG_RETURN_BOOL(FPlt(box->high.x, pt->x));
 }
 
 /*		box_overleft_pt	-		is the right edge of box at or left of point?
@@ -796,7 +796,7 @@ box_overleft_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->low.x <= pt->x);
+	PG_RETURN_BOOL(FPle(box->low.x, pt->x));
 }
 
 /*		box_right_pt	-		is box strictly right of point?
@@ -807,7 +807,7 @@ box_right_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->low.x > pt->x);
+	PG_RETURN_BOOL(FPgt(box->low.x, pt->x));
 }
 
 /*		box_overright_pt -		is the left edge of box at or right of point?
@@ -818,7 +818,7 @@ box_overright_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->high.x >= pt->x);
+	PG_RETURN_BOOL(FPge(box->high.x, pt->x));
 }
 
 /*		box_below_pt	-		is box strictly below point?
@@ -829,7 +829,7 @@ box_below_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->high.y < pt->y);
+	PG_RETURN_BOOL(FPlt(box->high.y, pt->y));
 }
 
 /*		box_overbelow_pt -		is the upper edge of box at or below point?
@@ -840,7 +840,7 @@ box_overbelow_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->low.y <= pt->y);
+	PG_RETURN_BOOL(FPle(box->low.y, pt->y));
 }
 
 /*		box_above_pt	-		is box strictly above point?
@@ -851,7 +851,7 @@ box_above_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->low.y > pt->y);
+	PG_RETURN_BOOL(FPgt(box->low.y, pt->y));
 }
 
 /*		box_overabove_pt -		is the lower edge of box at or above point?
@@ -862,7 +862,7 @@ box_overabove_pt(PG_FUNCTION_ARGS)
 	BOX		   *box = PG_GETARG_BOX_P(0);
 	Point	   *pt = PG_GETARG_POINT_P(1);
 
-	PG_RETURN_BOOL(box->high.y >= pt->y);
+	PG_RETURN_BOOL(FPge(box->high.y, pt->y));
 }
 
 /*		box_contain_pt	-		does box contain point?
