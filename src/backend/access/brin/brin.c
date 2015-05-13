@@ -280,7 +280,6 @@ bringetbitmap(PG_FUNCTION_ARGS)
 	BlockNumber nblocks;
 	BlockNumber heapBlk;
 	int			totalpages = 0;
-	int			keyno;
 	FmgrInfo   *consistentFn;
 	MemoryContext oldcxt;
 	MemoryContext perRangeCxt;
@@ -299,18 +298,11 @@ bringetbitmap(PG_FUNCTION_ARGS)
 	heap_close(heapRel, AccessShareLock);
 
 	/*
-	 * Obtain consistent functions for all indexed column.  Maybe it'd be
-	 * possible to do this lazily only the first time we see a scan key that
-	 * involves each particular attribute.
+	 * Make room for the consistent support procedures of indexed columns.  We
+	 * don't look them up here; we do that lazily the first time we see a scan
+	 * key reference each of them.  We rely on zeroing fn_oid to InvalidOid.
 	 */
-	consistentFn = palloc(sizeof(FmgrInfo) * bdesc->bd_tupdesc->natts);
-	for (keyno = 0; keyno < bdesc->bd_tupdesc->natts; keyno++)
-	{
-		FmgrInfo   *tmp;
-
-		tmp = index_getprocinfo(idxRel, keyno + 1, BRIN_PROCNUM_CONSISTENT);
-		fmgr_info_copy(&consistentFn[keyno], tmp, CurrentMemoryContext);
-	}
+	consistentFn = palloc0(sizeof(FmgrInfo) * bdesc->bd_tupdesc->natts);
 
 	/*
 	 * Setup and use a per-range memory context, which is reset every time we
@@ -358,7 +350,6 @@ bringetbitmap(PG_FUNCTION_ARGS)
 		else
 		{
 			BrinMemTuple *dtup;
-			int			keyno;
 
 			dtup = brin_deform_tuple(bdesc, tup);
 			if (dtup->bt_placeholder)
@@ -371,6 +362,8 @@ bringetbitmap(PG_FUNCTION_ARGS)
 			}
 			else
 			{
+				int			keyno;
+
 				/*
 				 * Compare scan keys with summary values stored for the range.
 				 * If scan keys are matched, the page range must be added to
@@ -395,6 +388,17 @@ bringetbitmap(PG_FUNCTION_ARGS)
 					Assert((key->sk_flags & SK_ISNULL) ||
 						   (key->sk_collation ==
 					   bdesc->bd_tupdesc->attrs[keyattno - 1]->attcollation));
+
+					/* First time this column? look up consistent function */
+					if (consistentFn[keyattno - 1].fn_oid == InvalidOid)
+					{
+						FmgrInfo   *tmp;
+
+						tmp = index_getprocinfo(idxRel, keyattno,
+												BRIN_PROCNUM_CONSISTENT);
+						fmgr_info_copy(&consistentFn[keyattno - 1], tmp,
+									   CurrentMemoryContext);
+					}
 
 					/*
 					 * Check whether the scan key is consistent with the page
