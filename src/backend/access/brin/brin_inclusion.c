@@ -63,11 +63,10 @@ typedef struct InclusionOpaque
 	FmgrInfo	strategy_procinfos[RTMaxStrategyNumber];
 } InclusionOpaque;
 
-Datum brin_inclusion_opcinfo(PG_FUNCTION_ARGS);
-Datum brin_inclusion_add_value(PG_FUNCTION_ARGS);
-Datum brin_inclusion_consistent(PG_FUNCTION_ARGS);
-Datum brin_inclusion_union(PG_FUNCTION_ARGS);
-
+Datum		brin_inclusion_opcinfo(PG_FUNCTION_ARGS);
+Datum		brin_inclusion_add_value(PG_FUNCTION_ARGS);
+Datum		brin_inclusion_consistent(PG_FUNCTION_ARGS);
+Datum		brin_inclusion_union(PG_FUNCTION_ARGS);
 static FmgrInfo *inclusion_get_procinfo(BrinDesc *bdesc, uint16 attno,
 					uint16 procnum);
 static FmgrInfo *inclusion_get_strategy_procinfo(BrinDesc *bdesc, uint16 attno,
