@@ -265,8 +265,6 @@ brinbeginscan(PG_FUNCTION_ARGS)
  * If a TID from the revmap is read as InvalidTID, we know that range is
  * unsummarized.  Pages in those ranges need to be returned regardless of scan
  * keys.
- *
- * XXX see _bt_first on what to do about sk_subtype.
  */
 Datum
 bringetbitmap(PG_FUNCTION_ARGS)
