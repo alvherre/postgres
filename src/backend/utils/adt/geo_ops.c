@@ -774,111 +774,6 @@ box_ge(PG_FUNCTION_ARGS)
 
 
 /*----------------------------------------------------------
- *	Relational operators for BOX vs Point
- *---------------------------------------------------------*/
-
-/*		box_left_pt		-		is box strictly left of point?
- */
-Datum
-box_left_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPlt(box->high.x, pt->x));
-}
-
-/*		box_overleft_pt	-		is the right edge of box at or left of point?
- */
-Datum
-box_overleft_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPle(box->low.x, pt->x));
-}
-
-/*		box_right_pt	-		is box strictly right of point?
- */
-Datum
-box_right_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPgt(box->low.x, pt->x));
-}
-
-/*		box_overright_pt -		is the left edge of box at or right of point?
- */
-Datum
-box_overright_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPge(box->high.x, pt->x));
-}
-
-/*		box_below_pt	-		is box strictly below point?
- */
-Datum
-box_below_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPlt(box->high.y, pt->y));
-}
-
-/*		box_overbelow_pt -		is the upper edge of box at or below point?
- */
-Datum
-box_overbelow_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPle(box->low.y, pt->y));
-}
-
-/*		box_above_pt	-		is box strictly above point?
- */
-Datum
-box_above_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPgt(box->low.y, pt->y));
-}
-
-/*		box_overabove_pt -		is the lower edge of box at or above point?
- */
-Datum
-box_overabove_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(FPge(box->high.y, pt->y));
-}
-
-/*		box_contain_pt	-		does box contain point?
- */
-Datum
-box_contain_pt(PG_FUNCTION_ARGS)
-{
-	BOX		   *box = PG_GETARG_BOX_P(0);
-	Point	   *pt = PG_GETARG_POINT_P(1);
-
-	PG_RETURN_BOOL(pt->x <= box->high.x && pt->x >= box->low.x &&
-				   pt->y <= box->high.y && pt->y >= box->low.y);
-}
-
-
-/*----------------------------------------------------------
  *	"Arithmetic" operators on boxes.
  *---------------------------------------------------------*/
 
@@ -3312,6 +3207,16 @@ on_pb(PG_FUNCTION_ARGS)
 {
 	Point	   *pt = PG_GETARG_POINT_P(0);
 	BOX		   *box = PG_GETARG_BOX_P(1);
+
+	PG_RETURN_BOOL(pt->x <= box->high.x && pt->x >= box->low.x &&
+				   pt->y <= box->high.y && pt->y >= box->low.y);
+}
+
+Datum
+box_contain_pt(PG_FUNCTION_ARGS)
+{
+	BOX		   *box = PG_GETARG_BOX_P(0);
+	Point	   *pt = PG_GETARG_POINT_P(1);
 
 	PG_RETURN_BOOL(pt->x <= box->high.x && pt->x >= box->low.x &&
 				   pt->y <= box->high.y && pt->y >= box->low.y);
