@@ -6,6 +6,16 @@
  * operator classes.  A few SQL-level support functions are also required for
  * each opclass.
  *
+ * The "inclusion" BRIN strategy is useful for types that support R-Tree
+ * operations.  This implementation is a straight mapping of those operations
+ * to the block-range nature of BRIN, with two exceptions: (a) we explicitely
+ * support "empty" elements: at least with range types, we need to consider
+ * emptiness separately from regular R-Tree strategies; and (b) we need to
+ * consider "unmergeable" elements, that is, a set of elements for whose union
+ * no representation exists.  The only case where that happens as of this
+ * writing is the INET type, where IPv6 values cannot be merged with IPv4
+ * values.
+ *
  * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
