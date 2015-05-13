@@ -25,8 +25,7 @@ CREATE TABLE brintest (byteacol bytea,
 	uuidcol uuid,
 	int4rangecol int4range,
 	lsncol pg_lsn,
-	boxcol box,
-	pointcol point
+	boxcol box
 ) WITH (fillfactor=10, autovacuum_enabled=off);
 
 INSERT INTO brintest SELECT
@@ -56,8 +55,7 @@ INSERT INTO brintest SELECT
 	format('%s%s-%s-%s-%s-%s%s%s', to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'))::uuid,
 	int4range(thousand, twothousand),
 	format('%s/%s%s', odd, even, tenthous)::pg_lsn,
-	box(point(odd, even), point(thousand, twothousand)),
-	point(thousand, twothousand)
+	box(point(odd, even), point(thousand, twothousand))
 FROM tenk1 LIMIT 25;
 
 -- throw in some NULL's and different values
@@ -95,8 +93,7 @@ CREATE INDEX brinidx ON brintest USING brin (
 	uuidcol,
 	int4rangecol,
 	lsncol,
-	boxcol,
-	pointcol
+	boxcol
 ) with (pages_per_range = 1);
 
 CREATE TABLE brinopers (colname name, typ text, op text[], value text[],
@@ -148,10 +145,8 @@ INSERT INTO brinopers VALUES
 	('int4rangecol', 'int4range', '{@>, <@, =, <=, >, >=}', '{empty, empty, empty, empty, empty, empty}'),
 	('int4rangecol', 'int4', '{@>}', '{1500}'),
 	('lsncol', 'pg_lsn', '{>, >=, =, <=, <, IS, IS NOT}', '{0/1200, 0/1200, 44/455222, 198/1999799, 198/1999799, NULL, NULL}'),
-	('boxcol', 'point', '{<<, &<, &>, >>, <<|, &<|, |&>, |>>, @>}', '{"(1000,2000)","(3000,4000)","(1,2)","(3,4)","(3000,4000)","(3000,4000)","(1,2)","(1,2)","(500,43)"}'),
-	('boxcol', 'box', '{<<, &<, &&, &>, >>, <<|, &<|, |&>, |>>, @>, <@, ~=}', '{"((1000,2000),(3000,4000))","((1,2),(3000,4000))","((1,2),(3000,4000))","((1,2),(3000,4000))","((1,2),(3,4))","((1000,2000),(3000,4000))","((1,2000),(3,4000))","((1000,2),(3000,4))","((1,2),(3,4))","((1,2),(300,400))","((1,2),(3000,4000))","((222,1222),(44,45))"}'),
-	('pointcol', 'point', '{<<, >>, <^, >^, ~=}', '{"(3000,4000)","(3,4)","(5000,15000)","(1,2)","(222,1222)"}'),
-	('pointcol', 'box', '{<@}', '{"((0,0),(5000,5000))"}');
+	('boxcol', 'point', '{@>}', '{"(500,43)"}'),
+	('boxcol', 'box', '{<<, &<, &&, &>, >>, <<|, &<|, |&>, |>>, @>, <@, ~=}', '{"((1000,2000),(3000,4000))","((1,2),(3000,4000))","((1,2),(3000,4000))","((1,2),(3000,4000))","((1,2),(3,4))","((1000,2000),(3000,4000))","((1,2000),(3,4000))","((1000,2),(3000,4))","((1,2),(3,4))","((1,2),(300,400))","((1,2),(3000,4000))","((222,1222),(44,45))"}');
 
 DO $x$
 DECLARE
@@ -249,8 +244,7 @@ INSERT INTO brintest SELECT
 	format('%s%s-%s-%s-%s-%s%s%s', to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'), to_char(tenthous, 'FM0000'))::uuid,
 	int4range(thousand, twothousand),
 	format('%s/%s%s', odd, even, tenthous)::pg_lsn,
-	box(point(odd, even), point(thousand, twothousand)),
-	point(thousand, twothousand)
+	box(point(odd, even), point(thousand, twothousand))
 FROM tenk1 LIMIT 5 OFFSET 5;
 
 SELECT brin_summarize_new_values('brinidx'::regclass);

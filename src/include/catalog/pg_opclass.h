@@ -270,7 +270,6 @@ DATA(insert (	3580	range_inclusion_ops		PGNSP PGUID 4103  3831 t 3831 ));
 DATA(insert (	3580	pg_lsn_minmax_ops		PGNSP PGUID 4082  3220 t 3220 ));
 /* no brin opclass for enum, tsvector, tsquery, jsonb */
 DATA(insert (	3580	box_inclusion_ops		PGNSP PGUID 4104   603 t 603 ));
-DATA(insert (	3580	point_box_inclusion_ops	PGNSP PGUID 4104   600 t 603 ));
-/* no brin opclass for the geometric types except box and point */
+/* no brin opclass for the geometric types except box */
 
 #endif   /* PG_OPCLASS_H */

@@ -35,9 +35,8 @@
 #define		INCLUSION_MAX_PROCNUMS	5	/* maximum support procs we need */
 #define		PROCNUM_MERGE			11	/* required */
 #define		PROCNUM_MERGEABLE		12	/* optional */
-#define		PROCNUM_CAST			13	/* optional */
-#define		PROCNUM_CONTAINS		14	/* optional */
-#define		PROCNUM_EMPTY			15	/* optional */
+#define		PROCNUM_CONTAINS		13	/* optional */
+#define		PROCNUM_EMPTY			14	/* optional */
 
 
 /*
@@ -134,16 +133,12 @@ brin_inclusion_add_value(PG_FUNCTION_ARGS)
 	attr = bdesc->bd_tupdesc->attrs[attno - 1];
 
 	/*
-	 * If the recorded value is null, cast or copy the new value (which we
-	 * know to be not null), and we're almost done.
+	 * If the recorded value is null, copy the new value (which we know to be
+	 * not null), and we're almost done.
 	 */
 	if (column->bv_allnulls)
 	{
-		frmg = inclusion_get_procinfo(bdesc, attno, PROCNUM_CAST);
-		if (frmg != NULL)
-			column->bv_values[0] = FunctionCall1Coll(frmg, colloid, newval);
-		else
-			column->bv_values[0] = datumCopy(newval, attr->attbyval, attr->attlen);
+		column->bv_values[0] = datumCopy(newval, attr->attbyval, attr->attlen);
 		column->bv_values[1] = BoolGetDatum(false);
 		column->bv_values[2] = BoolGetDatum(false);
 		column->bv_allnulls = false;
@@ -176,11 +171,6 @@ brin_inclusion_add_value(PG_FUNCTION_ARGS)
 		DatumGetBool(FunctionCall2Coll(frmg, colloid, column->bv_values[0],
 									   newval)))
 		PG_RETURN_BOOL(false);
-
-	/* Cast the new value if storage type is different. */
-	frmg = inclusion_get_procinfo(bdesc, attno, PROCNUM_CAST);
-	if (frmg != NULL)
-		newval = FunctionCall1Coll(frmg, colloid, newval);
 
 	/* Check if the new value is mergeable to the union. */
 	frmg = inclusion_get_procinfo(bdesc, attno, PROCNUM_MERGEABLE);

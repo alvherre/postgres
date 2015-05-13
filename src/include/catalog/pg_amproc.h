@@ -556,7 +556,7 @@ DATA(insert (   4102   869   869  3  4107 ));
 DATA(insert (   4102   869   869  4  4108 ));
 DATA(insert (   4102   869   869 11  4063 ));
 DATA(insert (   4102   869   869 12  4071 ));
-DATA(insert (   4102   869   869 14   930 ));
+DATA(insert (   4102   869   869 13   930 ));
 /* minmax character */
 DATA(insert (   4076  1042  1042  1  3383 ));
 DATA(insert (   4076  1042  1042  2  3384 ));
@@ -643,8 +643,8 @@ DATA(insert (   4103  3831  3831  2  4106 ));
 DATA(insert (   4103  3831  3831  3  4107 ));
 DATA(insert (   4103  3831  3831  4  4108 ));
 DATA(insert (   4103  3831  3831  11 4057 ));
-DATA(insert (   4103  3831  3831  14 3859 ));
-DATA(insert (   4103  3831  3831  15 3850 ));
+DATA(insert (   4103  3831  3831  13 3859 ));
+DATA(insert (   4103  3831  3831  14 3850 ));
 /* minmax pg_lsn */
 DATA(insert (   4082  3220  3220  1  3383 ));
 DATA(insert (   4082  3220  3220  2  3384 ));
@@ -656,14 +656,6 @@ DATA(insert (   4104   603   603  2  4106 ));
 DATA(insert (   4104   603   603  3  4107 ));
 DATA(insert (   4104   603   603  4  4108 ));
 DATA(insert (   4104   603   603  11 4067 ));
-DATA(insert (   4104   603   603  14  187 ));
-/* inclusion point */
-DATA(insert (   4104   600   600  1  4105 ));
-DATA(insert (   4104   600   600  2  4106 ));
-DATA(insert (   4104   600   600  3  4107 ));
-DATA(insert (   4104   600   600  4  4108 ));
-DATA(insert (   4104   600   600  11 4067 ));
-DATA(insert (   4104   600   600  13 4091 ));
-DATA(insert (   4104   600   600  14  193 ));
+DATA(insert (   4104   603   603  13  187 ));
 
 #endif   /* PG_AMPROC_H */
