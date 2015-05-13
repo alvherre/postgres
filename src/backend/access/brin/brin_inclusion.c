@@ -32,7 +32,7 @@
  * Procedure numbers must not use values reserved for BRIN itself; see
  * brin_internal.h.
  */
-#define		INCLUSION_MAX_PROCNUMS	5	/* maximum support procs we need */
+#define		INCLUSION_MAX_PROCNUMS	4	/* maximum support procs we need */
 #define		PROCNUM_MERGE			11	/* required */
 #define		PROCNUM_MERGEABLE		12	/* optional */
 #define		PROCNUM_CONTAINS		13	/* optional */
