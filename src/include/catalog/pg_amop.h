@@ -1111,8 +1111,7 @@ DATA(insert (	4104    603  603  9 s	  2571	  3580 0 ));
 DATA(insert (	4104    603  603 10 s 	  2570	  3580 0 ));
 DATA(insert (	4104    603  603 11 s 	  2573	  3580 0 ));
 DATA(insert (	4104    603  603 12 s 	  2572	  3580 0 ));
-DATA(insert (	4104    603  603 13 s 	  2863	  3580 0 ));
-DATA(insert (	4104    603  603 14 s 	  2862	  3580 0 ));
+/* we could, but choose not to, supply entries for strategies 13 and 14 */
 DATA(insert (	4104    603  600  7 s	   433	  3580 0 ));
 
 #endif   /* PG_AMOP_H */
