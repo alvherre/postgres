@@ -56,7 +56,7 @@ INSERT INTO brintest SELECT
 	int4range(thousand, twothousand),
 	format('%s/%s%s', odd, even, tenthous)::pg_lsn,
 	box(point(odd, even), point(thousand, twothousand))
-FROM tenk1 LIMIT 25;
+FROM tenk1 LIMIT 100;
 
 -- throw in some NULL's and different values
 INSERT INTO brintest (inetcol, cidrcol, int4rangecol) SELECT
