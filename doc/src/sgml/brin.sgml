@@ -434,25 +434,6 @@
       <literal>|&lt;&lt;</literal>
      </entry>
     </row>
-    <row>
-     <entry><literal>point_box_inclusion_ops</></entry>
-     <entry><type>point</type></entry>
-     <entry>
-      <literal>&amp;&amp;</>
-      <literal>&amp;&gt;</>
-      <literal>&amp;&lt;</>
-      <literal>&gt;&gt;</>
-      <literal>&lt;&lt;</>
-      <literal>&lt;@</>
-      <literal>~=</>
-      <literal>&amp;&gt;|</>
-      <literal>|&amp;&lt;</>
-      <literal>&gt;&gt;|</>
-      <literal>|&lt;&lt;</literal>
-      <literal>&gt;^</>
-      <literal>|&lt;^</literal>
-     </entry>
-    </row>
    </tbody>
   </tgroup>
  </table>
