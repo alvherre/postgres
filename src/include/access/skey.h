@@ -41,9 +41,9 @@ typedef uint16 StrategyNumber;
 
 
 /*
- * Strategy numbers for opclasses that want to implement the old RTREE behavior.
- * Operator strategy numbers used in the GiST, SP-GiST, GIN, BRIN  opclasses.
- * New numbers are chosen to match up operator names with existing usages.
+ * Strategy numbers common to (some) GiST, SP-GiST, GIN and BRIN opclasses.
+ * The first few of these come from the R-Tree indexing method (hence the
+ * names); the others have been added over time as they have been needed.
  */
 #define RTLeftStrategyNumber			1		/* for << */
 #define RTOverLeftStrategyNumber		2		/* for &< */
@@ -59,7 +59,7 @@ typedef uint16 StrategyNumber;
 #define RTOverAboveStrategyNumber		12		/* for |&> */
 #define RTOldContainsStrategyNumber		13		/* for old spelling of @> */
 #define RTOldContainedByStrategyNumber	14		/* for old spelling of <@ */
-#define RTKNNSearchStrategyNumber		15
+#define RTKNNSearchStrategyNumber		15		/* for <-> (distance) */
 #define RTContainsElemStrategyNumber	16		/* for range types @> elem */
 #define RTAdjacentStrategyNumber		17		/* for -|- */
 #define RTEqualStrategyNumber			18		/* for = */
@@ -69,7 +69,9 @@ typedef uint16 StrategyNumber;
 #define RTGreaterStrategyNumber			22		/* for > */
 #define RTGreaterEqualStrategyNumber	23		/* for >= */
 #define RTContainsNotEqualStrategyNumber	24	/* for inet >> */
+#define RTSubOrEqualStrategyNumber		25		/* for inet <<= */
 #define RTContainedByNotEqualStrategyNumber	26	/* for inet << */
+#define RTSuperOrEqualStrategyNumber	27		/* for inet >>= */
 
 #define RTMaxStrategyNumber				26
 
