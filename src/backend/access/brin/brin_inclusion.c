@@ -423,12 +423,13 @@ brin_inclusion_consistent(PG_FUNCTION_ARGS)
 			 * It is straightforward to support the equality strategies with
 			 * the contains operator.  Generally, inequality strategies do not
 			 * make much sense for the types which will be used with the
-			 * inclusion operator class, but is is possible to implement them
-			 * with logical negation of the left of and right of operator.
+			 * inclusion BRIN family of opclasses, but is is possible to
+			 * implement them with logical negation of the left-of and right-of
+			 * operators.
 			 *
-			 * Note that, these strategies except the same strategy are not
-			 * suitable for the geometric types which use basic comparison
-			 * operators for their areas.
+			 * NB: These strategies cannot be used with geometric datatypes
+			 * that use comparison of areas!  The only exception is the "same"
+			 * strategy.
 			 *
 			 * Empty elements are considered to be less than the others.  We
 			 * cannot use the empty support function to check the query is an
