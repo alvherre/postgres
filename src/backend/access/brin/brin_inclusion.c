@@ -468,6 +468,7 @@ brin_inclusion_consistent(PG_FUNCTION_ARGS)
 			PG_RETURN_DATUM(column->bv_values[INCLUSION_CONTAINS_EMPTY]);
 
 		case RTGreaterStrategyNumber:
+			/* no need to check for empty elements */
 			frmg = inclusion_get_strategy_procinfo(bdesc, attno, subtype,
 												   RTLeftStrategyNumber);
 			result = FunctionCall2Coll(frmg, colloid, unionval, query);
