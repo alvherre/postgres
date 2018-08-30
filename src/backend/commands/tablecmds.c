@@ -415,10 +415,28 @@ static ObjectAddress ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *
 						  Relation rel, Constraint *fkconstraint, Oid parentConstr,
 						  bool recurse, bool recursing,
 						  LOCKMODE lockmode);
+static ObjectAddress addFkRecurseReferenced(List **wqueue, Constraint *fkconstraint,
+					   Relation rel, Relation pkrel, Oid indexOid, Oid parentConstraint,
+					   int numfks, int16 *pkattnum, int16 *fkattnum,
+					   Oid *pfeqoperators, Oid *ppeqoperators, Oid *ffeqoperators,
+					   bool old_check_ok);
+static void addFkRecurseReferencing(List **wqueue, Constraint *fkconstraint,
+						Relation rel, Relation pkrel, Oid indexOid, Oid parentConstr, int numfks,
+						int16 *pkattnum, int16 *fkattnum, Oid *pfeqoperators,
+						Oid *ppeqoperators, Oid *ffeqoperators, bool old_check_ok,
+						bool create_constraint);
 static void CloneForeignKeyConstraints(Oid parentId, Oid relationId,
 						   List **cloned);
+static void CloneFkReferenced(Relation parentRel, Relation partitionRel,
+				  Relation pg_constraint);
 static void CloneFkReferencing(Relation pg_constraint, Relation parentRel,
 				   Relation partRel, List *clone, List **cloned);
+static void createForeignKeyCheckTriggers(Oid myRelOid, Oid refRelOid,
+							  Constraint *fkconstraint, Oid constraintOid,
+							  Oid indexOid);
+static void createForeignKeyActionTriggers(Relation rel, Oid refRelOid,
+							   Constraint *fkconstraint, Oid constraintOid,
+							   Oid indexOid);
 static void ATExecDropConstraint(Relation rel, const char *constrName,
 					 DropBehavior behavior,
 					 bool recurse, bool recursing,
@@ -502,6 +520,7 @@ static void refuseDupeIndexAttach(Relation parentIdx, Relation partIdx,
 					  Relation partitionTbl);
 static void update_relispartition(Relation classRel, Oid relationId,
 					  bool newval);
+static void checkNoForeignKeyRefs(Oid partitionOid);
 
 
 /* ----------------------------------------------------------------
@@ -1188,6 +1207,13 @@ RemoveRelations(DropStmt *drop)
 			DropErrorMsgNonExistent(rel, relkind, drop->missing_ok);
 			continue;
 		}
+
+		/*
+		 * If it's a partition referenced by a foreign key, make sure no
+		 * referencing values remain.
+		 */
+		if (state.partParentOid != InvalidOid)
+			checkNoForeignKeyRefs(relOid);
 
 		/* OK, we're ready to delete this one */
 		obj.classId = RelationRelationId;
@@ -3438,7 +3464,8 @@ AlterTableGetLockLevel(List *cmds)
 
 				/*
 				 * Removing constraints can affect SELECTs that have been
-				 * optimised assuming the constraint holds true.
+				 * optimised assuming the constraint holds true. See also
+				 * CloneFkReferenced.
 				 */
 			case AT_DropConstraint: /* as DROP INDEX */
 			case AT_DropNotNull:	/* may change some SQL plans */
@@ -7145,32 +7172,6 @@ ATExecAddConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			break;
 
 		case CONSTR_FOREIGN:
-
-			/*
-			 * Note that we currently never recurse for FK constraints, so the
-			 * "recurse" flag is silently ignored.
-			 *
-			 * Assign or validate constraint name
-			 */
-			if (newConstraint->conname)
-			{
-				if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
-										 RelationGetRelid(rel),
-										 newConstraint->conname))
-					ereport(ERROR,
-							(errcode(ERRCODE_DUPLICATE_OBJECT),
-							 errmsg("constraint \"%s\" for relation \"%s\" already exists",
-									newConstraint->conname,
-									RelationGetRelationName(rel))));
-			}
-			else
-				newConstraint->conname =
-					ChooseConstraintName(RelationGetRelationName(rel),
-										 strVal(linitial(newConstraint->fk_attrs)),
-										 "fkey",
-										 RelationGetNamespace(rel),
-										 NIL);
-
 			address = ATAddForeignKeyConstraint(wqueue, tab, rel,
 												newConstraint, InvalidOid,
 												recurse, false,
@@ -7328,6 +7329,12 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
  * Subroutine for ATExecAddConstraint.  Must already hold exclusive
  * lock on the rel, and have done appropriate validity checks for it.
  * We do permissions checks here, however.
+ *
+ * When the referenced or referencing tables (or both) are partitioned,
+ * multiple pg_constraint rows are required -- one for each partitioned table
+ * and each partition on each side (fortunately, not one for every combination
+ * thereof).  We also need the appropriate triggers to be created on each leaf
+ * partition.
  */
 static ObjectAddress
 ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
@@ -7347,7 +7354,6 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	int			numfks,
 				numpks;
 	Oid			indexOid;
-	Oid			constrOid;
 	bool		old_check_ok;
 	ObjectAddress address;
 	ListCell   *old_pfeqop_item = list_head(fkconstraint->old_conpfeqop);
@@ -7365,12 +7371,6 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	 * Validity checks (permission checks wait till we have the column
 	 * numbers)
 	 */
-	if (pkrel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-		ereport(ERROR,
-				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("cannot reference partitioned table \"%s\"",
-						RelationGetRelationName(pkrel))));
-
 	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 	{
 		if (!recurse)
@@ -7388,7 +7388,8 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 					 errdetail("This feature is not yet supported on partitioned tables.")));
 	}
 
-	if (pkrel->rd_rel->relkind != RELKIND_RELATION)
+	if (pkrel->rd_rel->relkind != RELKIND_RELATION &&
+		pkrel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 				 errmsg("referenced relation \"%s\" is not a table",
@@ -7598,8 +7599,9 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		if (!(OidIsValid(pfeqop) && OidIsValid(ffeqop)))
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("foreign key constraint \"%s\" "
-							"cannot be implemented",
+					 errmsg(fkconstraint->conname ?
+							"foreign key constraint \"%s\" cannot be implemented" :
+							"foreign key constraint cannot be implemented",
 							fkconstraint->conname),
 					 errdetail("Key columns \"%s\" and \"%s\" "
 							   "are of incompatible types: %s and %s.",
@@ -7687,15 +7689,161 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	}
 
 	/*
+	 * Create all the constraint and trigger objects, recursing to partitions
+	 * as necessary.  First handle the referenced side.
+	 */
+	address = addFkRecurseReferenced(wqueue, fkconstraint, rel, pkrel,
+									 indexOid,
+									 InvalidOid,	/* no parent constraint */
+									 numfks,
+									 pkattnum,
+									 fkattnum,
+									 pfeqoperators,
+									 ppeqoperators,
+									 ffeqoperators,
+									 old_check_ok);
+
+	/*
+	 * Now handle the referencing side.  We don't need the topmost constraint
+	 * on this side, because the constraint we created above fills that role;
+	 * if this recurses for any partitions then more constraints are added.
+	 */
+	addFkRecurseReferencing(wqueue, fkconstraint, rel, pkrel,
+							indexOid,
+							address.objectId,
+							numfks,
+							pkattnum,
+							fkattnum,
+							pfeqoperators,
+							ppeqoperators,
+							ffeqoperators,
+							old_check_ok,
+							false);
+
+	/*
+	 * Close pk table, but keep lock until we've committed.
+	 */
+	heap_close(pkrel, NoLock);
+
+	return address;
+}
+
+/*
+ * Return the OID of the index, in the given partition, that is a child of the
+ * given index, error out if none.
+ */
+static Oid
+index_get_partition(Relation partition, Oid indexId)
+{
+	List	   *idxlist = RelationGetIndexList(partition);
+	ListCell   *l;
+
+	foreach(l, idxlist)
+	{
+		Oid			partIdx = lfirst_oid(l);
+		HeapTuple	tup;
+		Form_pg_class classForm;
+		bool		ispartition;
+
+		tup = SearchSysCache1(RELOID, ObjectIdGetDatum(partIdx));
+		if (!tup)
+			elog(ERROR, "cache lookup failed for relation %u", partIdx);
+		classForm = (Form_pg_class) GETSTRUCT(tup);
+		ispartition = classForm->relispartition;
+		ReleaseSysCache(tup);
+		if (!ispartition)
+			continue;
+		if (get_partition_parent(lfirst_oid(l)) == indexId)
+		{
+			list_free(idxlist);
+			return partIdx;
+		}
+	}
+
+	elog(ERROR, "index for %u not found in partition %s",
+		 indexId, RelationGetRelationName(partition));
+}
+
+/*
+ * addFkRecurseReferenced
+ *		recursive subroutine for ATAddForeignKeyConstraint, referenced side
+ *
+ * Create pg_constraint rows for the referenced side of the constraint,
+ * referencing the parent of the referencing side; also create action triggers
+ * on leaf partitions.  If the table is partitioned, recurse to handle each
+ * partition.
+ *
+ * On constraint names: It's not possible in general to give all the cascaded
+ * constraints the same name, so we don't try.  (Also, even when it *is*
+ * possible, it goes counter to the SQL-standard rule that constraint names
+ * must be unique within a schema.)  Therefore we apply the given name to the
+ * top-most constraint, and use generated names when cascading to partitions
+ *
+ * wqueue is the ALTER TABLE work queue; can be NULL when not running as part
+ * of an ALTER TABLE sequence.
+ * fkconstraint is the constraint being added.
+ * rel is the root referencing relation.
+ * pkrel is the referenced relation; might be a partition, if recursing.
+ * indexOid is the OID of the index (on pkrel) implementing this constraint.
+ * parentConstraint is the OID of a parent constraint; InvalidOid if this is a
+ * top-level constraint.
+ * numfks is the number of columns in the foreign key
+ * pkattnum is the attnum array of referenced attributes.
+ * fkattnum is the attnum array of referencing attributes.
+ * pf/pp/ffeqoperators are OID array of operators between columns.
+ * old_check_ok signals that this constraint replaces an existing one that
+ * was already validated (thus this one doesn't need validation).
+ */
+static ObjectAddress
+addFkRecurseReferenced(List **wqueue, Constraint *fkconstraint, Relation rel,
+					   Relation pkrel, Oid indexOid, Oid parentConstraint,
+					   int numfks,
+					   int16 *pkattnum, int16 *fkattnum, Oid *pfeqoperators,
+					   Oid *ppeqoperators, Oid *ffeqoperators, bool old_check_ok)
+{
+	ObjectAddress address;
+	Oid			constrOid;
+	char	   *conname;
+
+	/*
+	 * Verify relkind for each referenced partition.  At the top level, this
+	 * is redundant with a previous check, but we need it when recursing.
+	 */
+	if (pkrel->rd_rel->relkind != RELKIND_RELATION &&
+		pkrel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("referenced relation \"%s\" is not a table",
+						RelationGetRelationName(pkrel))));
+
+	if (fkconstraint->conname)
+	{
+		if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
+								 RelationGetRelid(rel),
+								 fkconstraint->conname))
+			ereport(ERROR,
+					(errcode(ERRCODE_DUPLICATE_OBJECT),
+					 errmsg("constraint \"%s\" for relation \"%s\" already exists",
+							fkconstraint->conname,
+							RelationGetRelationName(rel))));
+		conname = fkconstraint->conname;
+	}
+	else
+		conname = ChooseConstraintName(RelationGetRelationName(rel),
+									   strVal(linitial(fkconstraint->fk_attrs)),
+									   "fkey",
+									   RelationGetNamespace(rel), NIL);
+
+	/*
 	 * Record the FK constraint in pg_constraint.
 	 */
-	constrOid = CreateConstraintEntry(fkconstraint->conname,
+	constrOid = CreateConstraintEntry(conname,
 									  RelationGetNamespace(rel),
 									  CONSTRAINT_FOREIGN,
 									  fkconstraint->deferrable,
 									  fkconstraint->initdeferred,
 									  fkconstraint->initially_valid,
-									  parentConstr,
+									  parentConstraint,
 									  RelationGetRelid(rel),
 									  fkattnum,
 									  numfks,
@@ -7707,7 +7855,7 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 									  pfeqoperators,
 									  ppeqoperators,
 									  ffeqoperators,
-									  numpks,
+									  numfks,
 									  fkconstraint->fk_upd_action,
 									  fkconstraint->fk_del_action,
 									  fkconstraint->fk_matchtype,
@@ -7720,76 +7868,270 @@ ATAddForeignKeyConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 									  false);	/* is_internal */
 	ObjectAddressSet(address, ConstraintRelationId, constrOid);
 
-	/*
-	 * Create the triggers that will enforce the constraint.  We only want the
-	 * action triggers to appear for the parent partitioned relation, even
-	 * though the constraints also exist below.
-	 */
-	createForeignKeyTriggers(rel, RelationGetRelid(pkrel), fkconstraint,
-							 constrOid, indexOid, !recursing);
+	/* make new constraint visible, in case we add more */
+	CommandCounterIncrement();
 
 	/*
-	 * Tell Phase 3 to check that the constraint is satisfied by existing
-	 * rows. We can skip this during table creation, when requested explicitly
-	 * by specifying NOT VALID in an ADD FOREIGN KEY command, and when we're
-	 * recreating a constraint following a SET DATA TYPE operation that did
-	 * not impugn its validity.
+	 * If the referenced table is a plain relation, create the action triggers
+	 * that enforce the constraint.
 	 */
-	if (!old_check_ok && !fkconstraint->skip_validation)
+	if (pkrel->rd_rel->relkind == RELKIND_RELATION)
 	{
-		NewConstraint *newcon;
-
-		newcon = (NewConstraint *) palloc0(sizeof(NewConstraint));
-		newcon->name = fkconstraint->conname;
-		newcon->contype = CONSTR_FOREIGN;
-		newcon->refrelid = RelationGetRelid(pkrel);
-		newcon->refindid = indexOid;
-		newcon->conid = constrOid;
-		newcon->qual = (Node *) fkconstraint;
-
-		tab->constraints = lappend(tab->constraints, newcon);
+		createForeignKeyActionTriggers(rel, RelationGetRelid(pkrel),
+									   fkconstraint,
+									   constrOid, indexOid);
 	}
 
 	/*
-	 * When called on a partitioned table, recurse to create the constraint on
-	 * the partitions also.
+	 * If the referenced table is partitioned, recurse on ourselves to handle
+	 * each partition.  We need one pg_constraint row created for each
+	 * partition in addition to the pg_constraint row for the parent table.
 	 */
-	if (recurse && rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	if (pkrel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 	{
-		PartitionDesc partdesc;
+		PartitionDesc pd = RelationGetPartitionDesc(pkrel);
+		int			i;
 
-		partdesc = RelationGetPartitionDesc(rel);
-
-		for (i = 0; i < partdesc->nparts; i++)
+		for (i = 0; i < pd->nparts; i++)
 		{
-			Oid			partitionId = partdesc->oids[i];
-			Relation	partition = heap_open(partitionId, lockmode);
-			AlteredTableInfo *childtab;
-			ObjectAddress childAddr;
+			Relation	partRel;
+			AttrNumber *map;
+			AttrNumber *mapped_pkattnum;
+			Constraint *newfk;
+			Oid			partIndexId;
 
-			CheckTableNotInUse(partition, "ALTER TABLE");
+			partRel = heap_open(pd->oids[i], ShareRowExclusiveLock);
 
-			/* Find or create work queue entry for this table */
-			childtab = ATGetQueueEntry(wqueue, partition);
+			/*
+			 * Create a new Constraint node as a copy of the original one,
+			 * blanking out the constraint name from it if there's one.  (It's
+			 * not possible in general to use the same name across the
+			 * hierarchy, so we don't try.)
+			 */
+			if (fkconstraint->conname)
+			{
+				newfk = copyObject(fkconstraint);
+				pfree(newfk->conname);
+				newfk->conname = NULL;
+			}
+			else
+				newfk = fkconstraint;
 
-			childAddr =
-				ATAddForeignKeyConstraint(wqueue, childtab, partition,
-										  fkconstraint, constrOid,
-										  recurse, true, lockmode);
+			/*
+			 * Map the attribute numbers in the referenced side of the FK
+			 * definition to match the partition's column layout.
+			 */
+			map = convert_tuples_by_name_map_if_req(RelationGetDescr(partRel),
+													RelationGetDescr(pkrel),
+													gettext_noop("could not convert row type"));
+			if (map)
+			{
+				int			j;
 
-			/* Record this constraint as dependent on the parent one */
-			recordDependencyOn(&childAddr, &address, DEPENDENCY_INTERNAL_AUTO);
+				mapped_pkattnum = palloc(sizeof(AttrNumber) * numfks);
+				for (j = 0; j < numfks; j++)
+					mapped_pkattnum[j] = map[pkattnum[j] - 1];
+			}
+			else
+				mapped_pkattnum = pkattnum;
 
-			heap_close(partition, NoLock);
+			/* do the deed */
+			partIndexId = index_get_partition(partRel, indexOid);
+			addFkRecurseReferenced(wqueue, fkconstraint, rel, partRel,
+								   partIndexId, constrOid, numfks,
+								   mapped_pkattnum, fkattnum,
+								   pfeqoperators, ppeqoperators, ffeqoperators,
+								   old_check_ok);
+
+			/* Done -- clean up (but keep the lock) */
+			heap_close(partRel, NoLock);
+			if (map)
+			{
+				pfree(mapped_pkattnum);
+				pfree(map);
+			}
 		}
 	}
 
-	/*
-	 * Close pk table, but keep lock until we've committed.
-	 */
-	heap_close(pkrel, NoLock);
-
 	return address;
+}
+
+/*
+ * addFkRecurseReferencing
+ *		recursive subroutine for ATAddForeignKeyConstraint, referencing side
+ *
+ * wqueue is the ALTER TABLE work queue; can be NULL when not running as part
+ * of an ALTER TABLE sequence.
+ * fkconstraint is the constraint being added.
+ * rel is the referencing relation; might be a partition, if recursing.
+ * pkrel is the root referenced relation.
+ * indexOid is the OID of the index (on pkrel) implementing this constraint.
+ * parentConstr is the OID of the parent constraint (there is always one).
+ * numfks is the number of columns in the foreign key
+ * pkattnum is the attnum array of referenced attributes.
+ * fkattnum is the attnum array of referencing attributes.
+ * pf/pp/ffeqoperators are OID array of operators between columns.
+ * old_check_ok signals that this constraint replaces an existing one that
+ * was already validated (thus this one doesn't need validation).
+ * create_constraint indicates whether to create a constraint; if false, the
+ * given parentConstr is the origin of all others.
+ */
+static void
+addFkRecurseReferencing(List **wqueue, Constraint *fkconstraint, Relation rel,
+						Relation pkrel, Oid indexOid, Oid parentConstr,
+						int numfks, int16 *pkattnum, int16 *fkattnum,
+						Oid *pfeqoperators, Oid *ppeqoperators, Oid *ffeqoperators,
+						bool old_check_ok, bool create_constraint)
+{
+	Oid			constrOid;		/* uninitialized */
+	char	   *conname;
+
+	AssertArg(OidIsValid(parentConstr));
+
+	/*
+	 * Verify relkind for each referencing partition.  At the top level, this
+	 * is redundant with a previous check, but we need it when recursing.
+	 */
+	if (pkrel->rd_rel->relkind != RELKIND_RELATION &&
+		pkrel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+		ereport(ERROR,
+				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+				 errmsg("referenced relation \"%s\" is not a table",
+						RelationGetRelationName(pkrel))));
+
+	if (!create_constraint)
+		constrOid = parentConstr;
+	else
+	{
+		/* Figure out a good constraint name to use */
+		conname = ChooseConstraintName(RelationGetRelationName(rel),
+									   strVal(linitial(fkconstraint->fk_attrs)),
+									   "fkey",
+									   RelationGetNamespace(rel), NIL);
+
+		/*
+		 * Record the FK constraint in pg_constraint.
+		 */
+		constrOid = CreateConstraintEntry(conname,
+										  RelationGetNamespace(rel),
+										  CONSTRAINT_FOREIGN,
+										  fkconstraint->deferrable,
+										  fkconstraint->initdeferred,
+										  fkconstraint->initially_valid,
+										  parentConstr,
+										  RelationGetRelid(rel),
+										  fkattnum,
+										  numfks,
+										  numfks,
+										  InvalidOid,
+										  indexOid,
+										  RelationGetRelid(pkrel),
+										  pkattnum,
+										  pfeqoperators,
+										  ppeqoperators,
+										  ffeqoperators,
+										  numfks,
+										  fkconstraint->fk_upd_action,
+										  fkconstraint->fk_del_action,
+										  fkconstraint->fk_matchtype,
+										  NULL, /* no exclusion constraint */
+										  NULL, /* no check constraint */
+										  NULL,
+										  true, /* islocal */
+										  0,	/* inhcount */
+										  true, /* isnoinherit */
+										  false);	/* is_internal */
+		/* make constraint visible */
+		CommandCounterIncrement();
+	}
+
+	/*
+	 * If the referencing relation is a plain table, add the check triggers to
+	 * it and, if necessary, schedule it to be checked in Phase 3.
+	 *
+	 * If the relation is partitioned, drill down to do it to its partitions.
+	 */
+	if (rel->rd_rel->relkind == RELKIND_RELATION)
+	{
+		createForeignKeyCheckTriggers(RelationGetRelid(rel),
+									  RelationGetRelid(pkrel),
+									  fkconstraint,
+									  constrOid,
+									  indexOid);
+
+		/*
+		 * Tell Phase 3 to check that the constraint is satisfied by existing
+		 * rows. We can skip this during table creation, when requested
+		 * explicitly by specifying NOT VALID in an ADD FOREIGN KEY command,
+		 * and when we're recreating a constraint following a SET DATA TYPE
+		 * operation that did not impugn its validity.
+		 */
+		if (!old_check_ok && !fkconstraint->skip_validation)
+		{
+			NewConstraint *newcon;
+			AlteredTableInfo *tab;
+
+			tab = ATGetQueueEntry(wqueue, rel);
+
+			newcon = (NewConstraint *) palloc0(sizeof(NewConstraint));
+			newcon->name = fkconstraint->conname;
+			newcon->contype = CONSTR_FOREIGN;
+			newcon->refrelid = RelationGetRelid(pkrel);
+			newcon->refindid = indexOid;
+			newcon->conid = constrOid;
+			newcon->qual = (Node *) fkconstraint;
+
+			tab->constraints = lappend(tab->constraints, newcon);
+		}
+	}
+	else if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	{
+		PartitionDesc pd;
+		int			i;
+
+		pd = RelationGetPartitionDesc(rel);
+		for (i = 0; i < pd->nparts; i++)
+		{
+			Relation	partRel;
+			AttrNumber *map;
+			AttrNumber *mapped_fkattnum;
+
+			partRel = heap_open(pd->oids[i], ShareRowExclusiveLock);
+
+			/*
+			 * Map the attribute numbers in the referencing side of the FK
+			 * definition to match the partition's column layout.
+			 */
+			map = convert_tuples_by_name_map_if_req(RelationGetDescr(partRel),
+													RelationGetDescr(rel),
+													gettext_noop("could not convert row type"));
+			if (map)
+			{
+				int			j;
+
+				mapped_fkattnum = palloc(sizeof(AttrNumber) * numfks);
+				for (j = 0; j < numfks; j++)
+					mapped_fkattnum[j] = map[fkattnum[j] - 1];
+			}
+			else
+				mapped_fkattnum = fkattnum;
+
+			/* down the rabbit hole */
+			addFkRecurseReferencing(wqueue, fkconstraint, partRel, pkrel,
+									indexOid, constrOid, numfks, pkattnum,
+									mapped_fkattnum,
+									pfeqoperators, ppeqoperators, ffeqoperators,
+									old_check_ok, true);
+
+			/* Done -- clean up (but keep the lock) */
+			heap_close(partRel, NoLock);
+			if (map)
+			{
+				pfree(mapped_fkattnum);
+				pfree(map);
+			}
+		}
+	}
 }
 
 /*
@@ -7821,7 +8163,14 @@ CloneForeignKeyConstraints(Oid parentId, Oid relationId, List **cloned)
 	rel = heap_open(relationId, AccessExclusiveLock);
 	pg_constraint = heap_open(ConstraintRelationId, RowShareLock);
 
-	/* Obtain the list of constraints to clone or attach */
+	/*
+	 * Clone constraints where the parent is in the referenced side.
+	 */
+	CloneFkReferenced(parentRel, rel, pg_constraint);
+
+	/*
+	 * Now search for constraints where the parent is in the referencing side.
+	 */
 	ScanKeyInit(&key,
 				Anum_pg_constraint_conrelid, BTEqualStrategyNumber,
 				F_OIDEQ, ObjectIdGetDatum(parentId));
@@ -7834,10 +8183,153 @@ CloneForeignKeyConstraints(Oid parentId, Oid relationId, List **cloned)
 	/* Do the actual work, recursing to partitions as needed */
 	CloneFkReferencing(pg_constraint, parentRel, rel, clone, cloned);
 
-	/* We're done.  Clean up */
+	list_free(clone);
+
+	/* We're done.  Clean up, keeping locks till commit */
 	heap_close(parentRel, NoLock);
-	heap_close(rel, NoLock);	/* keep lock till commit */
+	heap_close(rel, NoLock);
 	heap_close(pg_constraint, RowShareLock);
+}
+
+/*
+ * CloneFkReferenced
+ *		Subroutine for CloneForeignKeyConstraints, referenced side
+ *
+ * Clone the FKs that reference the parent relation.  Used when partitionRel
+ * is created/attached.  (Recursion to partitions is effected by callee
+ * addFkRecurseReferenced, so this routine is not itself recursive.)
+ */
+static void
+CloneFkReferenced(Relation parentRel, Relation partitionRel,
+				  Relation pg_constraint)
+{
+	AttrNumber *attmap;
+	ListCell   *cell;
+	SysScanDesc scan;
+	ScanKeyData key[2];
+	HeapTuple	tuple;
+	List	   *clone = NIL;
+
+	/*
+	 * Search for any constraints where this partition is in the referenced
+	 * side.  However, we must ignore any constraint whose parent constraint
+	 * is also going to be cloned, to avoid duplicates.  So do it in two
+	 * steps: first construct the list of constraints to clone, then go over
+	 * that list cloning those whose parents are not in the list.  (We must
+	 * not rely on the parent being seen first, since catalog order could
+	 * return children first.)
+	 */
+	attmap = convert_tuples_by_name_map(RelationGetDescr(partitionRel),
+										RelationGetDescr(parentRel),
+										gettext_noop("could not convert row type"));
+	ScanKeyInit(&key[0],
+				Anum_pg_constraint_confrelid, BTEqualStrategyNumber,
+				F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(parentRel)));
+	ScanKeyInit(&key[1],
+				Anum_pg_constraint_contype, BTEqualStrategyNumber,
+				F_CHAREQ, CharGetDatum(CONSTRAINT_FOREIGN));
+	/* This is a seqscan, as we don't have a usable index ... */
+	scan = systable_beginscan(pg_constraint, InvalidOid, true,
+							  NULL, 2, key);
+	while ((tuple = systable_getnext(scan)) != NULL)
+	{
+		Form_pg_constraint constrForm = (Form_pg_constraint) GETSTRUCT(tuple);
+
+		/* ignore this constraint if the parent is already on the list */
+		if (list_member_oid(clone, constrForm->conparentid))
+			continue;
+
+		clone = lappend_oid(clone, HeapTupleGetOid(tuple));
+	}
+	systable_endscan(scan);
+
+	foreach(cell, clone)
+	{
+		Oid			constrOid = lfirst_oid(cell);
+		Form_pg_constraint constrForm;
+		Form_pg_attribute att;
+		Relation	fkRel;
+		Oid			indexOid;
+		Oid			partIndexId;
+		int			numfks;
+		AttrNumber	conkey[INDEX_MAX_KEYS];
+		AttrNumber	mapped_confkey[INDEX_MAX_KEYS];
+		AttrNumber	confkey[INDEX_MAX_KEYS];
+		Oid			conpfeqop[INDEX_MAX_KEYS];
+		Oid			conppeqop[INDEX_MAX_KEYS];
+		Oid			conffeqop[INDEX_MAX_KEYS];
+		Constraint *fkconstraint;
+
+		tuple = SearchSysCache1(CONSTROID, constrOid);
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for constraint %u", constrOid);
+		constrForm = (Form_pg_constraint) GETSTRUCT(tuple);
+
+		/* skip children whose parents are going to be cloned, as above */
+		if (list_member_oid(clone, constrForm->conparentid))
+		{
+			ReleaseSysCache(tuple);
+			continue;
+		}
+
+		/*
+		 * Because we're only expanding the key space at the referenced side,
+		 * we don't need to prevent any operation in the referencing table, so
+		 * AccessShareLock suffices (assumes that dropping the constraint
+		 * acquires AEL).
+		 */
+		fkRel = heap_open(constrForm->conrelid, AccessShareLock);
+
+		indexOid = constrForm->conindid;
+		DeconstructConstraintRow(tuple,
+								 &numfks,
+								 conkey,
+								 confkey,
+								 conpfeqop,
+								 conppeqop,
+								 conffeqop);
+		for (int i = 0; i < numfks; i++)
+			mapped_confkey[i] = attmap[confkey[i] - 1];
+
+		fkconstraint = makeNode(Constraint);
+		/* for now this is all we need */
+		fkconstraint->fk_upd_action = constrForm->confupdtype;
+		fkconstraint->fk_del_action = constrForm->confdeltype;
+		fkconstraint->deferrable = constrForm->condeferrable;
+		fkconstraint->initdeferred = constrForm->condeferred;
+		fkconstraint->initially_valid = true;
+		fkconstraint->fk_matchtype = constrForm->confmatchtype;
+
+		/*
+		 * This is a bit grotty: we only need the first column name, which is
+		 * used to generate the constraint name.
+		 */
+		att = TupleDescAttr(RelationGetDescr(partitionRel), conkey[0] - 1);
+		fkconstraint->fk_attrs = list_make1(makeString(NameStr(att->attname)));
+
+		/*
+		 * Add the new foreign key constraint pointing to the new partition.
+		 * Because this new partition appears in the referenced side of the
+		 * constraint, we don't need to set up for Phase 3 check.
+		 */
+		partIndexId = index_get_partition(partitionRel, indexOid);
+		addFkRecurseReferenced(NULL,
+							   fkconstraint,
+							   fkRel,
+							   partitionRel,
+							   partIndexId,
+							   HeapTupleGetOid(tuple),
+							   numfks,
+							   mapped_confkey,
+							   conkey,
+							   conpfeqop,
+							   conppeqop,
+							   conffeqop,
+							   true);
+
+		heap_close(fkRel, NoLock);
+		ReleaseSysCache(tuple);
+	}
 }
 
 /*
@@ -7906,18 +8398,24 @@ CloneFkReferencing(Relation pg_constraint, Relation parentRel,
 			ReleaseSysCache(tuple);
 			continue;
 		}
+		if (list_member_oid(clone, constrForm->conparentid))
+		{
+			ReleaseSysCache(tuple);
+			continue;
+		}
 
 		ObjectAddressSet(parentAddr, ConstraintRelationId, parentConstrOid);
 
 		DeconstructConstraintRow(tuple, &numfks, conkey, confkey,
 								 conpfeqop, conppeqop, conffeqop);
+
 		for (i = 0; i < numfks; i++)
 			mapped_conkey[i] = attmap[conkey[i] - 1];
 
 		/*
 		 * Before creating a new constraint, see whether any existing FKs are
-		 * fit for the purpose.  If one is, attach the parent constraint to it,
-		 * and don't clone anything.  This way we avoid the expensive
+		 * fit for the purpose.  If one is, attach the parent constraint to
+		 * it, and don't clone anything.  This way we avoid the expensive
 		 * verification step and don't end up with a duplicate FK.  This also
 		 * means we don't consider this constraint when recursing to
 		 * partitions.
@@ -8039,8 +8537,12 @@ CloneFkReferencing(Relation pg_constraint, Relation parentRel,
 		fkconstraint->deferrable = constrForm->condeferrable;
 		fkconstraint->initdeferred = constrForm->condeferred;
 
-		createForeignKeyTriggers(partRel, constrForm->confrelid, fkconstraint,
-								 constrOid, constrForm->conindid, false);
+		/* If this is a plain relation, create the check triggers */
+		if (partRel->rd_rel->relkind == RELKIND_RELATION)
+			createForeignKeyCheckTriggers(RelationGetRelid(partRel),
+										  constrForm->confrelid,
+										  fkconstraint, constrOid,
+										  constrForm->conindid);
 
 		if (cloned)
 		{
@@ -8075,6 +8577,9 @@ CloneFkReferencing(Relation pg_constraint, Relation parentRel,
 	{
 		PartitionDesc partdesc = RelationGetPartitionDesc(partRel);
 		int			i;
+
+		/* make previously created constraints visible */
+		CommandCounterIncrement();
 
 		for (i = 0; i < partdesc->nparts; i++)
 		{
@@ -9124,37 +9629,6 @@ createForeignKeyCheckTriggers(Oid myRelOid, Oid refRelOid,
 						 indexOid, true);
 	CreateFKCheckTrigger(myRelOid, refRelOid, fkconstraint, constraintOid,
 						 indexOid, false);
-}
-
-/*
- * Create the triggers that implement an FK constraint.
- *
- * NB: if you change any trigger properties here, see also
- * ATExecAlterConstraint.
- */
-void
-createForeignKeyTriggers(Relation rel, Oid refRelOid, Constraint *fkconstraint,
-						 Oid constraintOid, Oid indexOid, bool create_action)
-{
-	/*
-	 * For the referenced side, create action triggers, if requested.  (If the
-	 * referencing side is partitioned, there is still only one trigger, which
-	 * runs on the referenced side and points to the top of the referencing
-	 * hierarchy.)
-	 */
-	if (create_action)
-		createForeignKeyActionTriggers(rel, refRelOid, fkconstraint, constraintOid,
-									   indexOid);
-
-	/*
-	 * For the referencing side, create the check triggers.  We only need
-	 * these on the partitions.
-	 */
-	if (rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
-		createForeignKeyCheckTriggers(RelationGetRelid(rel), refRelOid,
-									  fkconstraint, constraintOid, indexOid);
-
-	CommandCounterIncrement();
 }
 
 /*
@@ -15069,6 +15543,9 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 
 	partRel = heap_openrv(name, AccessShareLock);
 
+	/* Ensure that foreign keys still hold after this detach */
+	checkNoForeignKeyRefs(RelationGetRelid(partRel));
+
 	/* All inheritance related checks are performed within the function */
 	RemoveInheritance(partRel, rel);
 
@@ -15544,4 +16021,65 @@ update_relispartition(Relation classRel, Oid relationId, bool newval)
 
 	if (opened)
 		heap_close(classRel, RowExclusiveLock);
+}
+
+/*
+ * During an operation that removes a partition from a partitioned table,
+ * verify that any foreign keys pointing to the partitioned table would not
+ * become invalid.  (Used for ALTER TABLE ... DETACH as well as DROP).
+ * An error raised if any referenced values exist.
+ */
+static void
+checkNoForeignKeyRefs(Oid partitionOid)
+{
+	Relation	pg_constraint;
+	HeapTuple	tuple;
+	SysScanDesc scan;
+	ScanKeyData key[2];
+
+	/* XXX can we skip this for the case where no fkeys exist? */
+	/* XXX can we skip this when the parent constraint is being dropped too? */
+
+	pg_constraint = heap_open(ConstraintRelationId, AccessShareLock);
+	ScanKeyInit(&key[0],
+				Anum_pg_constraint_confrelid, BTEqualStrategyNumber,
+				F_OIDEQ, ObjectIdGetDatum(partitionOid));
+	ScanKeyInit(&key[1],
+				Anum_pg_constraint_contype, BTEqualStrategyNumber,
+				F_CHAREQ, CharGetDatum(CONSTRAINT_FOREIGN));
+
+	/* This is a seqscan, as we don't have a usable index ... */
+	scan = systable_beginscan(pg_constraint, InvalidOid, true,
+							  NULL, 2, key);
+	while ((tuple = systable_getnext(scan)) != NULL)
+	{
+		Form_pg_constraint constrForm = (Form_pg_constraint) GETSTRUCT(tuple);
+		Trigger		trig;
+		Relation	rel;
+		Relation	pkrel;
+
+		/* XXX lock levels OK? */
+		rel = heap_open(constrForm->conrelid, ShareLock);
+		pkrel = heap_open(constrForm->confrelid, ShareRowExclusiveLock);
+
+		MemSet(&trig, 0, sizeof(trig));
+		trig.tgoid = InvalidOid;
+		trig.tgname = NameStr(constrForm->conname);
+		trig.tgenabled = TRIGGER_FIRES_ON_ORIGIN;
+		trig.tgisinternal = true;
+		trig.tgconstrrelid = partitionOid;
+		trig.tgconstrindid = constrForm->conindid;
+		trig.tgconstraint = HeapTupleGetOid(tuple);
+		trig.tgdeferrable = false;
+		trig.tginitdeferred = false;
+		/* we needn't fill in remaining fields */
+
+		RI_Final_Check(&trig, rel, pkrel);
+
+		heap_close(rel, NoLock);
+		heap_close(pkrel, NoLock);
+	}
+
+	systable_endscan(scan);
+	heap_close(pg_constraint, AccessShareLock);
 }
