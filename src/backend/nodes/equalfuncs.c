@@ -1011,7 +1011,6 @@ _equalQuery(const Query *a, const Query *b)
 	COMPARE_NODE_FIELD(setOperations);
 	COMPARE_NODE_FIELD(constraintDeps);
 	COMPARE_NODE_FIELD(withCheckOptions);
-	COMPARE_NODE_FIELD(mergeSourceTargetList);
 	COMPARE_NODE_FIELD(mergeActionList);
 	COMPARE_LOCATION_FIELD(stmt_location);
 	COMPARE_SCALAR_FIELD(stmt_len);

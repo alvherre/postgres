@@ -197,6 +197,7 @@ transformMergeStmt(ParseState *pstate, MergeStmt *stmt)
 	AclMode		targetPerms = ACL_NO_RIGHTS;
 	bool		is_terminal[2];
 	JoinExpr   *joinexpr;
+	List	   *mergeSourceTargetList;
 	List	   *mergeActionList;
 
 	/* There can't be any outer WITH to worry about */
@@ -329,14 +330,11 @@ transformMergeStmt(ParseState *pstate, MergeStmt *stmt)
 	 * routines don't quite work right for the MERGE case.
 	 *
 	 * A special mergeSourceTargetList is setup by transformMergeJoinClause().
-	 * It refers to all the attributes provided by the source relation. This
-	 * is later used by set_plan_refs() to fix the UPDATE/INSERT target lists
-	 * to so that they can correctly fetch the attributes from the source
-	 * relation.
+	 * It refers to all the attributes output by the join.
 	 */
 	transformMergeJoinClause(pstate, (Node *) joinexpr,
-							 &qry->mergeSourceTargetList);
-	qry->targetList = qry->mergeSourceTargetList;
+							 &mergeSourceTargetList);
+	qry->targetList = mergeSourceTargetList;
 
 
 	/* qry has no WHERE clause so absent quals are shown as NULL */

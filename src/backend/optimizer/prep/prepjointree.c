@@ -2051,6 +2051,17 @@ perform_pullup_replace_vars(PlannerInfo *root,
 		 * can't contain any references to a subquery.
 		 */
 	}
+	if (parse->mergeActionList)
+	{
+		foreach(lc, parse->mergeActionList)
+		{
+			MergeAction *action = lfirst(lc);
+
+			action->qual = pullup_replace_vars(action->qual, rvcontext);
+			action->targetList = (List *)
+				pullup_replace_vars((Node *) action->targetList, rvcontext);
+		}
+	}
 	replace_vars_in_jointree((Node *) parse->jointree, rvcontext,
 							 lowest_nulling_outer_join);
 	Assert(parse->setOperations == NULL);

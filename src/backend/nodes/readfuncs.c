@@ -285,7 +285,6 @@ _readQuery(void)
 	READ_NODE_FIELD(setOperations);
 	READ_NODE_FIELD(constraintDeps);
 	READ_NODE_FIELD(withCheckOptions);
-	READ_NODE_FIELD(mergeSourceTargetList);
 	READ_NODE_FIELD(mergeActionList);
 	READ_LOCATION_FIELD(stmt_location);
 	READ_INT_FIELD(stmt_len);
@@ -1718,7 +1717,6 @@ _readModifyTable(void)
 	READ_NODE_FIELD(onConflictWhere);
 	READ_UINT_FIELD(exclRelRTI);
 	READ_NODE_FIELD(exclRelTlist);
-	READ_NODE_FIELD(mergeSourceTargetList);
 	READ_NODE_FIELD(mergeActionLists);
 
 	READ_DONE();

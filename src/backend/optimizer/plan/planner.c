@@ -857,10 +857,6 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 								  EXPRKIND_QUAL);
 	}
 
-	parse->mergeSourceTargetList = (List *)
-		preprocess_expression(root, (Node *) parse->mergeSourceTargetList,
-							  EXPRKIND_TARGET);
-
 	root->append_rel_list = (List *)
 		preprocess_expression(root, (Node *) root->append_rel_list,
 							  EXPRKIND_APPINFO);
@@ -1915,7 +1911,6 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 										returningLists,
 										rowMarks,
 										parse->onConflict,
-										parse->mergeSourceTargetList,
 										mergeActionLists,
 										assign_special_exec_param(root));
 		}

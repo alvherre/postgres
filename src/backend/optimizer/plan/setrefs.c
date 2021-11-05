@@ -962,6 +962,7 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 		case T_ModifyTable:
 			{
 				ModifyTable *splan = (ModifyTable *) plan;
+				Plan		*subplan = outerPlan(splan);
 
 				Assert(splan->plan.targetlist == NIL);
 				Assert(splan->plan.qual == NIL);
@@ -973,7 +974,6 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 				if (splan->returningLists)
 				{
 					List	   *newRL = NIL;
-					Plan	   *subplan = outerPlan(splan);
 					ListCell   *lcrl,
 							   *lcrr;
 
@@ -1055,13 +1055,12 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 					ListCell *lc;
 
 					/*
-					 * mergeSourceTargetList is already setup correctly to
-					 * include all Vars coming from the source relation. So we
-					 * fix the targetList of individual action nodes by
-					 * ensuring that the source relation Vars are referenced
-					 * as INNER_VAR. Note that for this to work correctly,
-					 * during execution, the ecxt_innertuple must be set to
-					 * the tuple obtained from the source relation.
+					 * Fix the targetList of individual action nodes so that
+					 * the so-called "source relation" Vars are referenced as
+					 * INNER_VAR.  Note that for this to work correctly during
+					 * execution, the ecxt_innertuple must be set to the tuple
+					 * obtained by executing the subplan, which is what
+					 * constitutes the "source relation".
 					 *
 					 * We leave the Vars from the result relation (i.e. the
 					 * target relation) unchanged i.e. those Vars would be
@@ -1069,10 +1068,9 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 					 * ensure that ecxt_scantuple is setup correctly to refer
 					 * to the tuple from the target relation.
 					 */
-
 					indexed_tlist *itlist;
 
-					itlist = build_tlist_index(splan->mergeSourceTargetList);
+					itlist = build_tlist_index(subplan->targetlist);
 
 					foreach(lc, splan->mergeActionLists)
 					{
