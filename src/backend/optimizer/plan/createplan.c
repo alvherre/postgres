@@ -306,7 +306,6 @@ static ModifyTable *make_modifytable(PlannerInfo *root, Plan *subplan,
 									 Index nominalRelation, Index rootRelation,
 									 bool partColsUpdated,
 									 List *resultRelations,
-									 Index mergeTargetRelation,
 									 List *updateColnosLists,
 									 List *withCheckOptionLists, List *returningLists,
 									 List *rowMarks, OnConflictExpr *onconflict,
@@ -2751,7 +2750,6 @@ create_modifytable_plan(PlannerInfo *root, ModifyTablePath *best_path)
 							best_path->rootRelation,
 							best_path->partColsUpdated,
 							best_path->resultRelations,
-							best_path->mergeTargetRelation,
 							best_path->updateColnosLists,
 							best_path->withCheckOptionLists,
 							best_path->returningLists,
@@ -6880,7 +6878,6 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 				 Index nominalRelation, Index rootRelation,
 				 bool partColsUpdated,
 				 List *resultRelations,
-				 Index mergeTargetRelation,
 				 List *updateColnosLists,
 				 List *withCheckOptionLists, List *returningLists,
 				 List *rowMarks, OnConflictExpr *onconflict,
@@ -6914,7 +6911,6 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 	node->rootRelation = rootRelation;
 	node->partColsUpdated = partColsUpdated;
 	node->resultRelations = resultRelations;
-	node->mergeTargetRelation = mergeTargetRelation;
 	if (!onconflict)
 	{
 		node->onConflictAction = ONCONFLICT_NONE;

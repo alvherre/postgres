@@ -1910,7 +1910,6 @@ grouping_planner(PlannerInfo *root, double tuple_fraction)
 										rootRelation,
 										root->partColsUpdated,
 										resultRelations,
-										parse->mergeTarget_relation,
 										updateColnosLists,
 										withCheckOptionLists,
 										returningLists,

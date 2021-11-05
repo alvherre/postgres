@@ -183,7 +183,6 @@ typedef struct Query
 	List	   *withCheckOptions;	/* a list of WithCheckOption's (added
 									 * during rewrite) */
 
-	int			mergeTarget_relation;
 	List	   *mergeSourceTargetList;
 	List	   *mergeActionList;	/* list of actions for MERGE (only) */
 

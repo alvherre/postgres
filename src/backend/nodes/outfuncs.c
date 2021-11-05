@@ -408,7 +408,6 @@ _outModifyTable(StringInfo str, const ModifyTable *node)
 	WRITE_UINT_FIELD(rootRelation);
 	WRITE_BOOL_FIELD(partColsUpdated);
 	WRITE_NODE_FIELD(resultRelations);
-	WRITE_INT_FIELD(mergeTargetRelation);
 	WRITE_NODE_FIELD(updateColnosLists);
 	WRITE_NODE_FIELD(withCheckOptionLists);
 	WRITE_NODE_FIELD(returningLists);
@@ -2215,7 +2214,6 @@ _outModifyTablePath(StringInfo str, const ModifyTablePath *node)
 	WRITE_UINT_FIELD(rootRelation);
 	WRITE_BOOL_FIELD(partColsUpdated);
 	WRITE_NODE_FIELD(resultRelations);
-	WRITE_INT_FIELD(mergeTargetRelation);
 	WRITE_NODE_FIELD(updateColnosLists);
 	WRITE_NODE_FIELD(withCheckOptionLists);
 	WRITE_NODE_FIELD(returningLists);
@@ -3121,7 +3119,6 @@ _outQuery(StringInfo str, const Query *node)
 	WRITE_NODE_FIELD(setOperations);
 	WRITE_NODE_FIELD(constraintDeps);
 	WRITE_NODE_FIELD(withCheckOptions);
-	WRITE_INT_FIELD(mergeTarget_relation);
 	WRITE_NODE_FIELD(mergeSourceTargetList);
 	WRITE_NODE_FIELD(mergeActionList);
 	WRITE_LOCATION_FIELD(stmt_location);

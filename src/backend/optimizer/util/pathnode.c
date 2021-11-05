@@ -3628,7 +3628,6 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 						Index nominalRelation, Index rootRelation,
 						bool partColsUpdated,
 						List *resultRelations,
-						Index mergeTargetRelation,
 						List *updateColnosLists,
 						List *withCheckOptionLists, List *returningLists,
 						List *rowMarks, OnConflictExpr *onconflict,
@@ -3694,7 +3693,6 @@ create_modifytable_path(PlannerInfo *root, RelOptInfo *rel,
 	pathnode->rootRelation = rootRelation;
 	pathnode->partColsUpdated = partColsUpdated;
 	pathnode->resultRelations = resultRelations;
-	pathnode->mergeTargetRelation = mergeTargetRelation;
 	pathnode->updateColnosLists = updateColnosLists;
 	pathnode->withCheckOptionLists = withCheckOptionLists;
 	pathnode->returningLists = returningLists;

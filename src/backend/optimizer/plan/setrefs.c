@@ -1074,8 +1074,6 @@ set_plan_refs(PlannerInfo *root, Plan *plan, int rtoffset)
 
 					itlist = build_tlist_index(splan->mergeSourceTargetList);
 
-					splan->mergeTargetRelation += rtoffset;
-
 					foreach(lc, splan->mergeActionLists)
 					{
 						List *mergeActionList = lfirst(lc);

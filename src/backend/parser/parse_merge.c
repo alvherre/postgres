@@ -31,7 +31,7 @@
 #include "utils/rel.h"
 #include "utils/relcache.h"
 
-static int	transformMergeJoinClause(ParseState *pstate, Node *merge,
+static void	transformMergeJoinClause(ParseState *pstate, Node *merge,
 									 List **mergeSourceTargetList);
 static void setNamespaceForMergeWhen(ParseState *pstate,
 									 MergeWhenClause *mergeWhenClause);
@@ -51,10 +51,8 @@ static void setNamespaceVisibilityForRTE(List *namespace, RangeTblEntry *rte,
  *	the join is populated and returned. Note that when the JoinExpr is
  *	setup by transformMergeStmt, the left subtree has the target result
  *	relation and the right subtree has the source relation.
- *
- *	Returns the rangetable index of the target relation.
  */
-static int
+static void
 transformMergeJoinClause(ParseState *pstate, Node *merge,
 						 List **mergeSourceTargetList)
 {
@@ -97,9 +95,7 @@ transformMergeJoinClause(ParseState *pstate, Node *merge,
 	 * We also do not want to resolve any references from the leftside of the
 	 * Join since that corresponds to the target relation. References to the
 	 * columns of the target relation must be resolved from the result
-	 * relation and not the one that is used in the join. So the
-	 * mergeTarget_relation is marked invisible to both qualified as well as
-	 * unqualified references.
+	 * relation and not the one that is used in the join.
 	 *
 	 * XXX this would be less hackish if we told transformFromClauseItem not
 	 * to add the new RTE element to the namespace
@@ -127,8 +123,6 @@ transformMergeJoinClause(ParseState *pstate, Node *merge,
 	 * is added to transformFromClauseItem, so consider removing it.
 	 */
 	*mergeSourceTargetList = expandNSItemAttrs(pstate, top_nsitem, 0, false, -1);
-
-	return mergeSourceRTE;
 }
 
 /*
@@ -339,20 +333,9 @@ transformMergeStmt(ParseState *pstate, MergeStmt *stmt)
 	 * is later used by set_plan_refs() to fix the UPDATE/INSERT target lists
 	 * to so that they can correctly fetch the attributes from the source
 	 * relation.
-	 *
-	 * The target relation when used in the underlying join, gets a new RTE
-	 * with rte->inh set to true. We remember this RTE (and later pass on to
-	 * the planner and executor) for two main reasons:
-	 *
-	 * 1. If we ever need to run EvalPlanQual while performing MERGE, we must
-	 * make the modified tuple available to the underlying join query, which
-	 * is using a different RTE from the resultRelation RTE.
-	 *
-	 * 2. rewriteTargetListMerge() requires the RTE of the underlying join in
-	 * order to add junk CTID and TABLEOID attributes.
 	 */
-	qry->mergeTarget_relation = transformMergeJoinClause(pstate, (Node *) joinexpr,
-														 &qry->mergeSourceTargetList);
+	transformMergeJoinClause(pstate, (Node *) joinexpr,
+							 &qry->mergeSourceTargetList);
 	qry->targetList = qry->mergeSourceTargetList;
 
 

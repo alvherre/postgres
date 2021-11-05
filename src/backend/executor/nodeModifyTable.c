@@ -2927,13 +2927,6 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 	 */
 	resultRelInfo = mtstate->resultRelInfo;
 
-	/*
-	 * mergeTargetRelation must be set if we're running MERGE and mustn't be
-	 * set if we're not.
-	 */
-	Assert(operation != CMD_MERGE || node->mergeTargetRelation > 0);
-	Assert(operation == CMD_MERGE || node->mergeTargetRelation == 0);
-
 	i = 0;
 	foreach(l, node->resultRelations)
 	{

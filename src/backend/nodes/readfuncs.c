@@ -285,7 +285,6 @@ _readQuery(void)
 	READ_NODE_FIELD(setOperations);
 	READ_NODE_FIELD(constraintDeps);
 	READ_NODE_FIELD(withCheckOptions);
-	READ_INT_FIELD(mergeTarget_relation);
 	READ_NODE_FIELD(mergeSourceTargetList);
 	READ_NODE_FIELD(mergeActionList);
 	READ_LOCATION_FIELD(stmt_location);
@@ -1705,7 +1704,6 @@ _readModifyTable(void)
 	READ_UINT_FIELD(rootRelation);
 	READ_BOOL_FIELD(partColsUpdated);
 	READ_NODE_FIELD(resultRelations);
-	READ_INT_FIELD(mergeTargetRelation);
 	READ_NODE_FIELD(updateColnosLists);
 	READ_NODE_FIELD(withCheckOptionLists);
 	READ_NODE_FIELD(returningLists);
