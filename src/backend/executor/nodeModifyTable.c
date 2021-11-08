@@ -1543,7 +1543,7 @@ ExecCrossPartitionUpdate(ModifyTableState *mtstate,
 			   false,			/* processReturning */
 			   false,			/* canSetTag */
 			   true,			/* changingPart */
-			   tmfdp, actionState,
+			   tmfdp, NULL,
 			   &tuple_deleted, &epqslot);
 
 	/*
@@ -1575,6 +1575,22 @@ ExecCrossPartitionUpdate(ModifyTableState *mtstate,
 		 */
 		if (TupIsNull(epqslot))
 			return true;
+		/*
+		 * If running as part of an MERGE update, use the projection given in
+		 * the provided MergeActionState to emit the tuple to retry the update
+		 * with.
+		 */
+		else if (actionState)
+		{
+			ExprContext *econtext = mtstate->ps.ps_ExprContext;
+
+			econtext->ecxt_scantuple = resultRelInfo->ri_mergeTuple;
+			econtext->ecxt_innertuple = epqslot;
+			econtext->ecxt_outertuple = NULL;
+
+			*retry_slot = ExecProject(actionState->mas_proj);
+			return false;
+		}
 		else
 		{
 			/* Fetch the most recent version of old tuple. */

@@ -58,7 +58,7 @@ step "pa_merge1"
 step "pa_merge2"
 {
   MERGE INTO pa_target t
-  USING (SELECT 1 as key, 'pa_merge1' as val) s
+  USING (SELECT 1 as key, 'pa_merge2' as val) s
   ON s.key = t.key
   WHEN NOT MATCHED THEN
 	INSERT VALUES (s.key, s.val)
