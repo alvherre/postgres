@@ -479,11 +479,12 @@ typedef struct XLogCtlData
 	XLogCtlInsert Insert;
 
 	XLogwrtAtomic LogwrtResult; /* uses atomics */
+	pg_atomic_uint64 asyncXactLSN;	/* LSN of newest async commit/abort */
+
 	/* Protected by info_lck: */
 	XLogwrtRqst LogwrtRqst;
 	XLogRecPtr	RedoRecPtr;		/* a recent copy of Insert->RedoRecPtr */
 	FullTransactionId ckptFullXid;	/* nextXid of latest checkpoint */
-	XLogRecPtr	asyncXactLSN;	/* LSN of newest async commit/abort */
 	XLogRecPtr	replicationSlotMinLSN;	/* oldest LSN needed by any slot */
 
 	XLogSegNo	lastRemovedSegNo;	/* latest removed/recycled XLOG segment */
@@ -547,9 +548,9 @@ typedef struct XLogCtlData
 	/*
 	 * WalWriterSleeping indicates whether the WAL writer is currently in
 	 * low-power mode (and hence should be nudged if an async commit occurs).
-	 * Protected by info_lck.
+	 * Uses atomics.
 	 */
-	bool		WalWriterSleeping;
+	pg_atomic_uint32 WalWriterSleeping;
 
 	/*
 	 * During recovery, we keep a copy of the latest checkpoint record here.
@@ -2377,12 +2378,8 @@ XLogSetAsyncXactLSN(XLogRecPtr asyncXactLSN)
 	XLogRecPtr	WriteRqstPtr = asyncXactLSN;
 	bool		sleeping;
 
-	LogFlushResult = pg_atomic_read_u64(&XLogCtl->LogwrtResult.Flush);
-	SpinLockAcquire(&XLogCtl->info_lck);
-	sleeping = XLogCtl->WalWriterSleeping;
-	if (XLogCtl->asyncXactLSN < asyncXactLSN)
-		XLogCtl->asyncXactLSN = asyncXactLSN;
-	SpinLockRelease(&XLogCtl->info_lck);
+	sleeping = (bool) pg_atomic_read_u32(&XLogCtl->WalWriterSleeping);
+	pg_atomic_monotonic_advance_u64(&XLogCtl->asyncXactLSN, asyncXactLSN);
 
 	/*
 	 * If the WALWriter is sleeping, we should kick it to make it come out of
@@ -2395,6 +2392,7 @@ XLogSetAsyncXactLSN(XLogRecPtr asyncXactLSN)
 		WriteRqstPtr -= WriteRqstPtr % XLOG_BLCKSZ;
 
 		/* if we have already flushed that far, we're done */
+		LogFlushResult = pg_atomic_read_u64(&XLogCtl->LogwrtResult.Flush);
 		if (WriteRqstPtr <= LogFlushResult)
 			return;
 	}
@@ -2748,10 +2746,8 @@ XLogBackgroundFlush(void)
 	LogFlushResult = pg_atomic_read_u64(&XLogCtl->LogwrtResult.Flush);
 	if (WriteRqst.Write <= LogFlushResult)
 	{
-		pg_memory_barrier();
-		SpinLockAcquire(&XLogCtl->info_lck);
-		WriteRqst.Write = XLogCtl->asyncXactLSN;
-		SpinLockRelease(&XLogCtl->info_lck);
+		pg_read_barrier();
+		WriteRqst.Write = pg_atomic_read_u64(&XLogCtl->asyncXactLSN);
 		flexible = false;		/* ensure it all gets written */
 	}
 
@@ -2826,6 +2822,7 @@ XLogBackgroundFlush(void)
 	LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
 	LogWriteResult = pg_atomic_read_u64(&XLogCtl->LogwrtResult.Write);
 	LogFlushResult = pg_atomic_read_u64(&XLogCtl->LogwrtResult.Flush);
+	/* no barrier needed here */
 	if (WriteRqst.Write > LogWriteResult ||
 		WriteRqst.Flush > LogFlushResult)
 	{
@@ -4494,7 +4491,7 @@ XLOGShmemInit(void)
 	XLogCtl->XLogCacheBlck = XLOGbuffers - 1;
 	XLogCtl->SharedRecoveryState = RECOVERY_STATE_CRASH;
 	XLogCtl->InstallXLogFileSegmentActive = false;
-	XLogCtl->WalWriterSleeping = false;
+	pg_atomic_write_u32(&XLogCtl->WalWriterSleeping, (uint32) false);
 
 	SpinLockInit(&XLogCtl->Insert.insertpos_lck);
 	SpinLockInit(&XLogCtl->info_lck);
@@ -9213,11 +9210,11 @@ IsInstallXLogFileSegmentActive(void)
 
 /*
  * Update the WalWriterSleeping flag.
+ *
+ * Note there is no memory barrier here.  Caller must insert one if needed.
  */
 void
 SetWalWriterSleeping(bool sleeping)
 {
-	SpinLockAcquire(&XLogCtl->info_lck);
-	XLogCtl->WalWriterSleeping = sleeping;
-	SpinLockRelease(&XLogCtl->info_lck);
+	pg_atomic_write_u32(&XLogCtl->WalWriterSleeping, (uint32) sleeping);
 }
