@@ -2282,12 +2282,12 @@ ERROR:  column data type integer can only have storage PLAIN
 create index test_storage_idx on test_storage (b, a);
 alter table test_storage alter column a set storage external;
 \d+ test_storage
-                                     Table "public.test_storage"
- Column |  Type   | Collation | Nullable |      Default      | Storage  | Stats target | Description 
---------+---------+-----------+----------+-------------------+----------+--------------+-------------
- a      | text    |           |          |                   | external |              | 
- c      | text    |           |          |                   | plain    |              | 
- b      | integer |           |          | random()::integer | plain    |              | 
+                                          Table "public.test_storage"
+ Column |  Type   | Collation | NOT NULL Constraint |      Default      | Storage  | Stats target | Description 
+--------+---------+-----------+---------------------+-------------------+----------+--------------+-------------
+ a      | text    |           |                     |                   | external |              | 
+ c      | text    |           |                     |                   | plain    |              | 
+ b      | integer |           |                     | random()::integer | plain    |              | 
 Indexes:
     "test_storage_idx" btree (b, a)
 
@@ -2492,23 +2492,23 @@ insert into at_base_table values (23, 'skidoo');
 create view at_view_1 as select * from at_base_table bt;
 create view at_view_2 as select *, to_json(v1) as j from at_view_1 v1;
 \d+ at_view_1
-                          View "public.at_view_1"
- Column |  Type   | Collation | Nullable | Default | Storage  | Description 
---------+---------+-----------+----------+---------+----------+-------------
- id     | integer |           |          |         | plain    | 
- stuff  | text    |           |          |         | extended | 
+                                View "public.at_view_1"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage  | Description 
+--------+---------+-----------+---------------------+---------+----------+-------------
+ id     | integer |           |                     |         | plain    | 
+ stuff  | text    |           |                     |         | extended | 
 View definition:
  SELECT id,
     stuff
    FROM at_base_table bt;
 
 \d+ at_view_2
-                          View "public.at_view_2"
- Column |  Type   | Collation | Nullable | Default | Storage  | Description 
---------+---------+-----------+----------+---------+----------+-------------
- id     | integer |           |          |         | plain    | 
- stuff  | text    |           |          |         | extended | 
- j      | json    |           |          |         | extended | 
+                                View "public.at_view_2"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage  | Description 
+--------+---------+-----------+---------------------+---------+----------+-------------
+ id     | integer |           |                     |         | plain    | 
+ stuff  | text    |           |                     |         | extended | 
+ j      | json    |           |                     |         | extended | 
 View definition:
  SELECT id,
     stuff,
@@ -2530,12 +2530,12 @@ select * from at_view_2;
 
 create or replace view at_view_1 as select *, 2+2 as more from at_base_table bt;
 \d+ at_view_1
-                          View "public.at_view_1"
- Column |  Type   | Collation | Nullable | Default | Storage  | Description 
---------+---------+-----------+----------+---------+----------+-------------
- id     | integer |           |          |         | plain    | 
- stuff  | text    |           |          |         | extended | 
- more   | integer |           |          |         | plain    | 
+                                View "public.at_view_1"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage  | Description 
+--------+---------+-----------+---------------------+---------+----------+-------------
+ id     | integer |           |                     |         | plain    | 
+ stuff  | text    |           |                     |         | extended | 
+ more   | integer |           |                     |         | plain    | 
 View definition:
  SELECT id,
     stuff,
@@ -2543,12 +2543,12 @@ View definition:
    FROM at_base_table bt;
 
 \d+ at_view_2
-                          View "public.at_view_2"
- Column |  Type   | Collation | Nullable | Default | Storage  | Description 
---------+---------+-----------+----------+---------+----------+-------------
- id     | integer |           |          |         | plain    | 
- stuff  | text    |           |          |         | extended | 
- j      | json    |           |          |         | extended | 
+                                View "public.at_view_2"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage  | Description 
+--------+---------+-----------+---------------------+---------+----------+-------------
+ id     | integer |           |                     |         | plain    | 
+ stuff  | text    |           |                     |         | extended | 
+ j      | json    |           |                     |         | extended | 
 View definition:
  SELECT id,
     stuff,
@@ -4275,10 +4275,10 @@ DROP TABLE part_rpd;
 -- works fine
 ALTER TABLE range_parted2 DETACH PARTITION part_rp CONCURRENTLY;
 \d+ range_parted2
-                         Partitioned table "public.range_parted2"
- Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
---------+---------+-----------+----------+---------+---------+--------------+-------------
- a      | integer |           |          |         | plain   |              | 
+                              Partitioned table "public.range_parted2"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Stats target | Description 
+--------+---------+-----------+---------------------+---------+---------+--------------+-------------
+ a      | integer |           |                     |         | plain   |              | 
 Partition key: RANGE (a)
 Number of partitions: 0
 
@@ -4619,10 +4619,10 @@ create publication pub1 for table alter1.t1, tables in schema alter2;
 reset client_min_messages;
 alter table alter1.t1 set schema alter2;
 \d+ alter2.t1
-                                    Table "alter2.t1"
- Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
---------+---------+-----------+----------+---------+---------+--------------+-------------
- a      | integer |           |          |         | plain   |              | 
+                                          Table "alter2.t1"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Stats target | Description 
+--------+---------+-----------+---------------------+---------+---------+--------------+-------------
+ a      | integer |           |                     |         | plain   |              | 
 Publications:
     "pub1"
 

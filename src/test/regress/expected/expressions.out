@@ -127,15 +127,15 @@ create view numeric_view as
     f2, f2::numeric(16,4) as f2164, f2::numeric as f2n
   from numeric_tbl;
 \d+ numeric_view
-                           View "public.numeric_view"
- Column |     Type      | Collation | Nullable | Default | Storage | Description 
---------+---------------+-----------+----------+---------+---------+-------------
- f1     | numeric(18,3) |           |          |         | main    | 
- f1164  | numeric(16,4) |           |          |         | main    | 
- f1n    | numeric       |           |          |         | main    | 
- f2     | numeric       |           |          |         | main    | 
- f2164  | numeric(16,4) |           |          |         | main    | 
- f2n    | numeric       |           |          |         | main    | 
+                                 View "public.numeric_view"
+ Column |     Type      | Collation | NOT NULL Constraint | Default | Storage | Description 
+--------+---------------+-----------+---------------------+---------+---------+-------------
+ f1     | numeric(18,3) |           |                     |         | main    | 
+ f1164  | numeric(16,4) |           |                     |         | main    | 
+ f1n    | numeric       |           |                     |         | main    | 
+ f2     | numeric       |           |                     |         | main    | 
+ f2164  | numeric(16,4) |           |                     |         | main    | 
+ f2n    | numeric       |           |                     |         | main    | 
 View definition:
  SELECT f1,
     f1::numeric(16,4) AS f1164,
@@ -161,15 +161,15 @@ create view bpchar_view as
     f2, f2::character(14) as f214, f2::bpchar as f2n
   from bpchar_tbl;
 \d+ bpchar_view
-                            View "public.bpchar_view"
- Column |     Type      | Collation | Nullable | Default | Storage  | Description 
---------+---------------+-----------+----------+---------+----------+-------------
- f1     | character(16) |           |          |         | extended | 
- f114   | character(14) |           |          |         | extended | 
- f1n    | bpchar        |           |          |         | extended | 
- f2     | bpchar        |           |          |         | extended | 
- f214   | character(14) |           |          |         | extended | 
- f2n    | bpchar        |           |          |         | extended | 
+                                  View "public.bpchar_view"
+ Column |     Type      | Collation | NOT NULL Constraint | Default | Storage  | Description 
+--------+---------------+-----------+---------------------+---------+----------+-------------
+ f1     | character(16) |           |                     |         | extended | 
+ f114   | character(14) |           |                     |         | extended | 
+ f1n    | bpchar        |           |                     |         | extended | 
+ f2     | bpchar        |           |                     |         | extended | 
+ f214   | character(14) |           |                     |         | extended | 
+ f2n    | bpchar        |           |                     |         | extended | 
 View definition:
  SELECT f1,
     f1::character(14) AS f114,

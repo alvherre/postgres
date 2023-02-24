@@ -693,10 +693,10 @@ CREATE VIEW collate_on_int AS
 SELECT c1+1 AS c1p FROM
   (SELECT ('4' COLLATE "C")::INT AS c1) ss;
 \d+ collate_on_int
-                    View "collate_tests.collate_on_int"
- Column |  Type   | Collation | Nullable | Default | Storage | Description 
---------+---------+-----------+----------+---------+---------+-------------
- c1p    | integer |           |          |         | plain   | 
+                         View "collate_tests.collate_on_int"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+--------+---------+-----------+---------------------+---------+---------+-------------
+ c1p    | integer |           |                     |         | plain   | 
 View definition:
  SELECT c1 + 1 AS c1p
    FROM ( SELECT 4 AS c1) ss;

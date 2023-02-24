@@ -1919,11 +1919,11 @@ INSERT INTO base_tbl VALUES (1,2), (2,3), (1,-1);
 CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a < b
   WITH LOCAL CHECK OPTION;
 \d+ rw_view1
-                          View "public.rw_view1"
- Column |  Type   | Collation | Nullable | Default | Storage | Description 
---------+---------+-----------+----------+---------+---------+-------------
- a      | integer |           |          |         | plain   | 
- b      | integer |           |          |         | plain   | 
+                                View "public.rw_view1"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+--------+---------+-----------+---------------------+---------+---------+-------------
+ a      | integer |           |                     |         | plain   | 
+ b      | integer |           |                     |         | plain   | 
 View definition:
  SELECT a,
     b
@@ -1973,10 +1973,10 @@ CREATE VIEW rw_view1 AS SELECT * FROM base_tbl WHERE a > 0;
 CREATE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
   WITH CHECK OPTION; -- implicitly cascaded
 \d+ rw_view2
-                          View "public.rw_view2"
- Column |  Type   | Collation | Nullable | Default | Storage | Description 
---------+---------+-----------+----------+---------+---------+-------------
- a      | integer |           |          |         | plain   | 
+                                View "public.rw_view2"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+--------+---------+-----------+---------------------+---------+---------+-------------
+ a      | integer |           |                     |         | plain   | 
 View definition:
  SELECT a
    FROM rw_view1
@@ -2013,10 +2013,10 @@ DETAIL:  Failing row contains (15).
 CREATE OR REPLACE VIEW rw_view2 AS SELECT * FROM rw_view1 WHERE a < 10
   WITH LOCAL CHECK OPTION;
 \d+ rw_view2
-                          View "public.rw_view2"
- Column |  Type   | Collation | Nullable | Default | Storage | Description 
---------+---------+-----------+----------+---------+---------+-------------
- a      | integer |           |          |         | plain   | 
+                                View "public.rw_view2"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+--------+---------+-----------+---------------------+---------+---------+-------------
+ a      | integer |           |                     |         | plain   | 
 View definition:
  SELECT a
    FROM rw_view1
@@ -2054,10 +2054,10 @@ ERROR:  new row violates check option for view "rw_view2"
 DETAIL:  Failing row contains (30).
 ALTER VIEW rw_view2 RESET (check_option);
 \d+ rw_view2
-                          View "public.rw_view2"
- Column |  Type   | Collation | Nullable | Default | Storage | Description 
---------+---------+-----------+----------+---------+---------+-------------
- a      | integer |           |          |         | plain   | 
+                                View "public.rw_view2"
+ Column |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+--------+---------+-----------+---------------------+---------+---------+-------------
+ a      | integer |           |                     |         | plain   | 
 View definition:
  SELECT a
    FROM rw_view1

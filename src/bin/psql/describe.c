@@ -1853,9 +1853,20 @@ describeOneTableDetails(const char *schemaname,
 		appendPQExpBufferStr(&buf,
 							 ",\n  (SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid, true)"
 							 "\n   FROM pg_catalog.pg_attrdef d"
-							 "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef)"
-							 ",\n  a.attnotnull");
+							 "\n   WHERE d.adrelid = a.attrelid AND d.adnum = a.attnum AND a.atthasdef)");
 		attrdef_col = cols++;
+		if (verbose && pset.sversion >= 160000)
+		{
+			appendPQExpBuffer(&buf,
+							  ",\n  (SELECT CASE when contype = 'n' THEN conname ELSE '(primary key)' END"
+							  "\n   FROM pg_catalog.pg_constraint co"
+							  "\n   WHERE co.conrelid = '%s' AND co.contype IN ('n', 'p') "
+							  "\n   AND co.conkey @> array[attnum]"
+							  "\n   ORDER BY contype <> 'n' LIMIT 1) AS attnotnull",
+							  oid);
+		}
+		else
+			appendPQExpBufferStr(&buf, ",\n  a.attnotnull");
 		attnotnull_col = cols++;
 		appendPQExpBufferStr(&buf, ",\n  (SELECT c.collname FROM pg_catalog.pg_collation c, pg_catalog.pg_type t\n"
 							 "   WHERE c.oid = a.attcollation AND t.oid = a.atttypid AND a.attcollation <> t.typcollation) AS attcollation");
@@ -2019,7 +2030,8 @@ describeOneTableDetails(const char *schemaname,
 	if (show_column_details)
 	{
 		headers[cols++] = gettext_noop("Collation");
-		headers[cols++] = gettext_noop("Nullable");
+		headers[cols++] = verbose ?  gettext_noop("NOT NULL Constraint") :
+			gettext_noop("Nullable");
 		headers[cols++] = gettext_noop("Default");
 	}
 	if (isindexkey_col >= 0)
@@ -2064,9 +2076,14 @@ describeOneTableDetails(const char *schemaname,
 
 			printTableAddCell(&cont, PQgetvalue(res, i, attcoll_col), false, false);
 
-			printTableAddCell(&cont,
-							  strcmp(PQgetvalue(res, i, attnotnull_col), "t") == 0 ? "not null" : "",
-							  false, false);
+			if (verbose)
+				printTableAddCell(&cont,
+								  PQgetvalue(res, i, attnotnull_col),
+								  false, false);
+			else
+				printTableAddCell(&cont,
+								  strcmp(PQgetvalue(res, i, attnotnull_col), "t") == 0 ? "not null" : "",
+								  false, false);
 
 			identity = PQgetvalue(res, i, attidentity_col);
 			generated = PQgetvalue(res, i, attgenerated_col);

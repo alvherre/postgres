@@ -633,10 +633,10 @@ ERROR:  WITH TIES cannot be specified without ORDER BY clause
 CREATE VIEW limit_thousand_v_1 AS SELECT thousand FROM onek WHERE thousand < 995
 		ORDER BY thousand FETCH FIRST 5 ROWS WITH TIES OFFSET 10;
 \d+ limit_thousand_v_1
-                      View "public.limit_thousand_v_1"
-  Column  |  Type   | Collation | Nullable | Default | Storage | Description 
-----------+---------+-----------+----------+---------+---------+-------------
- thousand | integer |           |          |         | plain   | 
+                            View "public.limit_thousand_v_1"
+  Column  |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+----------+---------+-----------+---------------------+---------+---------+-------------
+ thousand | integer |           |                     |         | plain   | 
 View definition:
  SELECT thousand
    FROM onek
@@ -648,10 +648,10 @@ View definition:
 CREATE VIEW limit_thousand_v_2 AS SELECT thousand FROM onek WHERE thousand < 995
 		ORDER BY thousand OFFSET 10 FETCH FIRST 5 ROWS ONLY;
 \d+ limit_thousand_v_2
-                      View "public.limit_thousand_v_2"
-  Column  |  Type   | Collation | Nullable | Default | Storage | Description 
-----------+---------+-----------+----------+---------+---------+-------------
- thousand | integer |           |          |         | plain   | 
+                            View "public.limit_thousand_v_2"
+  Column  |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+----------+---------+-----------+---------------------+---------+---------+-------------
+ thousand | integer |           |                     |         | plain   | 
 View definition:
  SELECT thousand
    FROM onek
@@ -666,10 +666,10 @@ ERROR:  row count cannot be null in FETCH FIRST ... WITH TIES clause
 CREATE VIEW limit_thousand_v_3 AS SELECT thousand FROM onek WHERE thousand < 995
 		ORDER BY thousand FETCH FIRST (NULL+1) ROWS WITH TIES;
 \d+ limit_thousand_v_3
-                      View "public.limit_thousand_v_3"
-  Column  |  Type   | Collation | Nullable | Default | Storage | Description 
-----------+---------+-----------+----------+---------+---------+-------------
- thousand | integer |           |          |         | plain   | 
+                            View "public.limit_thousand_v_3"
+  Column  |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+----------+---------+-----------+---------------------+---------+---------+-------------
+ thousand | integer |           |                     |         | plain   | 
 View definition:
  SELECT thousand
    FROM onek
@@ -680,10 +680,10 @@ View definition:
 CREATE VIEW limit_thousand_v_4 AS SELECT thousand FROM onek WHERE thousand < 995
 		ORDER BY thousand FETCH FIRST NULL ROWS ONLY;
 \d+ limit_thousand_v_4
-                      View "public.limit_thousand_v_4"
-  Column  |  Type   | Collation | Nullable | Default | Storage | Description 
-----------+---------+-----------+----------+---------+---------+-------------
- thousand | integer |           |          |         | plain   | 
+                            View "public.limit_thousand_v_4"
+  Column  |  Type   | Collation | NOT NULL Constraint | Default | Storage | Description 
+----------+---------+-----------+---------------------+---------+---------+-------------
+ thousand | integer |           |                     |         | plain   | 
 View definition:
  SELECT thousand
    FROM onek
