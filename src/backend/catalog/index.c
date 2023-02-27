@@ -269,8 +269,8 @@ index_check_primary_key(Relation heapRel,
 		if (!attform->attnotnull)
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					 errmsg("primary key column \"%s\" is not marked NOT NULL",
-							NameStr(attform->attname))));
+					 errmsg("primary key column \"%s\" is not marked NOT NULL in table \"%s\"",
+							NameStr(attform->attname), RelationGetRelationName(heapRel))));
 
 		ReleaseSysCache(atttuple);
 	}
