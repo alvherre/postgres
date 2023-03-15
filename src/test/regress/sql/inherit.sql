@@ -842,21 +842,6 @@ drop table inh_p2;
 drop table inh_p3;
 drop table inh_p4;
 
--- Verify constraint renaming when recursing to child
-create schema inh1 create table onetab (a int);
-create schema inh2 create table onetab (b int) inherits (inh1.onetab);
-alter table inh2.onetab add constraint onetab_a_not_null check (b > 0);
-alter table inh2.onetab add constraint foobar not null a;
--- fails: target constraint name in use, when renaming existing constraint
-alter table inh1.onetab alter a set not null;
-
-alter table inh2.onetab drop constraint foobar;
--- fails: target constraint name in use, when creating new constraint
-alter table inh1.onetab alter a set not null;
-
-drop schema inh1, inh2 cascade;
-
-
 --
 -- Check use of temporary tables with inheritance trees
 --

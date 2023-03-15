@@ -2174,24 +2174,6 @@ drop table inh_p1 cascade;
 drop table inh_p2;
 drop table inh_p3;
 drop table inh_p4;
--- Verify constraint renaming when recursing to child
-create schema inh1 create table onetab (a int);
-create schema inh2 create table onetab (b int) inherits (inh1.onetab);
-alter table inh2.onetab add constraint onetab_a_not_null check (b > 0);
-alter table inh2.onetab add constraint foobar not null a;
--- fails: target constraint name in use, when renaming existing constraint
-alter table inh1.onetab alter a set not null;
-ERROR:  cannot rename constraint on relation "inh2.onetab" to "onetab_a_not_null"
-DETAIL:  Another constraint with that name already exists.
-alter table inh2.onetab drop constraint foobar;
--- fails: target constraint name in use, when creating new constraint
-alter table inh1.onetab alter a set not null;
-ERROR:  cannot add constraint "onetab_a_not_null" to relation "inh2.onetab"
-DETAIL:  Another constraint with that name already exists.
-drop schema inh1, inh2 cascade;
-NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to table inh1.onetab
-drop cascades to table inh2.onetab
 --
 -- Check use of temporary tables with inheritance trees
 --

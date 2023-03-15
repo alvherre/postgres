@@ -7586,7 +7586,6 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ObjectAddress address;
 	Constraint *constraint;
 	CookedConstraint *ccon;
-	bool		found = false;
 	List	   *cooked;
 	List	   *ready = NIL;
 
@@ -7646,16 +7645,8 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		copytup = heap_copytuple(tuple);
 
 		/*
-		 * If we're recursing (that is, we have already determined a
-		 * constraint name) and we find that an appropriate constraint already
-		 * exists, then rename it to the name we want and increment
-		 * coninhcount.
-		 *
-		 * However, there are some problems: 1) if the constraint on the child
-		 * is inherited, then we cannot rename it because another parent
-		 * forces the current name. Throw error.  2) If the target name we
-		 * chose is used by another constraint, it's not possible to rename
-		 * either (this only happens when tables are in different schemas).
+		 * If we're recursing and we find that an appropriate constraint
+		 * already exists, increment coninhcount and we're done.
 		 *
 		 * If we're not recursing and we do find a matching constraint, then
 		 * we don't need to add another; just set conislocal for it (if not
@@ -7663,31 +7654,6 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		 */
 		if (recursing)
 		{
-			Assert(conName != NULL);
-			if (strcmp(conName, NameStr(conForm->conname)) != 0)
-			{
-				if (conForm->coninhcount > 0)
-					ereport(ERROR,
-							errmsg("renaming inherited constraint \"%s\" on relation \"%s\" to \"%s\" is not supported",
-								   NameStr(conForm->conname),
-								   RelationGetRelationName(rel), conName),
-							errhint("Try renaming the constraint on the other parent(s) of relation \"%s\" first.",
-									RelationGetRelationName(rel)));
-
-				if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
-										 RelationGetRelid(rel),
-										 conName))
-					ereport(ERROR,
-							errcode(ERRCODE_DUPLICATE_OBJECT),
-							errmsg("cannot rename constraint on relation \"%s.%s\" to \"%s\"",
-								   get_namespace_name(rel->rd_rel->relnamespace),
-								   RelationGetRelationName(rel),
-								   conName),
-							errdetail("Another constraint with that name already exists."));
-
-				namestrcpy(&(conForm->conname), conName);
-			}
-
 			conForm->coninhcount++;
 			changed = true;
 		}
@@ -7703,16 +7669,14 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			ObjectAddressSet(address, ConstraintRelationId, conForm->oid);
 		}
 
-		found = true;
-		break;
+		systable_endscan(conscan);
+		table_close(constr_rel, RowExclusiveLock);
+
+		return address;
 	}
 
 	systable_endscan(conscan);
 	table_close(constr_rel, RowExclusiveLock);
-
-	/* If a found a constraint, no need for anything else */
-	if (found)
-		return address;
 
 	/*
 	 * If we're asked not to recurse, and children exist, raise an error.
@@ -7734,28 +7698,8 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	}
 
 	/*
-	 * If we are recursing after having already decided on a name, but that
-	 * name is already taken up in this relation, throw an error.  This would
-	 * only happen with relations in different schemas, so mention the schema
-	 * in the message.
-	 */
-	if (conName &&
-		ConstraintNameIsUsed(CONSTRAINT_RELATION,
-							 RelationGetRelid(rel),
-							 conName))
-		ereport(ERROR,
-				errcode(ERRCODE_DUPLICATE_OBJECT),
-				errmsg("cannot add constraint \"%s\" to relation \"%s.%s\"",
-					   conName, get_namespace_name(rel->rd_rel->relnamespace),
-					   RelationGetRelationName(rel)),
-				errdetail("Another constraint with that name already exists."));
-
-	/*
 	 * No constraint exists; we must add one.  First determine a name to use,
-	 * if we haven't already.  Note that because how ChooseConstraintName
-	 * works, this name won't match any other constraint name in the schema,
-	 * including potentially ones in the children that we need to recurse to,
-	 * so this will necessarily rename any that exist.
+	 * if we haven't already.
 	 */
 	if (!recursing)
 	{
@@ -9243,9 +9187,9 @@ ChooseForeignKeyConstraintNameAddition(List *colnames)
 }
 
 /*
- * Add a check constraint to a single table and its children.  Returns the
- * address of the constraint added to the parent relation, if one gets added,
- * or InvalidObjectAddress otherwise.
+ * Add a check or NOT NULL constraint to a single table and its children.
+ * Returns the address of the constraint added to the parent relation,
+ * if one gets added, or InvalidObjectAddress otherwise.
  *
  * Subroutine for ATExecAddConstraint.
  *
@@ -12313,6 +12257,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	bool		dropping_pk = false;
 	char	   *constrName;
 	List	   *unconstrained_cols = NIL;
+	char	   *colname;	/* to match NOT NULL constraints when recursing */
 
 	conrel = table_open(ConstraintRelationId, RowExclusiveLock);
 
@@ -12515,6 +12460,13 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 				 errmsg("cannot remove constraint from only the partitioned table when partitions exist"),
 				 errhint("Do not specify the ONLY keyword.")));
 
+	/* For NOT NULL constraints we recurse by column name */
+	if (con->contype == CONSTRAINT_NOTNULL)
+		colname = NameStr(TupleDescAttr(RelationGetDescr(rel),
+										linitial_int(unconstrained_cols) - 1)->attname);
+	else
+		colname = NULL;		/* keep compiler quiet */
+
 	foreach(child, children)
 	{
 		Oid			childrelid = lfirst_oid(child);
@@ -12528,28 +12480,64 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		childrel = table_open(childrelid, NoLock);
 		CheckTableNotInUse(childrel, "ALTER TABLE");
 
-		ScanKeyInit(&skey[0],
-					Anum_pg_constraint_conrelid,
-					BTEqualStrategyNumber, F_OIDEQ,
-					ObjectIdGetDatum(childrelid));
-		ScanKeyInit(&skey[1],
-					Anum_pg_constraint_contypid,
-					BTEqualStrategyNumber, F_OIDEQ,
-					ObjectIdGetDatum(InvalidOid));
-		ScanKeyInit(&skey[2],
-					Anum_pg_constraint_conname,
-					BTEqualStrategyNumber, F_NAMEEQ,
-					CStringGetDatum(constrName));
-		scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId,
-								  true, NULL, 3, skey);
+		/*
+		 * We search for NOT NULL constraint by column number, and other
+		 * constraints by name.
+		 */
+		if (con->contype == CONSTRAINT_NOTNULL)
+		{
+			bool	found = false;
+			AttrNumber child_colnum;
 
-		/* There can be at most one matching row */
-		if (!HeapTupleIsValid(tuple = systable_getnext(scan)))
-			ereport(ERROR,
-					(errcode(ERRCODE_UNDEFINED_OBJECT),
-					 errmsg("constraint \"%s\" of relation \"%s\" does not exist",
-							constrName,
-							RelationGetRelationName(childrel))));
+			child_colnum = get_attnum(RelationGetRelid(childrel), colname);
+			ScanKeyInit(&skey[0],
+						Anum_pg_constraint_conrelid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(childrelid));
+			scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId,
+									  true, NULL, 1, skey);
+			while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+			{
+				Form_pg_constraint constr = (Form_pg_constraint) GETSTRUCT(tuple);
+				AttrNumber	constr_colnum;
+
+				if (constr->contype != CONSTRAINT_NOTNULL)
+					continue;
+				constr_colnum = extractNotNullColumn(tuple);
+				if (constr_colnum != child_colnum)
+					continue;
+
+				found = true;
+				break;	/* found it */
+			}
+			if (!found)
+				elog(ERROR, "could not find not null constraint"); /* FIXME improve */
+		}
+		else
+		{
+			ScanKeyInit(&skey[0],
+						Anum_pg_constraint_conrelid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(childrelid));
+			ScanKeyInit(&skey[1],
+						Anum_pg_constraint_contypid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(InvalidOid));
+			ScanKeyInit(&skey[2],
+						Anum_pg_constraint_conname,
+						BTEqualStrategyNumber, F_NAMEEQ,
+						CStringGetDatum(constrName));
+			scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId,
+									  true, NULL, 3, skey);
+			/* There can only be one, so no need to loop */
+			tuple = systable_getnext(scan);
+			if (!HeapTupleIsValid(tuple))
+				ereport(ERROR,
+						(errcode(ERRCODE_UNDEFINED_OBJECT),
+						 errmsg("constraint \"%s\" of relation \"%s\" does not exist",
+								constrName,
+								RelationGetRelationName(childrel))));
+		}
 
 		copy_tuple = heap_copytuple(tuple);
 
@@ -12575,10 +12563,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			if (con->coninhcount == 1 && !con->conislocal)
 			{
 				/* Time to delete this child constraint, too */
-				/* XXX can this recurse on itself instead? */
-				ATExecDropConstraint(childrel, constrName, behavior,
-									 true, true,
-									 false, lockmode);
+				dropconstraint_internal(childrel, copy_tuple, behavior,
+										recurse, true, missing_ok, lockmode);
 			}
 			else
 			{
