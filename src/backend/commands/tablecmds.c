@@ -7646,12 +7646,9 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		copytup = heap_copytuple(tuple);
 
 		/*
-		 * If we're recursing and we find that an appropriate constraint
-		 * already exists, increment coninhcount and we're done.
-		 *
-		 * If we're not recursing and we do find a matching constraint, then
-		 * we don't need to add another; just set conislocal for it (if not
-		 * already done) and we're done.
+		 * If we find an appropriate constraint, we're almost done, but just
+		 * need to change some properties on it: if we're recursing, increment
+		 * coninhcount; if not, set conislocal if not already set.
 		 */
 		if (recursing)
 		{
@@ -7666,14 +7663,17 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 		if (changed)
 		{
-			CatalogTupleUpdate(constr_rel, &tuple->t_self, copytup);
+			CatalogTupleUpdate(constr_rel, &copytup->t_self, copytup);
 			ObjectAddressSet(address, ConstraintRelationId, conForm->oid);
 		}
 
 		systable_endscan(conscan);
 		table_close(constr_rel, RowExclusiveLock);
 
-		return address;
+		if (changed)
+			return address;
+		else
+			return InvalidObjectAddress;
 	}
 
 	systable_endscan(conscan);
