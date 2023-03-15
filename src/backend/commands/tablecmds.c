@@ -545,7 +545,8 @@ static void ATExecDropConstraint(Relation rel, const char *constrName,
 static ObjectAddress dropconstraint_internal(Relation rel,
 											 HeapTuple constraintTup, DropBehavior behavior,
 											 bool recurse, bool recursing,
-											 bool missing_ok, LOCKMODE lockmode);
+											 bool missing_ok, List **readyRels,
+											 LOCKMODE lockmode);
 static void ATPrepAlterColumnType(List **wqueue,
 								  AlteredTableInfo *tab, Relation rel,
 								  bool recurse, bool recursing,
@@ -7548,7 +7549,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 					   NameStr(conForm->conname), RelationGetRelationName(rel)));
 
 	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
-							false, lockmode);
+							false, NULL, lockmode);
 
 	heap_freetuple(conTup);
 
@@ -12214,7 +12215,7 @@ ATExecDropConstraint(Relation rel, const char *constrName,
 	if (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
 		dropconstraint_internal(rel, tuple, behavior, recurse, recursing,
-								missing_ok, lockmode);
+								missing_ok, NULL, lockmode);
 		found = true;
 	}
 
@@ -12246,7 +12247,8 @@ ATExecDropConstraint(Relation rel, const char *constrName,
  */
 static ObjectAddress
 dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior behavior,
-						bool recurse, bool recursing, bool missing_ok, LOCKMODE lockmode)
+						bool recurse, bool recursing, bool missing_ok, List **readyRels,
+						LOCKMODE lockmode)
 {
 	Relation	conrel;
 	Form_pg_constraint con;
@@ -12258,6 +12260,13 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	char	   *constrName;
 	List	   *unconstrained_cols = NIL;
 	char	   *colname;	/* to match NOT NULL constraints when recursing */
+	List	   *ready = NIL;
+
+	if (readyRels == NULL)
+		readyRels = &ready;
+	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
+		return InvalidObjectAddress;
+	*readyRels = lappend_oid(*readyRels, RelationGetRelid(rel));
 
 	conrel = table_open(ConstraintRelationId, RowExclusiveLock);
 
@@ -12472,9 +12481,13 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		Oid			childrelid = lfirst_oid(child);
 		Relation	childrel;
 		HeapTuple	tuple;
+		Form_pg_constraint childcon;
 		HeapTuple	copy_tuple;
 		SysScanDesc scan;
 		ScanKeyData skey[3];
+
+		if (list_member_oid(*readyRels, childrelid))
+			continue;		/* child already processed */
 
 		/* find_inheritance_children already got lock */
 		childrel = table_open(childrelid, NoLock);
@@ -12488,6 +12501,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		{
 			bool	found = false;
 			AttrNumber child_colnum;
+			HeapTuple	child_tup;
 
 			child_colnum = get_attnum(RelationGetRelid(childrel), colname);
 			ScanKeyInit(&skey[0],
@@ -12496,22 +12510,26 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						ObjectIdGetDatum(childrelid));
 			scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId,
 									  true, NULL, 1, skey);
-			while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+			while (HeapTupleIsValid(child_tup = systable_getnext(scan)))
 			{
-				Form_pg_constraint constr = (Form_pg_constraint) GETSTRUCT(tuple);
+				Form_pg_constraint constr = (Form_pg_constraint) GETSTRUCT(child_tup);
 				AttrNumber	constr_colnum;
 
 				if (constr->contype != CONSTRAINT_NOTNULL)
 					continue;
-				constr_colnum = extractNotNullColumn(tuple);
+				constr_colnum = extractNotNullColumn(child_tup);
 				if (constr_colnum != child_colnum)
 					continue;
 
 				found = true;
 				break;	/* found it */
 			}
-			if (!found)
-				elog(ERROR, "could not find not null constraint"); /* FIXME improve */
+			if (!found)	/* shouldn't happen? */
+				elog(ERROR, "failed to find NOT NULL constraint for column \"%s\" in table \"%s\"",
+					 colname, RelationGetRelationName(childrel));
+
+			copy_tuple = heap_copytuple(child_tup);
+			systable_endscan(scan);
 		}
 		else
 		{
@@ -12537,20 +12555,18 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						 errmsg("constraint \"%s\" of relation \"%s\" does not exist",
 								constrName,
 								RelationGetRelationName(childrel))));
+			copy_tuple = heap_copytuple(tuple);
+			systable_endscan(scan);
 		}
 
-		copy_tuple = heap_copytuple(tuple);
-
-		systable_endscan(scan);
-
-		con = (Form_pg_constraint) GETSTRUCT(copy_tuple);
+		childcon = (Form_pg_constraint) GETSTRUCT(copy_tuple);
 
 		/* Right now only CHECK and NOT NULL constraints can be inherited */
-		if (con->contype != CONSTRAINT_CHECK &&
-			con->contype != CONSTRAINT_NOTNULL)
+		if (childcon->contype != CONSTRAINT_CHECK &&
+			childcon->contype != CONSTRAINT_NOTNULL)
 			elog(ERROR, "inherited constraint is not a CHECK or NOT NULL constraint");
 
-		if (con->coninhcount <= 0)	/* shouldn't happen */
+		if (childcon->coninhcount <= 0)	/* shouldn't happen */
 			elog(ERROR, "relation %u has non-inherited constraint \"%s\"",
 				 childrelid, constrName);
 
@@ -12560,16 +12576,17 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			 * If the child constraint has other definition sources, just
 			 * decrement its inheritance count; if not, recurse to delete it.
 			 */
-			if (con->coninhcount == 1 && !con->conislocal)
+			if (childcon->coninhcount == 1 && !childcon->conislocal)
 			{
 				/* Time to delete this child constraint, too */
 				dropconstraint_internal(childrel, copy_tuple, behavior,
-										recurse, true, missing_ok, lockmode);
+										recurse, true, missing_ok, readyRels,
+										lockmode);
 			}
 			else
 			{
 				/* Child constraint must survive my deletion */
-				con->coninhcount--;
+				childcon->coninhcount--;
 				CatalogTupleUpdate(conrel, &copy_tuple->t_self, copy_tuple);
 
 				/* Make update visible */
@@ -12583,8 +12600,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			 * need to mark the inheritors' constraints as locally defined
 			 * rather than inherited.
 			 */
-			con->coninhcount--;
-			con->conislocal = true;
+			childcon->coninhcount--;
+			childcon->conislocal = true;
 
 			CatalogTupleUpdate(conrel, &copy_tuple->t_self, copy_tuple);
 
