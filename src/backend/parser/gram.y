@@ -648,25 +648,16 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 					json_representation
 					json_value_expr
 					json_output_clause_opt
-					json_func_expr
-					json_value_constructor
-					json_object_constructor
-					json_object_constructor_args
 					json_object_constructor_args_opt
 					json_object_args
-					json_object_func_args
-					json_array_constructor
 					json_name_and_value
 					json_aggregate_func
-					json_object_aggregate_constructor
-					json_array_aggregate_constructor
 
 %type <list>		json_name_and_value_list
 					json_value_expr_list
 					json_array_aggregate_order_by_clause_opt
 
-%type <ival>		json_encoding
-					json_encoding_clause_opt
+%type <ival>		json_encoding_clause_opt
 
 %type <boolean>		json_key_uniqueness_constraint_opt
 					json_object_constructor_null_clause_opt
@@ -14949,15 +14940,13 @@ b_expr:		c_expr
 				}
 		;
 
+/* KEYS is a noise word here */
 json_key_uniqueness_constraint_opt:
-			WITH_LA_UNIQUE unique_keys				{ $$ = true; }
-			| WITHOUT unique_keys					{ $$ = false; }
+			WITH_LA_UNIQUE UNIQUE KEYS				{ $$ = true; }
+			| WITH_LA_UNIQUE UNIQUE				    { $$ = true; }
+			| WITHOUT UNIQUE KEYS					{ $$ = false; }
+			| WITHOUT UNIQUE					    { $$ = false; }
 			| /* EMPTY */ %prec empty_json_unique	{ $$ = false; }
-		;
-
-unique_keys:
-			UNIQUE
-			| UNIQUE KEYS
 		;
 
 /*
@@ -15599,8 +15588,53 @@ func_expr_common_subexpr:
 					n->location = @1;
 					$$ = (Node *) n;
 				}
-			| json_func_expr
-				{ $$ = $1; }
+			| JSON_OBJECT '(' json_object_args ')'
+				{
+					$$ = $3;
+				}
+			| JSON_ARRAY '('
+				json_value_expr_list
+				json_array_constructor_null_clause_opt
+				json_output_clause_opt
+			')'
+				{
+					JsonArrayConstructor *n = makeNode(JsonArrayConstructor);
+
+					n->exprs = $3;
+					n->absent_on_null = $4;
+					n->output = (JsonOutput *) $5;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| JSON_ARRAY '('
+				select_no_parens
+				/* json_format_clause_opt */
+				/* json_array_constructor_null_clause_opt */
+				json_output_clause_opt
+			')'
+				{
+					JsonArrayQueryConstructor *n = makeNode(JsonArrayQueryConstructor);
+
+					n->query = $3;
+					n->format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
+					/* n->format = $4; */
+					n->absent_on_null = true /* $5 */;
+					n->output = (JsonOutput *) $4;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
+			| JSON_ARRAY '('
+				json_output_clause_opt
+			')'
+				{
+					JsonArrayConstructor *n = makeNode(JsonArrayConstructor);
+
+					n->exprs = NIL;
+					n->absent_on_null = true;
+					n->output = (JsonOutput *) $3;
+					n->location = @1;
+					$$ = (Node *) n;
+				}
 		;
 
 /*
@@ -16326,10 +16360,6 @@ opt_asymmetric: ASYMMETRIC
 		;
 
 /* SQL/JSON support */
-json_func_expr:
-			json_value_constructor
-		;
-
 json_value_expr:
 			a_expr json_format_clause_opt
 			{
@@ -16354,16 +16384,12 @@ json_representation:
 				{
 					$$ = (Node *) makeJsonFormat(JS_FORMAT_JSON, $2, @1);
 				}
-		/*	| other implementation defined JSON representation options (BSON, AVRO etc) */
+		/* we only support JSON for now */
 		;
 
 json_encoding_clause_opt:
-			ENCODING json_encoding					{ $$ = $2; }
+			ENCODING name					{ $$ = makeJsonEncoding($2); }
 			| /* EMPTY */							{ $$ = JS_ENC_DEFAULT; }
-		;
-
-json_encoding:
-			name									{ $$ = makeJsonEncoding($1); }
 		;
 
 json_output_clause_opt:
@@ -16379,34 +16405,16 @@ json_output_clause_opt:
 			| /* EMPTY */							{ $$ = NULL; }
 			;
 
-json_value_constructor:
-			json_object_constructor
-			| json_array_constructor
-		;
-
-json_object_constructor:
-			JSON_OBJECT '(' json_object_args ')'
-				{
-					$$ = $3;
-				}
 		;
 
 json_object_args:
-			json_object_constructor_args
-			| json_object_func_args
-		;
-
-json_object_func_args:
 			func_arg_list
 				{
 					List *func = list_make1(makeString("json_object"));
 
 					$$ = (Node *) makeFuncCall(func, $1, COERCE_EXPLICIT_CALL, @1);
 				}
-		;
-
-json_object_constructor_args:
-			json_object_constructor_args_opt json_output_clause_opt
+			| json_object_constructor_args_opt json_output_clause_opt
 				{
 					JsonObjectConstructor *n = (JsonObjectConstructor *) $1;
 
@@ -16459,61 +16467,11 @@ json_name_and_value:
 				{ $$ = makeJsonKeyValue($1, $3); }
 		;
 
+/* empty means false for objects, true for arrays */
 json_object_constructor_null_clause_opt:
 			NULL_P ON NULL_P					{ $$ = false; }
 			| ABSENT ON NULL_P					{ $$ = true; }
 			| /* EMPTY */						{ $$ = false; }
-		;
-
-json_array_constructor:
-			JSON_ARRAY '('
-				json_value_expr_list
-				json_array_constructor_null_clause_opt
-				json_output_clause_opt
-			')'
-				{
-					JsonArrayConstructor *n = makeNode(JsonArrayConstructor);
-
-					n->exprs = $3;
-					n->absent_on_null = $4;
-					n->output = (JsonOutput *) $5;
-					n->location = @1;
-					$$ = (Node *) n;
-				}
-			| JSON_ARRAY '('
-				select_no_parens
-				/* json_format_clause_opt */
-				/* json_array_constructor_null_clause_opt */
-				json_output_clause_opt
-			')'
-				{
-					JsonArrayQueryConstructor *n = makeNode(JsonArrayQueryConstructor);
-
-					n->query = $3;
-					n->format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
-					/* n->format = $4; */
-					n->absent_on_null = true /* $5 */;
-					n->output = (JsonOutput *) $4;
-					n->location = @1;
-					$$ = (Node *) n;
-				}
-			| JSON_ARRAY '('
-				json_output_clause_opt
-			')'
-				{
-					JsonArrayConstructor *n = makeNode(JsonArrayConstructor);
-
-					n->exprs = NIL;
-					n->absent_on_null = true;
-					n->output = (JsonOutput *) $3;
-					n->location = @1;
-					$$ = (Node *) n;
-				}
-		;
-
-json_value_expr_list:
-			json_value_expr								{ $$ = list_make1($1); }
-			| json_value_expr_list ',' json_value_expr	{ $$ = lappend($1, $3);}
 		;
 
 json_array_constructor_null_clause_opt:
@@ -16522,12 +16480,12 @@ json_array_constructor_null_clause_opt:
 			| /* EMPTY */							{ $$ = true; }
 		;
 
-json_aggregate_func:
-			json_object_aggregate_constructor
-			| json_array_aggregate_constructor
+json_value_expr_list:
+			json_value_expr								{ $$ = list_make1($1); }
+			| json_value_expr_list ',' json_value_expr	{ $$ = lappend($1, $3);}
 		;
 
-json_object_aggregate_constructor:
+json_aggregate_func:
 			JSON_OBJECTAGG '('
 				json_name_and_value
 				json_object_constructor_null_clause_opt
@@ -16546,10 +16504,7 @@ json_object_aggregate_constructor:
 					n->constructor->location = @1;
 					$$ = (Node *) n;
 				}
-		;
-
-json_array_aggregate_constructor:
-			JSON_ARRAYAGG '('
+			| JSON_ARRAYAGG '('
 				json_value_expr
 				json_array_aggregate_order_by_clause_opt
 				json_array_constructor_null_clause_opt
