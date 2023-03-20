@@ -2303,13 +2303,6 @@ CREATE TABLE cities_partdef
     constraint, and index names must be unique across all relations within
     the same schema.
    </para>
-
-   <para>
-    Currently, <productname>PostgreSQL</productname> does not record names
-    for <literal>NOT NULL</literal> constraints at all, so they are not
-    subject to the uniqueness restriction.  This might change in a future
-    release.
-   </para>
   </refsect2>
 
   <refsect2>
