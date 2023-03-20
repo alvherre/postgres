@@ -645,7 +645,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 
 %type <node>		json_format_clause_opt
-					json_representation
 					json_value_expr
 					json_output_clause_opt
 					json_object_constructor_args_opt
@@ -16368,23 +16367,14 @@ json_value_expr:
 		;
 
 json_format_clause_opt:
-			FORMAT json_representation
+			FORMAT JSON json_encoding_clause_opt
 				{
-					$$ = $2;
-					castNode(JsonFormat, $$)->location = @1;
+					$$ = (Node *) makeJsonFormat(JS_FORMAT_JSON, $3, @1);
 				}
 			| /* EMPTY */
 				{
 					$$ = (Node *) makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
 				}
-		;
-
-json_representation:
-			JSON json_encoding_clause_opt
-				{
-					$$ = (Node *) makeJsonFormat(JS_FORMAT_JSON, $2, @1);
-				}
-		/* we only support JSON for now */
 		;
 
 json_encoding_clause_opt:
