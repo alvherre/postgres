@@ -1333,10 +1333,6 @@ connectOptions2(PGconn *conn)
 				bits |= (1 << AUTH_REQ_SASL_CONT);
 				bits |= (1 << AUTH_REQ_SASL_FIN);
 			}
-			else if (strcmp(method, "creds") == 0)
-			{
-				bits = (1 << AUTH_REQ_SCM_CREDS);
-			}
 			else if (strcmp(method, "none") == 0)
 			{
 				/*
@@ -2633,6 +2629,7 @@ keep_going:						/* We will come back to here until there is
 				{
 					struct addrinfo *addr_cur = conn->addr_cur;
 					char		host_addr[NI_MAXHOST];
+					int			sock_type;
 
 					/*
 					 * Advance to next possible host, if we've tried all of
@@ -2663,7 +2660,26 @@ keep_going:						/* We will come back to here until there is
 						conn->connip = strdup(host_addr);
 
 					/* Try to create the socket */
-					conn->sock = socket(addr_cur->ai_family, SOCK_STREAM, 0);
+					sock_type = SOCK_STREAM;
+#ifdef SOCK_CLOEXEC
+
+					/*
+					 * Atomically mark close-on-exec, if possible on this
+					 * platform, so that there isn't a window where a
+					 * subprogram executed by another thread inherits the
+					 * socket.  See fallback code below.
+					 */
+					sock_type |= SOCK_CLOEXEC;
+#endif
+#ifdef SOCK_NONBLOCK
+
+					/*
+					 * We might as well skip a system call for nonblocking
+					 * mode too, if we can.
+					 */
+					sock_type |= SOCK_NONBLOCK;
+#endif
+					conn->sock = socket(addr_cur->ai_family, sock_type, 0);
 					if (conn->sock == PGINVALID_SOCKET)
 					{
 						int			errorno = SOCK_ERRNO;
@@ -2709,6 +2725,7 @@ keep_going:						/* We will come back to here until there is
 							goto keep_going;
 						}
 					}
+#ifndef SOCK_NONBLOCK
 					if (!pg_set_noblock(conn->sock))
 					{
 						libpq_append_conn_error(conn, "could not set socket to nonblocking mode: %s",
@@ -2716,7 +2733,9 @@ keep_going:						/* We will come back to here until there is
 						conn->try_next_addr = true;
 						goto keep_going;
 					}
+#endif
 
+#ifndef SOCK_CLOEXEC
 #ifdef F_SETFD
 					if (fcntl(conn->sock, F_SETFD, FD_CLOEXEC) == -1)
 					{
@@ -2726,6 +2745,7 @@ keep_going:						/* We will come back to here until there is
 						goto keep_going;
 					}
 #endif							/* F_SETFD */
+#endif
 
 					if (addr_cur->ai_family != AF_UNIX)
 					{
