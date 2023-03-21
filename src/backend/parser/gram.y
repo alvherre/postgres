@@ -792,7 +792,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * as NOT, at least with respect to their left-hand subexpression.
  * NULLS_LA and WITH_LA are needed to make the grammar LALR(1).
  */
-%token		NOT_LA NULLS_LA WITH_LA WITH_LA_UNIQUE WITHOUT_LA
+%token		FORMAT_LA NOT_LA NULLS_LA WITH_LA WITH_LA_UNIQUE WITHOUT_LA
 
 /*
  * The grammar likewise thinks these tokens are keywords, but they are never
@@ -15607,7 +15607,7 @@ func_expr_common_subexpr:
 				}
 			| JSON_ARRAY '('
 				select_no_parens
-				/* json_format_clause_opt */
+				json_format_clause_opt
 				/* json_array_constructor_null_clause_opt */
 				json_output_clause_opt
 			')'
@@ -15615,10 +15615,9 @@ func_expr_common_subexpr:
 					JsonArrayQueryConstructor *n = makeNode(JsonArrayQueryConstructor);
 
 					n->query = $3;
-					n->format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
-					/* n->format = $4; */
-					n->absent_on_null = true /* $5 */;
-					n->output = (JsonOutput *) $4;
+					n->format = (JsonFormat *) $4;
+					n->absent_on_null = true;	/* XXX */
+					n->output = (JsonOutput *) $5;
 					n->location = @1;
 					$$ = (Node *) n;
 				}
@@ -16367,7 +16366,7 @@ json_value_expr:
 		;
 
 json_format_clause_opt:
-			FORMAT JSON json_encoding_clause_opt
+			FORMAT_LA JSON json_encoding_clause_opt
 				{
 					$$ = (Node *) makeJsonFormat(JS_FORMAT_JSON, $3, @1);
 				}
