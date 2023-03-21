@@ -792,7 +792,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * as NOT, at least with respect to their left-hand subexpression.
  * NULLS_LA and WITH_LA are needed to make the grammar LALR(1).
  */
-%token		FORMAT_LA NOT_LA NULLS_LA WITH_LA WITH_LA_UNIQUE WITHOUT_LA
+%token		FORMAT_LA NOT_LA NULLS_LA WITH_LA WITHOUT_LA
 
 /*
  * The grammar likewise thinks these tokens are keywords, but they are never
@@ -871,7 +871,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL
 
 %nonassoc	empty_json_unique
-%left		WITHOUT WITH_LA_UNIQUE
+%left		WITHOUT
 
 %%
 
@@ -14941,8 +14941,8 @@ b_expr:		c_expr
 
 /* KEYS is a noise word here */
 json_key_uniqueness_constraint_opt:
-			WITH_LA_UNIQUE UNIQUE KEYS				{ $$ = true; }
-			| WITH_LA_UNIQUE UNIQUE				    { $$ = true; }
+			WITH UNIQUE KEYS				{ $$ = true; }
+			| WITH UNIQUE				    { $$ = true; }
 			| WITHOUT UNIQUE KEYS					{ $$ = false; }
 			| WITHOUT UNIQUE					    { $$ = false; }
 			| /* EMPTY */ %prec empty_json_unique	{ $$ = false; }
