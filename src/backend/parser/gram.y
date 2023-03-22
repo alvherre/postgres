@@ -790,7 +790,8 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * NOT_LA exists so that productions such as NOT LIKE can be given the same
  * precedence as LIKE; otherwise they'd effectively have the same precedence
  * as NOT, at least with respect to their left-hand subexpression.
- * NULLS_LA and WITH_LA are needed to make the grammar LALR(1).
+ * FORMAT_LA, NULLS_LA, WITH_LA, and WITHOUT_LA are needed to make the grammar
+ * LALR(1).
  */
 %token		FORMAT_LA NOT_LA NULLS_LA WITH_LA WITHOUT_LA
 
@@ -846,13 +847,11 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * Using the same precedence as IDENT seems right for the reasons given above.
  */
 %nonassoc	UNBOUNDED		/* ideally would have same precedence as IDENT */
-%nonassoc	ABSENT UNIQUE
 %nonassoc	IDENT PARTITION RANGE ROWS GROUPS PRECEDING FOLLOWING CUBE ROLLUP
 %left		Op OPERATOR		/* multi-character ops and user-defined operators */
 %left		'+' '-'
 %left		'*' '/' '%'
 %left		'^'
-%left		KEYS						/* UNIQUE [ KEYS ] */
 /* Unary Operators */
 %left		AT				/* sets precedence for AT TIME ZONE */
 %left		COLLATE
@@ -869,8 +868,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * left-associativity among the JOIN rules themselves.
  */
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL
-
-%left		WITHOUT
 
 %%
 

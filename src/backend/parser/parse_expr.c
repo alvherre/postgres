@@ -3706,13 +3706,13 @@ transformJsonObjectAgg(ParseState *pstate, JsonObjectAgg *agg)
 	{
 		if (agg->absent_on_null)
 			if (agg->unique)
-				aggfnname = "pg_catalog.jsonb_object_agg_unique_strict";	/* F_JSONB_OBJECT_AGG_UNIQUE_STRICT */
+				aggfnname = "pg_catalog.jsonb_object_agg_unique_strict";
 			else
-				aggfnname = "pg_catalog.jsonb_object_agg_strict";	/* F_JSONB_OBJECT_AGG_STRICT */
+				aggfnname = "pg_catalog.jsonb_object_agg_strict";
 		else if (agg->unique)
-			aggfnname = "pg_catalog.jsonb_object_agg_unique";	/* F_JSONB_OBJECT_AGG_UNIQUE */
+			aggfnname = "pg_catalog.jsonb_object_agg_unique";
 		else
-			aggfnname = "pg_catalog.jsonb_object_agg";	/* F_JSONB_OBJECT_AGG */
+			aggfnname = "pg_catalog.jsonb_object_agg";
 
 		aggtype = JSONBOID;
 	}
@@ -3720,13 +3720,13 @@ transformJsonObjectAgg(ParseState *pstate, JsonObjectAgg *agg)
 	{
 		if (agg->absent_on_null)
 			if (agg->unique)
-				aggfnname = "pg_catalog.json_object_agg_unique_strict"; /* F_JSON_OBJECT_AGG_UNIQUE_STRICT */
+				aggfnname = "pg_catalog.json_object_agg_unique_strict";
 			else
-				aggfnname = "pg_catalog.json_object_agg_strict";	/* F_JSON_OBJECT_AGG_STRICT */
+				aggfnname = "pg_catalog.json_object_agg_strict";
 		else if (agg->unique)
-			aggfnname = "pg_catalog.json_object_agg_unique";	/* F_JSON_OBJECT_AGG_UNIQUE */
+			aggfnname = "pg_catalog.json_object_agg_unique";
 		else
-			aggfnname = "pg_catalog.json_object_agg";	/* F_JSON_OBJECT_AGG */
+			aggfnname = "pg_catalog.json_object_agg";
 
 		aggtype = JSONOID;
 	}

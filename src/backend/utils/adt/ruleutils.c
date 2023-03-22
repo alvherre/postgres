@@ -9931,8 +9931,10 @@ get_json_constructor(JsonConstructorExpr *ctor, deparse_context *context,
 	{
 		if (nargs > 0)
 		{
-			const char *sep = ctor->type == JSCTOR_JSON_OBJECT &&
-			(nargs % 2) != 0 ? " : " : ", ";
+			const char *sep;
+
+			sep = (ctor->type == JSCTOR_JSON_OBJECT && (nargs % 2) != 0) ?
+				" : " : ", ";
 
 			appendStringInfoString(buf, sep);
 		}
