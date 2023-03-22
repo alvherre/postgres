@@ -11721,6 +11721,7 @@ utility_option_elem:
 utility_option_name:
 			NonReservedWord							{ $$ = $1; }
 			| analyze_keyword						{ $$ = "analyze"; }
+			| FORMAT_LA								{ $$ = "format"; }
 		;
 
 utility_option_arg:
@@ -14942,9 +14943,9 @@ b_expr:		c_expr
 json_key_uniqueness_constraint_opt:
 			WITH UNIQUE KEYS				{ $$ = true; }
 			| WITH UNIQUE				    { $$ = true; }
-			| WITHOUT UNIQUE KEYS					{ $$ = false; }
-			| WITHOUT UNIQUE					    { $$ = false; }
-			| /* EMPTY */ 				{ $$ = false; }
+			| WITHOUT UNIQUE KEYS			{ $$ = false; }
+			| WITHOUT UNIQUE			    { $$ = false; }
+			| /* EMPTY */ 					{ $$ = false; }
 		;
 
 /*
