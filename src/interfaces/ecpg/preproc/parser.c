@@ -78,12 +78,13 @@ filtered_base_yylex(void)
 	 */
 	switch (cur_token)
 	{
+		case FORMAT:
 		case NOT:
 		case NULLS_P:
 		case WITH:
+		case WITHOUT:
 		case UIDENT:
 		case USCONST:
-		case WITHOUT:
 			break;
 		default:
 			return cur_token;
@@ -111,6 +112,16 @@ filtered_base_yylex(void)
 	/* Replace cur_token if needed, based on lookahead */
 	switch (cur_token)
 	{
+		case FORMAT:
+			/* Replace FORMAT by FORMAT_LA if it's followed by JSON */
+			switch (next_token)
+			{
+				case JSON:
+					cur_token = FORMAT_LA;
+					break;
+			}
+			break;
+
 		case NOT:
 			/* Replace NOT by NOT_LA if it's followed by BETWEEN, IN, etc */
 			switch (next_token)
