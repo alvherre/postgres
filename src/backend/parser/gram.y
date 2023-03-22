@@ -870,7 +870,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  */
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL
 
-%nonassoc	empty_json_unique
 %left		WITHOUT
 
 %%
@@ -14945,7 +14944,7 @@ json_key_uniqueness_constraint_opt:
 			| WITH UNIQUE				    { $$ = true; }
 			| WITHOUT UNIQUE KEYS					{ $$ = false; }
 			| WITHOUT UNIQUE					    { $$ = false; }
-			| /* EMPTY */ %prec empty_json_unique	{ $$ = false; }
+			| /* EMPTY */ 				{ $$ = false; }
 		;
 
 /*
