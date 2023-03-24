@@ -235,11 +235,11 @@ typedef enum ExprEvalOp
 	EEOP_SCALARARRAYOP,
 	EEOP_HASHED_SCALARARRAYOP,
 	EEOP_XMLEXPR,
+	EEOP_JSON_CONSTRUCTOR,
 	EEOP_AGGREF,
 	EEOP_GROUPING_FUNC,
 	EEOP_WINDOW_FUNC,
 	EEOP_SUBPLAN,
-	EEOP_JSON_CONSTRUCTOR,
 
 	/* aggregation related nodes */
 	EEOP_AGG_STRICT_DESERIALIZE,
@@ -590,6 +590,12 @@ typedef struct ExprEvalStep
 			bool	   *argnull;
 		}			xmlexpr;
 
+		/* for EEOP_JSON_CONSTRUCTOR */
+		struct
+		{
+			struct JsonConstructorExprState *jcstate;
+		}			json_constructor;
+
 		/* for EEOP_AGGREF */
 		struct
 		{
@@ -668,12 +674,6 @@ typedef struct ExprEvalStep
 			int			transno;
 			int			setoff;
 		}			agg_trans;
-
-		/* for EEOP_JSON_CONSTRUCTOR */
-		struct
-		{
-			struct JsonConstructorExprState *jcstate;
-		}			json_constructor;
 
 	}			d;
 } ExprEvalStep;

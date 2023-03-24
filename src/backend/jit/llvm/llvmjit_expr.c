@@ -1842,6 +1842,12 @@ llvm_compile_expr(ExprState *state)
 				LLVMBuildBr(b, opblocks[opno + 1]);
 				break;
 
+			case EEOP_JSON_CONSTRUCTOR:
+				build_EvalXFunc(b, mod, "ExecEvalJsonConstructor",
+								v_state, op, v_econtext);
+				LLVMBuildBr(b, opblocks[opno + 1]);
+				break;
+
 			case EEOP_AGGREF:
 				{
 					LLVMValueRef v_aggno;
@@ -2385,12 +2391,6 @@ llvm_compile_expr(ExprState *state)
 
 			case EEOP_AGG_ORDERED_TRANS_TUPLE:
 				build_EvalXFunc(b, mod, "ExecEvalAggOrderedTransTuple",
-								v_state, op, v_econtext);
-				LLVMBuildBr(b, opblocks[opno + 1]);
-				break;
-
-			case EEOP_JSON_CONSTRUCTOR:
-				build_EvalXFunc(b, mod, "ExecEvalJsonConstructor",
 								v_state, op, v_econtext);
 				LLVMBuildBr(b, opblocks[opno + 1]);
 				break;
