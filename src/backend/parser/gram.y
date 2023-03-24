@@ -16366,7 +16366,7 @@ json_format_clause_opt:
 
 json_encoding_clause_opt:
 			ENCODING name					{ $$ = makeJsonEncoding($2); }
-			| /* EMPTY */							{ $$ = JS_ENC_DEFAULT; }
+			| /* EMPTY */					{ $$ = JS_ENC_DEFAULT; }
 		;
 
 json_output_clause_opt:
