@@ -874,8 +874,8 @@ makeJsonEncoding(char *name)
 		return JS_ENC_UTF32;
 
 	ereport(ERROR,
-			(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-			 errmsg("unrecognized JSON encoding: %s", name)));
+			errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+			errmsg("unrecognized JSON encoding: %s", name));
 
 	return JS_ENC_DEFAULT;
 }

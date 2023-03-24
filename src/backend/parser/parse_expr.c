@@ -3185,16 +3185,16 @@ transformJsonValueExpr(ParseState *pstate, JsonValueExpr *ve,
 	{
 		if (ve->format->encoding != JS_ENC_DEFAULT && exprtype != BYTEAOID)
 			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg("JSON ENCODING clause is only allowed for bytea input type"),
-					 parser_errposition(pstate, ve->format->location)));
+					errcode(ERRCODE_DATATYPE_MISMATCH),
+					errmsg("JSON ENCODING clause is only allowed for bytea input type"),
+					parser_errposition(pstate, ve->format->location));
 
 		if (exprtype == JSONOID || exprtype == JSONBOID)
 		{
 			format = JS_FORMAT_DEFAULT; /* do not format json[b] types */
 			ereport(WARNING,
-					(errmsg("FORMAT JSON has no effect for json and jsonb types"),
-					 parser_errposition(pstate, ve->format->location)));
+					errmsg("FORMAT JSON has no effect for json and jsonb types"),
+					parser_errposition(pstate, ve->format->location));
 		}
 		else
 			format = ve->format->format_type;
@@ -3214,12 +3214,12 @@ transformJsonValueExpr(ParseState *pstate, JsonValueExpr *ve,
 
 		if (exprtype != BYTEAOID && typcategory != TYPCATEGORY_STRING)
 			ereport(ERROR,
-					(errcode(ERRCODE_DATATYPE_MISMATCH),
-					 errmsg(ve->format->format_type == JS_FORMAT_DEFAULT ?
-							"cannot use non-string types with implicit FORMAT JSON clause" :
-							"cannot use non-string types with explicit FORMAT JSON clause"),
-					 parser_errposition(pstate, ve->format->location >= 0 ?
-										ve->format->location : location)));
+					errcode(ERRCODE_DATATYPE_MISMATCH),
+					errmsg(ve->format->format_type == JS_FORMAT_DEFAULT ?
+						   "cannot use non-string types with implicit FORMAT JSON clause" :
+						   "cannot use non-string types with explicit FORMAT JSON clause"),
+					parser_errposition(pstate, ve->format->location >= 0 ?
+									   ve->format->location : location));
 
 		/* Convert encoded JSON text from bytea. */
 		if (format == JS_FORMAT_JSON && exprtype == BYTEAOID)
@@ -3284,9 +3284,9 @@ checkJsonOutputFormat(ParseState *pstate, const JsonFormat *format,
 
 		if (typcategory != TYPCATEGORY_STRING)
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 parser_errposition(pstate, format->location),
-					 errmsg("cannot use JSON format with non-string output types")));
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					parser_errposition(pstate, format->location),
+					errmsg("cannot use JSON format with non-string output types"));
 	}
 
 	if (format->format_type == JS_FORMAT_JSON)
@@ -3297,16 +3297,16 @@ checkJsonOutputFormat(ParseState *pstate, const JsonFormat *format,
 		if (targettype != BYTEAOID &&
 			format->encoding != JS_ENC_DEFAULT)
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 parser_errposition(pstate, format->location),
-					 errmsg("cannot set JSON encoding for non-bytea output types")));
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					parser_errposition(pstate, format->location),
+					errmsg("cannot set JSON encoding for non-bytea output types"));
 
 		if (enc != JS_ENC_UTF8)
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("unsupported JSON encoding"),
-					 errhint("Only UTF8 JSON encoding is supported."),
-					 parser_errposition(pstate, format->location)));
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("unsupported JSON encoding"),
+					errhint("Only UTF8 JSON encoding is supported."),
+					parser_errposition(pstate, format->location));
 	}
 }
 
@@ -3341,8 +3341,8 @@ transformJsonOutput(ParseState *pstate, const JsonOutput *output,
 
 	if (output->typeName->setof)
 		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("returning SETOF types is not supported in SQL/JSON functions")));
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("returning SETOF types is not supported in SQL/JSON functions"));
 
 	if (ret->format->format_type == JS_FORMAT_DEFAULT)
 		/* assign JSONB format when returning jsonb, or JSON format otherwise */
@@ -3447,11 +3447,11 @@ coerceJsonFuncExpr(ParseState *pstate, Node *expr,
 
 	if (!res && report_error)
 		ereport(ERROR,
-				(errcode(ERRCODE_CANNOT_COERCE),
-				 errmsg("cannot cast type %s to %s",
-						format_type_be(exprtype),
-						format_type_be(returning->typid)),
-				 parser_coercion_errposition(pstate, location, expr)));
+				errcode(ERRCODE_CANNOT_COERCE),
+				errmsg("cannot cast type %s to %s",
+					   format_type_be(exprtype),
+					   format_type_be(returning->typid)),
+				parser_coercion_errposition(pstate, location, expr));
 
 	return res;
 }
@@ -3561,9 +3561,9 @@ transformJsonArrayQueryConstructor(ParseState *pstate,
 
 	if (count_nonjunk_tlist_entries(query->targetList) != 1)
 		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("subquery must return only one column"),
-				 parser_errposition(pstate, ctor->location)));
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("subquery must return only one column"),
+				parser_errposition(pstate, ctor->location));
 
 	free_parsestate(qpstate);
 
@@ -3642,9 +3642,9 @@ transformJsonAggConstructor(ParseState *pstate, JsonAggConstructor *agg_ctor,
 		 */
 		if (agg_ctor->agg_order != NIL)
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("aggregate ORDER BY is not implemented for window functions"),
-					 parser_errposition(pstate, agg_ctor->location)));
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("aggregate ORDER BY is not implemented for window functions"),
+					parser_errposition(pstate, agg_ctor->location));
 
 		/* parse_agg.c does additional window-func-specific processing */
 		transformWindowFuncCall(pstate, wfunc, agg_ctor->over);
