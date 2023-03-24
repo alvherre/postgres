@@ -3168,8 +3168,12 @@ transformJsonValueExpr(ParseState *pstate, JsonValueExpr *ve,
 	char		typcategory;
 	bool		typispreferred;
 
+	/*
+	 * Using JSON_VALUE here is slightly bogus: perhaps we need to be passed a
+	 * JsonConstructorType so that we can use one of JSON_OBJECTAGG, etc.
+	 */
 	if (exprType(expr) == UNKNOWNOID)
-		expr = coerce_to_specific_type(pstate, expr, TEXTOID, "JSON_VALUE_EXPR");
+		expr = coerce_to_specific_type(pstate, expr, TEXTOID, "JSON_VALUE");
 
 	rawexpr = expr;
 	exprtype = exprType(expr);
