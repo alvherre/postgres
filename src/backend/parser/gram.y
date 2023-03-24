@@ -14936,15 +14936,6 @@ b_expr:		c_expr
 				}
 		;
 
-/* KEYS is a noise word here */
-json_key_uniqueness_constraint_opt:
-			WITH UNIQUE KEYS				{ $$ = true; }
-			| WITH UNIQUE				    { $$ = true; }
-			| WITHOUT_LA UNIQUE KEYS		{ $$ = false; }
-			| WITHOUT_LA UNIQUE			    { $$ = false; }
-			| /* EMPTY */ 					{ $$ = false; }
-		;
-
 /*
  * Productions that can be used in both a_expr and b_expr.
  *
@@ -16389,8 +16380,15 @@ json_output_clause_opt:
 					$$ = (Node *) n;
 				}
 			| /* EMPTY */							{ $$ = NULL; }
-			;
+		;
 
+/* KEYS is a noise word here */
+json_key_uniqueness_constraint_opt:
+			WITH UNIQUE KEYS				{ $$ = true; }
+			| WITH UNIQUE				    { $$ = true; }
+			| WITHOUT_LA UNIQUE KEYS		{ $$ = false; }
+			| WITHOUT_LA UNIQUE			    { $$ = false; }
+			| /* EMPTY */ 					{ $$ = false; }
 		;
 
 json_object_args:
