@@ -14308,7 +14308,7 @@ ConstInterval:
 
 opt_timezone:
 			WITH_LA TIME ZONE						{ $$ = true; }
-			| WITHOUT_LA TIME ZONE					{ $$ = false; }
+			| WITHOUT TIME ZONE						{ $$ = false; }
 			| /*EMPTY*/								{ $$ = false; }
 		;
 
@@ -14940,8 +14940,8 @@ b_expr:		c_expr
 json_key_uniqueness_constraint_opt:
 			WITH UNIQUE KEYS				{ $$ = true; }
 			| WITH UNIQUE				    { $$ = true; }
-			| WITHOUT UNIQUE KEYS			{ $$ = false; }
-			| WITHOUT UNIQUE			    { $$ = false; }
+			| WITHOUT_LA UNIQUE KEYS		{ $$ = false; }
+			| WITHOUT_LA UNIQUE			    { $$ = false; }
 			| /* EMPTY */ 					{ $$ = false; }
 		;
 

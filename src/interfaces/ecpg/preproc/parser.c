@@ -159,10 +159,10 @@ filtered_base_yylex(void)
 			break;
 
 		case WITHOUT:
-			/* Replace WITHOUT by WITHOUT_LA if it's followed by TIME */
+			/* Replace WITHOUT by WITHOUT_LA if it's followed by UNIQUE */
 			switch (next_token)
 			{
-				case TIME:
+				case UNIQUE:
 					cur_token = WITHOUT_LA;
 					break;
 			}
