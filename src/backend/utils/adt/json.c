@@ -48,13 +48,6 @@ typedef enum					/* type categories for datum_to_json */
 /* Common context for key uniqueness check */
 typedef struct HTAB *JsonUniqueCheckState;	/* hash table for key names */
 
-/* Element of object stack for key uniqueness check during JSON parsing */
-typedef struct JsonUniqueStackEntry
-{
-	struct JsonUniqueStackEntry *parent;
-	int			object_id;
-} JsonUniqueStackEntry;
-
 /* Hash entry for JsonUniqueCheckState */
 typedef struct JsonUniqueHashEntry
 {
