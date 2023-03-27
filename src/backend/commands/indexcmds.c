@@ -189,7 +189,6 @@ CheckIndexCompatible(Oid oldId,
 	IndexInfo  *indexInfo;
 	int			numberOfAttributes;
 	int			old_natts;
-	bool		isnull;
 	bool		ret = true;
 	oidvector  *old_indclass;
 	oidvector  *old_indcollation;
@@ -270,12 +269,10 @@ CheckIndexCompatible(Oid oldId,
 	old_natts = indexForm->indnkeyatts;
 	Assert(old_natts == numberOfAttributes);
 
-	d = SysCacheGetAttr(INDEXRELID, tuple, Anum_pg_index_indcollation, &isnull);
-	Assert(!isnull);
+	d = SysCacheGetAttrNotNull(INDEXRELID, tuple, Anum_pg_index_indcollation);
 	old_indcollation = (oidvector *) DatumGetPointer(d);
 
-	d = SysCacheGetAttr(INDEXRELID, tuple, Anum_pg_index_indclass, &isnull);
-	Assert(!isnull);
+	d = SysCacheGetAttrNotNull(INDEXRELID, tuple, Anum_pg_index_indclass);
 	old_indclass = (oidvector *) DatumGetPointer(d);
 
 	ret = (memcmp(old_indclass->values, classObjectId,
@@ -513,6 +510,8 @@ WaitForOlderSnapshots(TransactionId limitXmin, bool progress)
  *		of a partitioned index.
  * 'parentConstraintId': the OID of the parent constraint; InvalidOid if not
  *		the child of a constraint (only used when recursing)
+ * 'total_parts': total number of direct and indirect partitions of relation;
+ *		pass -1 if not known or rel is not partitioned.
  * 'is_alter_table': this is due to an ALTER rather than a CREATE operation.
  * 'check_rights': check for CREATE rights in namespace and tablespace.  (This
  *		should be true except when ALTER is deleting/recreating an index.)
@@ -530,6 +529,7 @@ DefineIndex(Oid relationId,
 			Oid indexRelationId,
 			Oid parentIndexId,
 			Oid parentConstraintId,
+			int total_parts,
 			bool is_alter_table,
 			bool check_rights,
 			bool check_not_in_use,
@@ -1225,8 +1225,37 @@ DefineIndex(Oid relationId,
 			Relation	parentIndex;
 			TupleDesc	parentDesc;
 
-			pgstat_progress_update_param(PROGRESS_CREATEIDX_PARTITIONS_TOTAL,
-										 nparts);
+			/*
+			 * Report the total number of partitions at the start of the
+			 * command; don't update it when being called recursively.
+			 */
+			if (!OidIsValid(parentIndexId))
+			{
+				/*
+				 * When called by ProcessUtilitySlow, the number of partitions
+				 * is passed in as an optimization; but other callers pass -1
+				 * since they don't have the value handy.  This should count
+				 * partitions the same way, ie one less than the number of
+				 * relations find_all_inheritors reports.
+				 *
+				 * We assume we needn't ask find_all_inheritors to take locks,
+				 * because that should have happened already for all callers.
+				 * Even if it did not, this is safe as long as we don't try to
+				 * touch the partitions here; the worst consequence would be a
+				 * bogus progress-reporting total.
+				 */
+				if (total_parts < 0)
+				{
+					List	   *children = find_all_inheritors(relationId,
+															   NoLock, NULL);
+
+					total_parts = list_length(children) - 1;
+					list_free(children);
+				}
+
+				pgstat_progress_update_param(PROGRESS_CREATEIDX_PARTITIONS_TOTAL,
+											 total_parts);
+			}
 
 			/* Make a local copy of partdesc->oids[], just for safety */
 			memcpy(part_oids, partdesc->oids, sizeof(Oid) * nparts);
@@ -1353,6 +1382,18 @@ DefineIndex(Oid relationId,
 							invalidate_parent = true;
 
 						found = true;
+
+						/*
+						 * Report this partition as processed.  Note that if
+						 * the partition has children itself, we'd ideally
+						 * count the children and update the progress report
+						 * for all of them; but that seems unduly expensive.
+						 * Instead, the progress report will act like all such
+						 * indirect children were processed in zero time at
+						 * the end of the command.
+						 */
+						pgstat_progress_incr_param(PROGRESS_CREATEIDX_PARTITIONS_DONE, 1);
+
 						/* keep lock till commit */
 						index_close(cldidx, NoLock);
 						break;
@@ -1432,14 +1473,13 @@ DefineIndex(Oid relationId,
 								InvalidOid, /* no predefined OID */
 								indexRelationId,	/* this is our child */
 								createdConstraintId,
+								-1,
 								is_alter_table, check_rights, check_not_in_use,
 								skip_build, quiet);
 					SetUserIdAndSecContext(child_save_userid,
 										   child_save_sec_context);
 				}
 
-				pgstat_progress_update_param(PROGRESS_CREATEIDX_PARTITIONS_DONE,
-											 i + 1);
 				free_attrmap(attmap);
 			}
 
@@ -1479,6 +1519,12 @@ DefineIndex(Oid relationId,
 		table_close(rel, NoLock);
 		if (!OidIsValid(parentIndexId))
 			pgstat_progress_end_command();
+		else
+		{
+			/* Update progress for an intermediate partitioned index itself */
+			pgstat_progress_incr_param(PROGRESS_CREATEIDX_PARTITIONS_DONE, 1);
+		}
+
 		return address;
 	}
 
@@ -1490,9 +1536,14 @@ DefineIndex(Oid relationId,
 		/* Close the heap and we're done, in the non-concurrent case */
 		table_close(rel, NoLock);
 
-		/* If this is the top-level index, we're done. */
+		/*
+		 * If this is the top-level index, the command is done overall;
+		 * otherwise, increment progress to report one child index is done.
+		 */
 		if (!OidIsValid(parentIndexId))
 			pgstat_progress_end_command();
+		else
+			pgstat_progress_incr_param(PROGRESS_CREATEIDX_PARTITIONS_DONE, 1);
 
 		return address;
 	}

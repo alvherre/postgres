@@ -1,6 +1,7 @@
 # Copyright (c) 2022-2023, PostgreSQL Global Development Group
 
 docs = []
+installdocs = []
 alldocs = []
 doc_generated = []
 
@@ -120,8 +121,19 @@ if xsltproc_bin.found()
   )
   alldocs += html
 
-  # build multi-page html docs as part of docs target
+  install_doc_html = custom_target('install-html',
+    output: 'install-html',
+    command: [
+      python, install_files, '--prefix', dir_prefix,
+      '--install-dir-contents', dir_doc_html, html],
+    build_always_stale: true, build_by_default: false,
+  )
+  alias_target('install-doc-html', install_doc_html)
+
+  # build and install multi-page html docs as part of docs target
   docs += html
+  installdocs += install_doc_html
+
 
   htmlhelp = custom_target('htmlhelp',
     input: ['stylesheet-hh.xsl', postgres_full_xml],
@@ -208,6 +220,19 @@ if xsltproc_bin.found()
     build_by_default: false,
   )
   alldocs += man
+
+  install_doc_man = custom_target('install-man',
+    output: 'install-man',
+    command: [
+      python, install_files, '--prefix', dir_prefix,
+      '--install-dirs', dir_man, man],
+    build_always_stale: true, build_by_default: false,
+  )
+  alias_target('install-doc-man', install_doc_man)
+
+  # even though we don't want to build man pages as part of 'docs', we do want
+  # to install them as part of install-docs
+  installdocs += install_doc_man
 endif
 
 
@@ -262,10 +287,44 @@ if pandoc.found() and xsltproc_bin.found()
   alldocs += postgres_epub
 endif
 
+
+##
+## Experimental Texinfo targets
+##
+
+db2x_xsltproc = find_program('db2x_xsltproc', native: true, required: false)
+db2x_texixml = find_program('db2x_texixml', native: true, required: false)
+makeinfo = find_program('makeinfo', native: true, required: false)
+
+if db2x_texixml.found() and db2x_xsltproc.found() and makeinfo.found()
+  postgres_texixml = custom_target('postgres.texixml',
+    output: 'postgres.texixml',
+    command: [db2x_xsltproc, '-s', 'texi',
+              '-g', 'output-file=postgres',
+              postgres_full_xml, '-o', '@OUTPUT@'],
+    build_by_default: false,
+  )
+  postgres_texi = custom_target('postgres.texi',
+    output: 'postgres.texi',
+    command: [db2x_texixml, '--encoding=utf-8', postgres_texixml,
+              '--output-dir=@OUTDIR@'],
+    build_by_default: false,
+  )
+  postgres_info = custom_target('postgres.info',
+    output: 'postgres.info',
+    command: [makeinfo, '--enable-encoding', '--no-split', '--no-validate',
+              postgres_texi, '-o', '@OUTPUT0@'],
+    build_by_default: false,
+  )
+  alldocs += postgres_info
+endif
+
+
 if docs.length() == 0
   run_target('docs', command: [missing, 'xsltproc'])
 else
   alias_target('docs', docs)
+  alias_target('install-docs', installdocs)
 endif
 
 if alldocs.length() == 0

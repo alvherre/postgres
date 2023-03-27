@@ -233,8 +233,10 @@ elif host_system == 'darwin'
   sysroot_args = [files('src/tools/darwin_sysroot'), get_option('darwin_sysroot')]
   pg_sysroot = run_command(sysroot_args, check:true).stdout().strip()
   message('darwin sysroot: @0@'.format(pg_sysroot))
-  cflags += ['-isysroot', pg_sysroot]
-  ldflags += ['-isysroot', pg_sysroot]
+  if pg_sysroot != ''
+    cflags += ['-isysroot', pg_sysroot]
+    ldflags += ['-isysroot', pg_sysroot]
+  endif
   # meson defaults to -Wl,-undefined,dynamic_lookup for modules, which we
   # don't want because a) it's different from what we do for autoconf, b) it
   # causes warnings starting in macOS Ventura
@@ -369,6 +371,8 @@ flex_cmd = [python, flex_wrapper,
 wget = find_program('wget', required: false, native: true)
 wget_flags = ['-O', '@OUTPUT0@', '--no-use-server-timestamps']
 
+install_files = files('src/tools/install_files')
+
 
 
 ###############################################################
@@ -502,7 +506,7 @@ dir_man = get_option('mandir')
 
 # FIXME: These used to be separately configurable - worth adding?
 dir_doc = get_option('datadir') / 'doc' / 'postgresql'
-dir_doc_html = dir_doc
+dir_doc_html = dir_doc / 'html'
 
 dir_locale = get_option('localedir')
 
@@ -1219,8 +1223,9 @@ if sslopt in ['auto', 'openssl']
       ['CRYPTO_new_ex_data', {'required': true}],
       ['SSL_new', {'required': true}],
 
-      # Function introduced in OpenSSL 1.0.2.
+      # Functions introduced in OpenSSL 1.0.2.
       ['X509_get_signature_nid'],
+      ['SSL_CTX_set_cert_cb'], # not in LibreSSL
 
       # Functions introduced in OpenSSL 1.1.0. We used to check for
       # OPENSSL_VERSION_NUMBER, but that didn't work with 1.1.0, because LibreSSL
@@ -2541,6 +2546,7 @@ bin_targets = []
 pl_targets = []
 contrib_targets = []
 testprep_targets = []
+nls_targets = []
 
 
 # Define the tests to distribute them to the correct test styles later
@@ -2844,22 +2850,6 @@ generated_sources_ac += {'': ['GNUmakefile']}
 testprep_targets += test_install_libs
 
 
-# command to install files used for tests, which aren't installed by default
-install_test_files = files('src/tools/install_test_files')
-install_test_files_args = [
-  install_test_files,
-  '--prefix', dir_prefix,
-  '--install', contrib_data_dir, test_install_data,
-  '--install', dir_lib_pkg, test_install_libs,
-]
-
-# Target installing files required for installcheck of various modules
-run_target('install-test-files',
-  command: [python] + install_test_files_args,
-  depends: testprep_targets,
-)
-
-
 # If there are any files in the source directory that we also generate in the
 # build directory, they might get preferred over the newly generated files,
 # e.g. because of a #include "file", which always will search in the current
@@ -2911,6 +2901,64 @@ above, or by running configure and then make maintainer-clean.
   errmsg_cleanup = errmsg_cleanup.format(' '.join(conflicting_files))
   error(errmsg_nonclean_base.format(errmsg_cleanup))
 endif
+
+
+
+###############################################################
+# Install targets
+###############################################################
+
+
+# We want to define additional install targets beyond what meson provides. For
+# that we need to define targets depending on nearly everything. We collected
+# the results of i18n.gettext() invocations into nls_targets, that also
+# includes maintainer targets though. Collect the ones we want as a dependency.
+#
+# i18n.gettext() doesn't return the dependencies before 0.60 - but the gettext
+# generation happens during install, so that's not a real issue.
+nls_mo_targets = []
+if libintl.found() and meson.version().version_compare('>=0.60')
+  # use range() to avoid the flattening of the list that forech() would do
+  foreach off : range(0, nls_targets.length())
+    # i18n.gettext() list containing 1) list of built .mo files 2) maintainer
+    # -pot target 3) maintainer -pot target
+    nls_mo_targets += nls_targets[off][0]
+  endforeach
+  alias_target('nls', nls_mo_targets)
+endif
+
+
+all_built = [
+  backend_targets,
+  bin_targets,
+  libpq_st,
+  pl_targets,
+  contrib_targets,
+  nls_mo_targets,
+  testprep_targets,
+  ecpg_targets,
+]
+
+# Meson's default install target is quite verbose. Provide one that is quiet.
+install_quiet = custom_target('install-quiet',
+  output: 'install-quiet',
+  build_always_stale: true,
+  build_by_default: false,
+  command: [meson_bin, meson_args, 'install', '--quiet', '--no-rebuild'],
+  depends: all_built,
+)
+
+# Target to install files used for tests, which aren't installed by default
+install_test_files_args = [
+  install_files,
+  '--prefix', dir_prefix,
+  '--install', contrib_data_dir, test_install_data,
+  '--install', dir_lib_pkg, test_install_libs,
+]
+run_target('install-test-files',
+  command: [python] + install_test_files_args,
+  depends: testprep_targets,
+)
 
 
 
@@ -3184,6 +3232,7 @@ if meson.version().version_compare('>=0.57')
 endif
 
 
+
 ###############################################################
 # Pseudo targets
 ###############################################################
@@ -3193,6 +3242,7 @@ alias_target('bin', bin_targets + [libpq_st])
 alias_target('pl', pl_targets)
 alias_target('contrib', contrib_targets)
 alias_target('testprep', testprep_targets)
+alias_target('install-world', install_quiet, installdocs)
 
 
 

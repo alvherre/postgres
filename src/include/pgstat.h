@@ -106,9 +106,9 @@ typedef int64 PgStat_Counter;
  */
 typedef struct PgStat_FunctionCounts
 {
-	PgStat_Counter f_numcalls;
-	instr_time	f_total_time;
-	instr_time	f_self_time;
+	PgStat_Counter numcalls;
+	instr_time	total_time;
+	instr_time	self_time;
 } PgStat_FunctionCounts;
 
 /*
@@ -124,7 +124,7 @@ typedef struct PgStat_FunctionCallUsage
 	/* Backend-wide total time as of function start */
 	instr_time	save_total;
 	/* system clock as of function start */
-	instr_time	f_start;
+	instr_time	start;
 } PgStat_FunctionCallUsage;
 
 /* ----------
@@ -151,31 +151,32 @@ typedef struct PgStat_BackendSubEntry
  * the index AM, while tuples_fetched is the number of tuples successfully
  * fetched by heap_fetch under the control of simple indexscans for this index.
  *
- * tuples_inserted/updated/deleted/hot_updated count attempted actions,
- * regardless of whether the transaction committed.  delta_live_tuples,
+ * tuples_inserted/updated/deleted/hot_updated/newpage_updated count attempted
+ * actions, regardless of whether the transaction committed.  delta_live_tuples,
  * delta_dead_tuples, and changed_tuples are set depending on commit or abort.
  * Note that delta_live_tuples and delta_dead_tuples can be negative!
  * ----------
  */
 typedef struct PgStat_TableCounts
 {
-	PgStat_Counter t_numscans;
+	PgStat_Counter numscans;
 
-	PgStat_Counter t_tuples_returned;
-	PgStat_Counter t_tuples_fetched;
+	PgStat_Counter tuples_returned;
+	PgStat_Counter tuples_fetched;
 
-	PgStat_Counter t_tuples_inserted;
-	PgStat_Counter t_tuples_updated;
-	PgStat_Counter t_tuples_deleted;
-	PgStat_Counter t_tuples_hot_updated;
-	bool		t_truncdropped;
+	PgStat_Counter tuples_inserted;
+	PgStat_Counter tuples_updated;
+	PgStat_Counter tuples_deleted;
+	PgStat_Counter tuples_hot_updated;
+	PgStat_Counter tuples_newpage_updated;
+	bool		truncdropped;
 
-	PgStat_Counter t_delta_live_tuples;
-	PgStat_Counter t_delta_dead_tuples;
-	PgStat_Counter t_changed_tuples;
+	PgStat_Counter delta_live_tuples;
+	PgStat_Counter delta_dead_tuples;
+	PgStat_Counter changed_tuples;
 
-	PgStat_Counter t_blocks_fetched;
-	PgStat_Counter t_blocks_hit;
+	PgStat_Counter blocks_fetched;
+	PgStat_Counter blocks_hit;
 } PgStat_TableCounts;
 
 /* ----------
@@ -195,10 +196,10 @@ typedef struct PgStat_TableCounts
  */
 typedef struct PgStat_TableStatus
 {
-	Oid			t_id;			/* table's OID */
-	bool		t_shared;		/* is it a shared catalog? */
+	Oid			id;				/* table's OID */
+	bool		shared;			/* is it a shared catalog? */
 	struct PgStat_TableXactStatus *trans;	/* lowest subxact's counts */
-	PgStat_TableCounts t_counts;	/* event counts to be sent */
+	PgStat_TableCounts counts;	/* event counts to be sent */
 	Relation	relation;		/* rel that is using this entry */
 } PgStat_TableStatus;
 
@@ -351,10 +352,10 @@ typedef struct PgStat_StatDBEntry
 
 typedef struct PgStat_StatFuncEntry
 {
-	PgStat_Counter f_numcalls;
+	PgStat_Counter numcalls;
 
-	PgStat_Counter f_total_time;	/* times in microseconds */
-	PgStat_Counter f_self_time;
+	PgStat_Counter total_time;	/* times in microseconds */
+	PgStat_Counter self_time;
 } PgStat_StatFuncEntry;
 
 typedef struct PgStat_StatReplSlotEntry
@@ -401,6 +402,7 @@ typedef struct PgStat_StatTabEntry
 	PgStat_Counter tuples_updated;
 	PgStat_Counter tuples_deleted;
 	PgStat_Counter tuples_hot_updated;
+	PgStat_Counter tuples_newpage_updated;
 
 	PgStat_Counter live_tuples;
 	PgStat_Counter dead_tuples;
@@ -582,41 +584,41 @@ extern void pgstat_report_analyze(Relation rel,
 #define pgstat_count_heap_scan(rel)									\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_numscans++;				\
+			(rel)->pgstat_info->counts.numscans++;					\
 	} while (0)
 #define pgstat_count_heap_getnext(rel)								\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_tuples_returned++;		\
+			(rel)->pgstat_info->counts.tuples_returned++;			\
 	} while (0)
 #define pgstat_count_heap_fetch(rel)								\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_tuples_fetched++;		\
+			(rel)->pgstat_info->counts.tuples_fetched++;			\
 	} while (0)
 #define pgstat_count_index_scan(rel)								\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_numscans++;				\
+			(rel)->pgstat_info->counts.numscans++;					\
 	} while (0)
 #define pgstat_count_index_tuples(rel, n)							\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_tuples_returned += (n);	\
+			(rel)->pgstat_info->counts.tuples_returned += (n);		\
 	} while (0)
 #define pgstat_count_buffer_read(rel)								\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_blocks_fetched++;		\
+			(rel)->pgstat_info->counts.blocks_fetched++;			\
 	} while (0)
 #define pgstat_count_buffer_hit(rel)								\
 	do {															\
 		if (pgstat_should_count_relation(rel))						\
-			(rel)->pgstat_info->t_counts.t_blocks_hit++;			\
+			(rel)->pgstat_info->counts.blocks_hit++;				\
 	} while (0)
 
 extern void pgstat_count_heap_insert(Relation rel, PgStat_Counter n);
-extern void pgstat_count_heap_update(Relation rel, bool hot);
+extern void pgstat_count_heap_update(Relation rel, bool hot, bool newpage);
 extern void pgstat_count_heap_delete(Relation rel);
 extern void pgstat_count_truncate(Relation rel);
 extern void pgstat_update_heap_dead_tuples(Relation rel, int delta);
