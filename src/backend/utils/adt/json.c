@@ -70,16 +70,6 @@ typedef struct JsonUniqueStackEntry
 	int			object_id;
 } JsonUniqueStackEntry;
 
-/* State for key uniqueness check during json parsing */
-typedef struct JsonUniqueParsingState
-{
-	JsonLexContext *lex;
-	JsonUniqueCheckState check;
-	JsonUniqueStackEntry *stack;
-	int			id_counter;
-	bool		unique;
-} JsonUniqueParsingState;
-
 typedef struct JsonAggState
 {
 	StringInfo	str;
