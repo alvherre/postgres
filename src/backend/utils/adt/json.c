@@ -44,8 +44,16 @@ typedef enum					/* type categories for datum_to_json */
 	JSONTYPE_OTHER				/* all else */
 } JsonTypeCategory;
 
+
 /* Common context for key uniqueness check */
 typedef struct HTAB *JsonUniqueCheckState;	/* hash table for key names */
+
+/* Element of object stack for key uniqueness check during JSON parsing */
+typedef struct JsonUniqueStackEntry
+{
+	struct JsonUniqueStackEntry *parent;
+	int			object_id;
+} JsonUniqueStackEntry;
 
 /* Hash entry for JsonUniqueCheckState */
 typedef struct JsonUniqueHashEntry
@@ -55,7 +63,7 @@ typedef struct JsonUniqueHashEntry
 	int			object_id;
 } JsonUniqueHashEntry;
 
-/* Context for key uniqueness check in builder functions */
+/* Context struct for key uniqueness check during JSON building */
 typedef struct JsonUniqueBuilderState
 {
 	JsonUniqueCheckState check; /* unique check */
@@ -63,13 +71,8 @@ typedef struct JsonUniqueBuilderState
 	MemoryContext mcxt;			/* context for saving skipped keys */
 } JsonUniqueBuilderState;
 
-/* Element of object stack for key uniqueness check during json parsing */
-typedef struct JsonUniqueStackEntry
-{
-	struct JsonUniqueStackEntry *parent;
-	int			object_id;
-} JsonUniqueStackEntry;
 
+/* State struct for JSON aggregation */
 typedef struct JsonAggState
 {
 	StringInfo	str;
@@ -1052,8 +1055,8 @@ json_object_agg_transfn_worker(FunctionCallInfo fcinfo,
 		/*
 		 * Make the StringInfo in a context where it will persist for the
 		 * duration of the aggregate call. Switching context is only needed
-		 * for this initial step, as the StringInfo routines make sure they
-		 * use the right context to enlarge the object if necessary.
+		 * for this initial step, as the StringInfo and dynahash routines make
+		 * sure they use the right context to enlarge the object if necessary.
 		 */
 		oldcontext = MemoryContextSwitchTo(aggcontext);
 		state = (JsonAggState *) palloc(sizeof(JsonAggState));
@@ -1288,11 +1291,10 @@ json_build_object_worker(int nargs, Datum *args, bool *nulls, Oid *types,
 		/* process key */
 		if (nulls[i])
 			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("argument %d cannot be null", i + 1),
-					 errhint("Object keys should be text.")));
+					(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+					 errmsg("null value not allowed for object key")));
 
-		/* save key offset before key appending */
+		/* save key offset before appending it */
 		key_offset = out->len;
 
 		add_json(args[i], false, out, types[i], true);
