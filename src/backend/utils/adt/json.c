@@ -45,6 +45,12 @@ typedef enum					/* type categories for datum_to_json */
 } JsonTypeCategory;
 
 
+/*
+ * Support for fast key uniqueness checking.
+ *
+ * We maintain a hash table of used keys in JSON objects for fast detection
+ * of duplicates.
+ */
 /* Common context for key uniqueness check */
 typedef struct HTAB *JsonUniqueCheckState;	/* hash table for key names */
 
@@ -969,7 +975,12 @@ json_unique_hash_match(const void *key1, const void *key2, Size keysize)
 	return strncmp(entry1->key, entry2->key, entry1->key_len);
 }
 
-/* Functions implementing object key uniqueness check */
+/*
+ * Uniqueness detection support.
+ *
+ * In order to detect uniqueness during building or parsing of a JSON
+ * object, we maintain a hash table of key names already seen.
+ */
 static void
 json_unique_check_init(JsonUniqueCheckState *cxt)
 {
@@ -988,6 +999,14 @@ json_unique_check_init(JsonUniqueCheckState *cxt)
 					   HASH_ELEM | HASH_CONTEXT | HASH_FUNCTION | HASH_COMPARE);
 }
 
+static void
+json_unique_builder_init(JsonUniqueBuilderState *cxt)
+{
+	json_unique_check_init(&cxt->check);
+	cxt->mcxt = CurrentMemoryContext;
+	cxt->skipped_keys.data = NULL;
+}
+
 static bool
 json_unique_check_key(JsonUniqueCheckState *cxt, const char *key, int object_id)
 {
@@ -1003,17 +1022,13 @@ json_unique_check_key(JsonUniqueCheckState *cxt, const char *key, int object_id)
 	return !found;
 }
 
-static void
-json_unique_builder_init(JsonUniqueBuilderState *cxt)
-{
-	json_unique_check_init(&cxt->check);
-	cxt->mcxt = CurrentMemoryContext;
-	cxt->skipped_keys.data = NULL;
-}
-
-/* On-demand initialization of skipped_keys StringInfo structure */
+/*
+ * On-demand initialization of a throwaway StringInfo.  This is used to
+ * read a key name that we don't need to store in the output object, for
+ * duplicate key detection when the value is NULL.
+ */
 static StringInfo
-json_unique_builder_get_skipped_keys(JsonUniqueBuilderState *cxt)
+json_unique_builder_get_throwawaybuf(JsonUniqueBuilderState *cxt)
 {
 	StringInfo	out = &cxt->skipped_keys;
 
@@ -1024,6 +1039,9 @@ json_unique_builder_get_skipped_keys(JsonUniqueBuilderState *cxt)
 		initStringInfo(out);
 		MemoryContextSwitchTo(oldcxt);
 	}
+	else
+		/* Just reset the string to empty */
+		out->len = 0;
 
 	return out;
 }
@@ -1107,27 +1125,31 @@ json_object_agg_transfn_worker(FunctionCallInfo fcinfo,
 
 	if (PG_ARGISNULL(1))
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("field name must not be null")));
+				(errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+				 errmsg("null value not allowed for object key")));
 
 	/* Skip null values if absent_on_null */
 	skip = absent_on_null && PG_ARGISNULL(2);
 
 	if (skip)
 	{
-		/* If key uniqueness check is needed we must save skipped keys */
+		/*
+		 * We got a NULL value and we're not storing those; if we're not
+		 * testing key uniqueness, we're done.  If we are, use the throwaway
+		 * buffer to store the key name so that we can check it.
+		 */
 		if (!unique_keys)
 			PG_RETURN_POINTER(state);
 
-		out = json_unique_builder_get_skipped_keys(&state->unique_check);
+		out = json_unique_builder_get_throwawaybuf(&state->unique_check);
 	}
 	else
 	{
 		out = state->str;
 
 		/*
-		 * Append comma delimiter only if we have already outputted some
-		 * fields after the initial string "{ ".
+		 * Append comma delimiter only if we have already output some fields
+		 * after the initial string "{ ".
 		 */
 		if (out->len > 2)
 			appendStringInfoString(out, ", ");
@@ -1282,7 +1304,7 @@ json_build_object_worker(int nargs, Datum *args, bool *nulls, Oid *types,
 			if (!unique_keys)
 				continue;
 
-			out = json_unique_builder_get_skipped_keys(&unique_check);
+			out = json_unique_builder_get_throwawaybuf(&unique_check);
 		}
 		else
 		{
