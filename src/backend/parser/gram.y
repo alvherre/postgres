@@ -16426,7 +16426,7 @@ json_name_and_value_list:
 
 json_name_and_value:
 /* TODO This is not supported due to conflicts
-			KEY c_expr VALUE_P json_value_expr %prec POSTFIXOP
+			KEY c_expr VALUE_P json_value_expr %prec ESCAPE
 				{ $$ = makeJsonKeyValue($2, $4); }
 			|
 */
