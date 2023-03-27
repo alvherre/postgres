@@ -1150,6 +1150,13 @@ add_jsonb(Datum val, bool is_null, JsonbInState *result,
 	datum_to_jsonb(val, is_null, result, tcategory, outfuncoid, key_scalar);
 }
 
+/*
+ * Is the given type immutable when coming out of a JSONB context?
+ *
+ * At present, datetimes are all considered mutable, because they
+ * depend on timezone.  XXX we should also drill down into objects and
+ * arrays, but do not.
+ */
 bool
 to_jsonb_is_immutable(Oid typoid)
 {
@@ -1160,6 +1167,7 @@ to_jsonb_is_immutable(Oid typoid)
 
 	switch (tcategory)
 	{
+		case JSONBTYPE_NULL:
 		case JSONBTYPE_BOOL:
 		case JSONBTYPE_JSON:
 		case JSONBTYPE_JSONB:
@@ -1178,9 +1186,11 @@ to_jsonb_is_immutable(Oid typoid)
 
 		case JSONBTYPE_NUMERIC:
 		case JSONBTYPE_JSONCAST:
-		default:
+		case JSONBTYPE_OTHER:
 			return func_volatile(outfuncoid) == PROVOLATILE_IMMUTABLE;
 	}
+
+	return false;			/* not reached */
 }
 
 /*

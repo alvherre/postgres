@@ -755,6 +755,13 @@ row_to_json_pretty(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(cstring_to_text_with_len(result->data, result->len));
 }
 
+/*
+ * Is the given type immutable when coming out of a JSON context?
+ *
+ * At present, datetimes are all considered mutable, because they
+ * depend on timezone.  XXX we should also drill down into objects
+ * and arrays, but do not.
+ */
 bool
 to_json_is_immutable(Oid typoid)
 {
@@ -767,6 +774,7 @@ to_json_is_immutable(Oid typoid)
 	{
 		case JSONTYPE_BOOL:
 		case JSONTYPE_JSON:
+		case JSONTYPE_NULL:
 			return true;
 
 		case JSONTYPE_DATE:
@@ -782,9 +790,11 @@ to_json_is_immutable(Oid typoid)
 
 		case JSONTYPE_NUMERIC:
 		case JSONTYPE_CAST:
-		default:
+		case JSONTYPE_OTHER:
 			return func_volatile(outfuncoid) == PROVOLATILE_IMMUTABLE;
 	}
+
+	return false;		/* not reached */
 }
 
 /*

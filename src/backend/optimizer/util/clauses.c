@@ -389,10 +389,16 @@ contain_mutable_functions_walker(Node *node, void *context)
 	{
 		const JsonConstructorExpr *ctor = (JsonConstructorExpr *) node;
 		ListCell   *lc;
-		bool		is_jsonb =
-		ctor->returning->format->format_type == JS_FORMAT_JSONB;
+		bool		is_jsonb;
 
-		/* Check argument_type => json[b] conversions */
+		is_jsonb = ctor->returning->format->format_type == JS_FORMAT_JSONB;
+
+		/*
+		 * Check argument_type => json[b] conversions specifically.  We still
+		 * recurse to check 'args' below, but here we want to specifically
+		 * check whether or not the emitted clause would fail to be immutable
+		 * because of TimeZone, for example.
+		 */
 		foreach(lc, ctor->args)
 		{
 			Oid			typid = exprType(lfirst(lc));
@@ -2345,6 +2351,7 @@ eval_const_expressions_mutator(Node *node,
 {
 	if (node == NULL)
 		return NULL;
+
 	switch (nodeTag(node))
 	{
 		case T_Param:
@@ -2813,9 +2820,10 @@ eval_const_expressions_mutator(Node *node,
 		case T_JsonValueExpr:
 			{
 				JsonValueExpr *jve = (JsonValueExpr *) node;
-				Node	   *raw = eval_const_expressions_mutator((Node *) jve->raw_expr,
-																 context);
+				Node	   *raw;
 
+				raw = eval_const_expressions_mutator((Node *) jve->raw_expr,
+																 context);
 				if (raw && IsA(raw, Const))
 				{
 					Node	   *formatted;
