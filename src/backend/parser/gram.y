@@ -647,7 +647,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <node>		json_format_clause_opt
 					json_value_expr
 					json_output_clause_opt
-					json_object_constructor_args_opt
 					json_object_args
 					json_name_and_value
 					json_aggregate_func
@@ -16398,35 +16397,29 @@ json_object_args:
 
 					$$ = (Node *) makeFuncCall(func, $1, COERCE_EXPLICIT_CALL, @1);
 				}
-			| json_object_constructor_args_opt json_output_clause_opt
-				{
-					JsonObjectConstructor *n = (JsonObjectConstructor *) $1;
-
-					n->output = (JsonOutput *) $2;
-					n->location = @1;
-					$$ = (Node *) n;
-				}
-		;
-
-json_object_constructor_args_opt:
-			json_name_and_value_list
-			json_object_constructor_null_clause_opt
-			json_key_uniqueness_constraint_opt
+			| json_name_and_value_list
+				json_object_constructor_null_clause_opt
+				json_key_uniqueness_constraint_opt
+				json_output_clause_opt
 				{
 					JsonObjectConstructor *n = makeNode(JsonObjectConstructor);
 
 					n->exprs = $1;
 					n->absent_on_null = $2;
 					n->unique = $3;
+					n->output = (JsonOutput *) $4;
+					n->location = @1;
 					$$ = (Node *) n;
 				}
-			| /* EMPTY */
+			| json_output_clause_opt
 				{
 					JsonObjectConstructor *n = makeNode(JsonObjectConstructor);
 
 					n->exprs = NULL;
 					n->absent_on_null = false;
 					n->unique = false;
+					n->output = (JsonOutput *) $1;
+					n->location = @1;
 					$$ = (Node *) n;
 				}
 		;
