@@ -1970,22 +1970,25 @@ uniqueifyJsonbObject(JsonbValue *object, bool unique_keys, bool skip_nulls)
 			object->val.object.nPairs--;
 		}
 
-		ptr = object->val.object.pairs + 1;
-		res = object->val.object.pairs;
-
-		while (ptr - object->val.object.pairs < object->val.object.nPairs)
+		if (object->val.object.nPairs > 0)
 		{
-			/* Avoid copying over duplicate or null */
-			if (lengthCompareJsonbStringValue(ptr, res) != 0 &&
-				(!skip_nulls || ptr->value.type != jbvNull))
-			{
-				res++;
-				if (ptr != res)
-					memcpy(res, ptr, sizeof(JsonbPair));
-			}
-			ptr++;
-		}
+			ptr = object->val.object.pairs + 1;
+			res = object->val.object.pairs;
 
-		object->val.object.nPairs = res + 1 - object->val.object.pairs;
+			while (ptr - object->val.object.pairs < object->val.object.nPairs)
+			{
+				/* Avoid copying over duplicate or null */
+				if (lengthCompareJsonbStringValue(ptr, res) != 0 &&
+					(!skip_nulls || ptr->value.type != jbvNull))
+				{
+					res++;
+					if (ptr != res)
+						memcpy(res, ptr, sizeof(JsonbPair));
+				}
+				ptr++;
+			}
+
+			object->val.object.nPairs = res + 1 - object->val.object.pairs;
+		}
 	}
 }
