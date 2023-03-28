@@ -15575,10 +15575,9 @@ func_expr_common_subexpr:
 				}
 			| JSON_OBJECT '(' func_arg_list ')'
 				{
-					List *func = list_make1(makeString("json_object"));
-
 					/* Support for legacy (non-standard) json_object() */
-					$$ = (Node *) makeFuncCall(func, $3, COERCE_EXPLICIT_CALL, @1);
+					$$ = (Node *) makeFuncCall(SystemFuncName("json_object"),
+											   $3, COERCE_EXPLICIT_CALL, @1);
 				}
 			| JSON_OBJECT '(' json_name_and_value_list
 				json_object_constructor_null_clause_opt
