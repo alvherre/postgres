@@ -655,6 +655,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 					json_array_aggregate_order_by_clause_opt
 
 %type <ival>		json_encoding_clause_opt
+					json_predicate_type_constraint_opt
 
 %type <boolean>		json_key_uniqueness_constraint_opt
 					json_object_constructor_null_clause_opt
@@ -724,7 +725,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 	JOIN JSON JSON_ARRAY JSON_ARRAYAGG JSON_OBJECT JSON_OBJECTAGG
 
-	KEY KEYS
+	KEY KEYS KEEP
 
 	LABEL LANGUAGE LARGE_P LAST_P LATERAL_P
 	LEADING LEAKPROOF LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL
@@ -754,9 +755,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	RESET RESTART RESTRICT RETURN RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLUP
 	ROUTINE ROUTINES ROW ROWS RULE
 
-	SAVEPOINT SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
-	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHOW
-	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
+	SAVEPOINT SCALAR SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT
+	SEQUENCE SEQUENCES SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF
+	SHARE SHOW SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
 	START STATEMENT STATISTICS STDIN STDOUT STORAGE STORED STRICT_P STRIP_P
 	SUBSCRIPTION SUBSTRING SUPPORT SYMMETRIC SYSID SYSTEM_P SYSTEM_USER
 
@@ -14851,6 +14852,48 @@ a_expr:		c_expr									{ $$ = $1; }
 														   @2),
 									 @2);
 				}
+			| a_expr
+				IS json_predicate_type_constraint_opt
+					json_key_uniqueness_constraint_opt		%prec IS
+				{
+					JsonFormat *format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
+
+					$$ = makeJsonIsPredicate($1, format, $3, $4, @1);
+				}
+			/*
+			 * Required by standard, but it would conflict with expressions
+			 * like: 'str' || format(...)
+			| a_expr
+				FORMAT json_representation
+				IS  json_predicate_type_constraint_opt
+					json_key_uniqueness_constraint_opt		%prec FORMAT
+				{
+					$3.location = @2;
+					$$ = makeJsonIsPredicate($1, $3, $5, $6, @1);
+				}
+			*/
+			| a_expr
+				IS NOT
+					json_predicate_type_constraint_opt
+					json_key_uniqueness_constraint_opt		%prec IS
+				{
+					JsonFormat *format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
+
+					$$ = makeNotExpr(makeJsonIsPredicate($1, format, $4, $5, @1), @1);
+				}
+			/*
+			 * Required by standard, but it would conflict with expressions
+			 * like: 'str' || format(...)
+			| a_expr
+				FORMAT json_representation
+				IS NOT
+					json_predicate_type_constraint_opt
+					json_key_uniqueness_constraint_opt		%prec FORMAT
+				{
+					$3.location = @2;
+					$$ = makeNotExpr(makeJsonIsPredicate($1, $3, $6, $7, @1), @1);
+				}
+			*/
 			| DEFAULT
 				{
 					/*
@@ -16407,6 +16450,14 @@ json_output_clause_opt:
 			| /* EMPTY */							{ $$ = NULL; }
 		;
 
+json_predicate_type_constraint_opt:
+			JSON									{ $$ = JS_TYPE_ANY; }
+			| JSON VALUE_P							{ $$ = JS_TYPE_ANY; }
+			| JSON ARRAY							{ $$ = JS_TYPE_ARRAY; }
+			| JSON OBJECT_P							{ $$ = JS_TYPE_OBJECT; }
+			| JSON SCALAR							{ $$ = JS_TYPE_SCALAR; }
+		;
+
 /* KEYS is a noise word here */
 json_key_uniqueness_constraint_opt:
 			WITH UNIQUE KEYS				{ $$ = true; }
@@ -17183,6 +17234,7 @@ unreserved_keyword:
 			| ROWS
 			| RULE
 			| SAVEPOINT
+			| SCALAR
 			| SCHEMA
 			| SCHEMAS
 			| SCROLL
@@ -17655,6 +17707,7 @@ bare_label_keyword:
 			| JSON_ARRAYAGG
 			| JSON_OBJECT
 			| JSON_OBJECTAGG
+			| KEEP
 			| KEY
 			| KEYS
 			| LABEL
@@ -17785,6 +17838,7 @@ bare_label_keyword:
 			| ROWS
 			| RULE
 			| SAVEPOINT
+			| SCALAR
 			| SCHEMA
 			| SCHEMAS
 			| SCROLL
