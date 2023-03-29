@@ -457,22 +457,31 @@ static void get_func_expr(FuncExpr *expr, deparse_context *context,
 						  bool showimplicit);
 static void get_agg_expr(Aggref *aggref, deparse_context *context,
 						 Aggref *original_aggref);
+static void get_agg_expr_helper(Aggref *aggref, deparse_context *context,
+					Aggref *original_aggref, const char *funcname,
+					const char *options, bool is_json_objectagg);
 static void get_agg_combine_expr(Node *node, deparse_context *context,
 								 void *callback_arg);
 static void get_windowfunc_expr(WindowFunc *wfunc, deparse_context *context);
+static void get_windowfunc_expr_helper(WindowFunc *wfunc, deparse_context *context,
+									   const char *funcname, const char *options,
+									   bool is_json_objectagg);
 static bool get_func_sql_syntax(FuncExpr *expr, deparse_context *context);
 static void get_coercion_expr(Node *arg, deparse_context *context,
 							  Oid resulttype, int32 resulttypmod,
 							  Node *parentNode);
 static void get_const_expr(Const *constval, deparse_context *context,
 						   int showtype);
+static void get_const_collation(Const *constval, deparse_context *context);
+static void get_json_format(JsonFormat *format, StringInfo buf);
 static void get_json_constructor(JsonConstructorExpr *ctor,
 								 deparse_context *context, bool showimplicit);
+static void get_json_constructor_options(JsonConstructorExpr *ctor,
+										 StringInfo buf);
 static void get_json_agg_constructor(JsonConstructorExpr *ctor,
 									 deparse_context *context,
 									 const char *funcname,
 									 bool is_json_objectagg);
-static void get_const_collation(Const *constval, deparse_context *context);
 static void simple_quote_literal(StringInfo buf, const char *val);
 static void get_sublink_expr(SubLink *sublink, deparse_context *context);
 static void get_tablefunc(TableFunc *tf, deparse_context *context,
@@ -8410,48 +8419,6 @@ get_rule_expr_paren(Node *node, deparse_context *context,
 		appendStringInfoChar(context->buf, ')');
 }
 
-/*
- * get_json_format			- Parse back a JsonFormat node
- */
-static void
-get_json_format(JsonFormat *format, StringInfo buf)
-{
-	if (format->format_type == JS_FORMAT_DEFAULT)
-		return;
-
-	appendStringInfoString(buf,
-						   format->format_type == JS_FORMAT_JSONB ?
-						   " FORMAT JSONB" : " FORMAT JSON");
-
-	if (format->encoding != JS_ENC_DEFAULT)
-	{
-		const char *encoding =
-		format->encoding == JS_ENC_UTF16 ? "UTF16" :
-		format->encoding == JS_ENC_UTF32 ? "UTF32" : "UTF8";
-
-		appendStringInfo(buf, " ENCODING %s", encoding);
-	}
-}
-
-/*
- * get_json_returning		- Parse back a JsonReturning structure
- */
-static void
-get_json_returning(JsonReturning *returning, StringInfo buf,
-				   bool json_format_by_default)
-{
-	if (!OidIsValid(returning->typid))
-		return;
-
-	appendStringInfo(buf, " RETURNING %s",
-					 format_type_with_typemod(returning->typid,
-											  returning->typmod));
-
-	if (!json_format_by_default ||
-		returning->format->format_type !=
-		(returning->typid == JSONBOID ? JS_FORMAT_JSONB : JS_FORMAT_JSON))
-		get_json_format(returning->format, buf);
-}
 
 /* ----------
  * get_rule_expr			- Parse back an expression
@@ -9830,83 +9797,20 @@ get_func_expr(FuncExpr *expr, deparse_context *context,
 	appendStringInfoChar(buf, ')');
 }
 
+/*
+ * get_agg_expr			- Parse back an Aggref node
+ */
 static void
-get_json_constructor_options(JsonConstructorExpr *ctor, StringInfo buf)
+get_agg_expr(Aggref *aggref, deparse_context *context,
+			 Aggref *original_aggref)
 {
-	if (ctor->absent_on_null)
-	{
-		if (ctor->type == JSCTOR_JSON_OBJECT ||
-			ctor->type == JSCTOR_JSON_OBJECTAGG)
-			appendStringInfoString(buf, " ABSENT ON NULL");
-	}
-	else
-	{
-		if (ctor->type == JSCTOR_JSON_ARRAY ||
-			ctor->type == JSCTOR_JSON_ARRAYAGG)
-			appendStringInfoString(buf, " NULL ON NULL");
-	}
-
-	if (ctor->unique)
-		appendStringInfoString(buf, " WITH UNIQUE KEYS");
-
-	get_json_returning(ctor->returning, buf, true);
+	get_agg_expr_helper(aggref, context, original_aggref, NULL, NULL,
+						false);
 }
-
-static void
-get_json_constructor(JsonConstructorExpr *ctor, deparse_context *context,
-					 bool showimplicit)
-{
-	StringInfo	buf = context->buf;
-	const char *funcname;
-	int			nargs;
-	ListCell   *lc;
-
-	switch (ctor->type)
-	{
-		case JSCTOR_JSON_OBJECT:
-			funcname = "JSON_OBJECT";
-			break;
-		case JSCTOR_JSON_ARRAY:
-			funcname = "JSON_ARRAY";
-			break;
-		case JSCTOR_JSON_OBJECTAGG:
-			get_json_agg_constructor(ctor, context, "JSON_OBJECTAGG", true);
-			return;
-		case JSCTOR_JSON_ARRAYAGG:
-			get_json_agg_constructor(ctor, context, "JSON_ARRAYAGG", false);
-			return;
-		default:
-			elog(ERROR, "invalid JsonConstructorExprType %d", ctor->type);
-	}
-
-	appendStringInfo(buf, "%s(", funcname);
-
-	nargs = 0;
-	foreach(lc, ctor->args)
-	{
-		if (nargs > 0)
-		{
-			const char *sep;
-
-			sep = (ctor->type == JSCTOR_JSON_OBJECT && (nargs % 2) != 0) ?
-				" : " : ", ";
-
-			appendStringInfoString(buf, sep);
-		}
-
-		get_rule_expr((Node *) lfirst(lc), context, true);
-
-		nargs++;
-	}
-
-	get_json_constructor_options(ctor, buf);
-
-	appendStringInfo(buf, ")");
-}
-
 
 /*
- * get_agg_expr_helper			- Parse back an Aggref node
+ * get_agg_expr_helper		- subroutine for get_agg_expr and
+ *							get_json_agg_constructor
  */
 static void
 get_agg_expr_helper(Aggref *aggref, deparse_context *context,
@@ -9992,9 +9896,12 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 				{
 					if (is_json_objectagg)
 					{
+						/*
+						 * the ABSENT ON NULL and WITH UNIQUE args are printed
+						 * separately, so ignore them here
+						 */
 						if (i > 2)
-							break;	/* skip ABSENT ON NULL and WITH UNIQUE
-									 * args */
+							break;
 
 						appendStringInfoString(buf, " : ");
 					}
@@ -10027,16 +9934,6 @@ get_agg_expr_helper(Aggref *aggref, deparse_context *context,
 }
 
 /*
- * get_agg_expr			- Parse back an Aggref node
- */
-static void
-get_agg_expr(Aggref *aggref, deparse_context *context, Aggref *original_aggref)
-{
-	get_agg_expr_helper(aggref, context, original_aggref, NULL, NULL,
-						false);
-}
-
-/*
  * This is a helper function for get_agg_expr().  It's used when we deparse
  * a combining Aggref; resolve_special_varno locates the corresponding partial
  * Aggref and then calls this.
@@ -10055,7 +9952,18 @@ get_agg_combine_expr(Node *node, deparse_context *context, void *callback_arg)
 }
 
 /*
- * get_windowfunc_expr_helper	- Parse back a WindowFunc node
+ * get_windowfunc_expr	- Parse back a WindowFunc node
+ */
+static void
+get_windowfunc_expr(WindowFunc *wfunc, deparse_context *context)
+{
+	get_windowfunc_expr_helper(wfunc, context, NULL, NULL, false);
+}
+
+
+/*
+ * get_windowfunc_expr_helper	- subroutine for get_windowfunc_expr and
+ *								get_json_agg_constructor
  */
 static void
 get_windowfunc_expr_helper(WindowFunc *wfunc, deparse_context *context,
@@ -10169,15 +10077,6 @@ get_func_sql_syntax_time(List *args, deparse_context *context)
 		get_rule_expr((Node *) cons, context, false);
 		appendStringInfoString(buf, ")");
 	}
-}
-
-/*
- * get_windowfunc_expr	- Parse back a WindowFunc node
- */
-static void
-get_windowfunc_expr(WindowFunc *wfunc, deparse_context *context)
-{
-	get_windowfunc_expr_helper(wfunc, context, NULL, NULL, false);
 }
 
 /*
@@ -10460,31 +10359,6 @@ get_func_sql_syntax(FuncExpr *expr, deparse_context *context)
 	return false;
 }
 
-/*
- * get_json_agg_constructor - Parse back an aggregate JsonConstructorExpr node
- */
-static void
-get_json_agg_constructor(JsonConstructorExpr *ctor, deparse_context *context,
-						 const char *funcname, bool is_json_objectagg)
-{
-	StringInfoData options;
-
-	initStringInfo(&options);
-	get_json_constructor_options(ctor, &options);
-
-	if (IsA(ctor->func, Aggref))
-		get_agg_expr_helper((Aggref *) ctor->func, context,
-							(Aggref *) ctor->func,
-							funcname, options.data, is_json_objectagg);
-	else if (IsA(ctor->func, WindowFunc))
-		get_windowfunc_expr_helper((WindowFunc *) ctor->func, context,
-								   funcname, options.data,
-								   is_json_objectagg);
-	else
-		elog(ERROR, "invalid JsonConstructorExpr underlying node type: %d",
-			 nodeTag(ctor->func));
-}
-
 /* ----------
  * get_coercion_expr
  *
@@ -10700,6 +10574,158 @@ get_const_collation(Const *constval, deparse_context *context)
 							 generate_collation_name(constval->constcollid));
 		}
 	}
+}
+
+/*
+ * get_json_format			- Parse back a JsonFormat node
+ */
+static void
+get_json_format(JsonFormat *format, StringInfo buf)
+{
+	if (format->format_type == JS_FORMAT_DEFAULT)
+		return;
+
+	appendStringInfoString(buf,
+						   format->format_type == JS_FORMAT_JSONB ?
+						   " FORMAT JSONB" : " FORMAT JSON");
+
+	if (format->encoding != JS_ENC_DEFAULT)
+	{
+		const char *encoding;
+
+		encoding =
+			format->encoding == JS_ENC_UTF16 ? "UTF16" :
+			format->encoding == JS_ENC_UTF32 ? "UTF32" : "UTF8";
+
+		appendStringInfo(buf, " ENCODING %s", encoding);
+	}
+}
+
+/*
+ * get_json_returning		- Parse back a JsonReturning structure
+ */
+static void
+get_json_returning(JsonReturning *returning, StringInfo buf,
+				   bool json_format_by_default)
+{
+	if (!OidIsValid(returning->typid))
+		return;
+
+	appendStringInfo(buf, " RETURNING %s",
+					 format_type_with_typemod(returning->typid,
+											  returning->typmod));
+
+	if (!json_format_by_default ||
+		returning->format->format_type !=
+		(returning->typid == JSONBOID ? JS_FORMAT_JSONB : JS_FORMAT_JSON))
+		get_json_format(returning->format, buf);
+}
+
+/*
+ * get_json_constructor		- Parse back a JsonConstructorExpr node
+ */
+static void
+get_json_constructor(JsonConstructorExpr *ctor, deparse_context *context,
+					 bool showimplicit)
+{
+	StringInfo	buf = context->buf;
+	const char *funcname;
+	bool		is_json_object;
+	int			curridx;
+	ListCell   *lc;
+
+	if (ctor->type == JSCTOR_JSON_OBJECTAGG)
+	{
+		get_json_agg_constructor(ctor, context, "JSON_OBJECTAGG", true);
+		return;
+	}
+	else if (ctor->type == JSCTOR_JSON_ARRAYAGG)
+	{
+		get_json_agg_constructor(ctor, context, "JSON_ARRAYAGG", false);
+		return;
+	}
+
+	switch (ctor->type)
+	{
+		case JSCTOR_JSON_OBJECT:
+			funcname = "JSON_OBJECT";
+			break;
+		case JSCTOR_JSON_ARRAY:
+			funcname = "JSON_ARRAY";
+			break;
+		default:
+			elog(ERROR, "invalid JsonConstructorExprType %d", ctor->type);
+	}
+
+	appendStringInfo(buf, "%s(", funcname);
+
+	is_json_object = ctor->type == JSCTOR_JSON_OBJECT;
+	foreach(lc, ctor->args)
+	{
+		curridx = foreach_current_index(lc);
+		if (curridx > 0)
+		{
+			const char *sep;
+
+			sep = (is_json_object && (curridx % 2) != 0) ?  " : " : ", ";
+			appendStringInfoString(buf, sep);
+		}
+
+		get_rule_expr((Node *) lfirst(lc), context, true);
+	}
+
+	get_json_constructor_options(ctor, buf);
+	appendStringInfo(buf, ")");
+}
+
+/*
+ * Append options, if any, to the JSON constructor being deparsed
+ */
+static void
+get_json_constructor_options(JsonConstructorExpr *ctor, StringInfo buf)
+{
+	if (ctor->absent_on_null)
+	{
+		if (ctor->type == JSCTOR_JSON_OBJECT ||
+			ctor->type == JSCTOR_JSON_OBJECTAGG)
+			appendStringInfoString(buf, " ABSENT ON NULL");
+	}
+	else
+	{
+		if (ctor->type == JSCTOR_JSON_ARRAY ||
+			ctor->type == JSCTOR_JSON_ARRAYAGG)
+			appendStringInfoString(buf, " NULL ON NULL");
+	}
+
+	if (ctor->unique)
+		appendStringInfoString(buf, " WITH UNIQUE KEYS");
+
+	get_json_returning(ctor->returning, buf, true);
+}
+
+/*
+ * get_json_agg_constructor - Parse back an aggregate JsonConstructorExpr node
+ */
+static void
+get_json_agg_constructor(JsonConstructorExpr *ctor, deparse_context *context,
+						 const char *funcname, bool is_json_objectagg)
+{
+	StringInfoData options;
+
+	initStringInfo(&options);
+	get_json_constructor_options(ctor, &options);
+
+	if (IsA(ctor->func, Aggref))
+		get_agg_expr_helper((Aggref *) ctor->func, context,
+							(Aggref *) ctor->func,
+							funcname, options.data, is_json_objectagg);
+	else if (IsA(ctor->func, WindowFunc))
+		get_windowfunc_expr_helper((WindowFunc *) ctor->func, context,
+								   funcname, options.data,
+								   is_json_objectagg);
+	else
+		elog(ERROR, "invalid JsonConstructorExpr underlying node type: %d",
+			 nodeTag(ctor->func));
 }
 
 /*
