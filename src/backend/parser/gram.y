@@ -821,6 +821,14 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %nonassoc	'<' '>' '=' LESS_EQUALS GREATER_EQUALS NOT_EQUALS
 %nonassoc	BETWEEN IN_P LIKE ILIKE SIMILAR NOT_LA
 %nonassoc	ESCAPE			/* ESCAPE must be just above LIKE/ILIKE/SIMILAR */
+
+/* SQL/JSON related keywords */
+%nonassoc	UNIQUE JSON
+%nonassoc	KEYS						/* UNIQUE [ KEYS ] */
+%nonassoc	OBJECT_P SCALAR VALUE_P		/* JSON [ OBJECT | SCALAR | VALUE ] */
+%nonassoc	empty_json_unique
+%nonassoc	WITHOUT_LA WITH_UNIQUE_LA
+
 /*
  * To support target_el without AS, it used to be necessary to assign IDENT an
  * explicit precedence just less than Op.  While that's not really necessary
@@ -847,14 +855,11 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * Using the same precedence as IDENT seems right for the reasons given above.
  */
 %nonassoc	UNBOUNDED		/* ideally would have same precedence as IDENT */
-%nonassoc	ABSENT UNIQUE JSON
 %nonassoc	IDENT PARTITION RANGE ROWS GROUPS PRECEDING FOLLOWING CUBE ROLLUP
 %left		Op OPERATOR		/* multi-character ops and user-defined operators */
 %left		'+' '-'
 %left		'*' '/' '%'
 %left		'^'
-%left		KEYS						/* UNIQUE [ KEYS ] */
-%left		OBJECT_P SCALAR VALUE_P		/* JSON [ OBJECT | SCALAR | VALUE ] */
 /* Unary Operators */
 %left		AT				/* sets precedence for AT TIME ZONE */
 %left		COLLATE
@@ -871,9 +876,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * left-associativity among the JOIN rules themselves.
  */
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL
-
-%nonassoc	empty_json_unique
-%left		WITHOUT_LA WITH_UNIQUE_LA
 
 %%
 
