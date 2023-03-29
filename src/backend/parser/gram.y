@@ -655,7 +655,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 					json_array_aggregate_order_by_clause_opt
 
 %type <ival>		json_encoding_clause_opt
-					json_predicate_type_constraint_opt
+					json_predicate_type_constraint
 
 %type <boolean>		json_key_uniqueness_constraint_opt
 					json_object_constructor_null_clause_opt
@@ -756,8 +756,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	ROUTINE ROUTINES ROW ROWS RULE
 
 	SAVEPOINT SCALAR SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT
-	SEQUENCE SEQUENCES SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF
-	SHARE SHOW SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
+	SEQUENCE SEQUENCES
+	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHOW
+	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P
 	START STATEMENT STATISTICS STDIN STDOUT STORAGE STORED STRICT_P STRIP_P
 	SUBSCRIPTION SUBSTRING SUPPORT SYMMETRIC SYSID SYSTEM_P SYSTEM_USER
 
@@ -792,7 +793,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * FORMAT_LA, NULLS_LA, WITH_LA, and WITHOUT_LA are needed to make the grammar
  * LALR(1).
  */
-%token		FORMAT_LA NOT_LA NULLS_LA WITH_LA WITHOUT_LA
+%token		FORMAT_LA NOT_LA NULLS_LA WITH_LA WITH_UNIQUE_LA WITHOUT_LA
 
 /*
  * The grammar likewise thinks these tokens are keywords, but they are never
@@ -846,11 +847,14 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * Using the same precedence as IDENT seems right for the reasons given above.
  */
 %nonassoc	UNBOUNDED		/* ideally would have same precedence as IDENT */
+%nonassoc	ABSENT UNIQUE JSON
 %nonassoc	IDENT PARTITION RANGE ROWS GROUPS PRECEDING FOLLOWING CUBE ROLLUP
 %left		Op OPERATOR		/* multi-character ops and user-defined operators */
 %left		'+' '-'
 %left		'*' '/' '%'
 %left		'^'
+%left		KEYS						/* UNIQUE [ KEYS ] */
+%left		OBJECT_P SCALAR VALUE_P		/* JSON [ OBJECT | SCALAR | VALUE ] */
 /* Unary Operators */
 %left		AT				/* sets precedence for AT TIME ZONE */
 %left		COLLATE
@@ -867,6 +871,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  * left-associativity among the JOIN rules themselves.
  */
 %left		JOIN CROSS LEFT FULL RIGHT INNER_P NATURAL
+
+%nonassoc	empty_json_unique
+%left		WITHOUT_LA WITH_UNIQUE_LA
 
 %%
 
@@ -14852,8 +14859,7 @@ a_expr:		c_expr									{ $$ = $1; }
 														   @2),
 									 @2);
 				}
-			| a_expr
-				IS json_predicate_type_constraint_opt
+			| a_expr IS json_predicate_type_constraint
 					json_key_uniqueness_constraint_opt		%prec IS
 				{
 					JsonFormat *format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
@@ -14865,16 +14871,15 @@ a_expr:		c_expr									{ $$ = $1; }
 			 * like: 'str' || format(...)
 			| a_expr
 				FORMAT json_representation
-				IS  json_predicate_type_constraint_opt
-					json_key_uniqueness_constraint_opt		%prec FORMAT
+				IS  json_predicate_type_constraint
+					json_key_uniqueness_constraint_opt		%prec IS
 				{
 					$3.location = @2;
 					$$ = makeJsonIsPredicate($1, $3, $5, $6, @1);
 				}
 			*/
-			| a_expr
-				IS NOT
-					json_predicate_type_constraint_opt
+			| a_expr IS NOT
+					json_predicate_type_constraint
 					json_key_uniqueness_constraint_opt		%prec IS
 				{
 					JsonFormat *format = makeJsonFormat(JS_FORMAT_DEFAULT, JS_ENC_DEFAULT, -1);
@@ -14887,8 +14892,8 @@ a_expr:		c_expr									{ $$ = $1; }
 			| a_expr
 				FORMAT json_representation
 				IS NOT
-					json_predicate_type_constraint_opt
-					json_key_uniqueness_constraint_opt		%prec FORMAT
+					json_predicate_type_constraint
+					json_key_uniqueness_constraint_opt		%prec IS
 				{
 					$3.location = @2;
 					$$ = makeNotExpr(makeJsonIsPredicate($1, $3, $6, $7, @1), @1);
@@ -16450,7 +16455,7 @@ json_output_clause_opt:
 			| /* EMPTY */							{ $$ = NULL; }
 		;
 
-json_predicate_type_constraint_opt:
+json_predicate_type_constraint:
 			JSON									{ $$ = JS_TYPE_ANY; }
 			| JSON VALUE_P							{ $$ = JS_TYPE_ANY; }
 			| JSON ARRAY							{ $$ = JS_TYPE_ARRAY; }
@@ -16460,11 +16465,11 @@ json_predicate_type_constraint_opt:
 
 /* KEYS is a noise word here */
 json_key_uniqueness_constraint_opt:
-			WITH UNIQUE KEYS				{ $$ = true; }
-			| WITH UNIQUE				    { $$ = true; }
-			| WITHOUT_LA UNIQUE KEYS		{ $$ = false; }
-			| WITHOUT_LA UNIQUE			    { $$ = false; }
-			| /* EMPTY */ 					{ $$ = false; }
+			WITH_UNIQUE_LA UNIQUE KEYS					{ $$ = true; }
+			| WITH_UNIQUE_LA UNIQUE				    	{ $$ = true; }
+			| WITHOUT_LA UNIQUE KEYS					{ $$ = false; }
+			| WITHOUT_LA UNIQUE			    			{ $$ = false; }
+			| /* EMPTY */ 	%prec empty_json_unique		{ $$ = false; }
 		;
 
 json_name_and_value_list:
