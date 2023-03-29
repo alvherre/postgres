@@ -1791,7 +1791,7 @@ json_typeof(PG_FUNCTION_ARGS)
 	JsonTokenType tok;
 	JsonParseErrorType result;
 
-	/* Lex exactlyi one token from the input and check its type. */
+	/* Lex exactly one token from the input and check its type. */
 	result = json_lex(lex);
 	if (result != JSON_SUCCESS)
 		json_errsave_error(result, lex, NULL);
