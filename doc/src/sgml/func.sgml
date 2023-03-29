@@ -15718,7 +15718,7 @@ table2-mapping
    <xref linkend="functions-json-creation-table"/> shows the functions that are
    available for constructing <type>json</type> and <type>jsonb</type> values.
    Some functions in this table have a <literal>RETURNING</literal> clause,
-   which specify the data type returned.  It must be one of <type>json</type>,
+   which specifies the data type returned.  It must be one of <type>json</type>,
    <type>jsonb</type>, <type>bytea</type>, a character string type (<type>text</type>,
    <type>char</type>, <type>varchar</type>, or <type>nchar</type>), or a type
    for which there is a cast from <type>json</type> to that type.
@@ -15929,18 +15929,20 @@ table2-mapping
          <optional> <literal>RETURNING</literal> <replaceable>data_type</replaceable> <optional> <literal>FORMAT JSON</literal> <optional> <literal>ENCODING UTF8</literal> </optional> </optional> </optional>)
         </para>
         <para>
-         Constructs a JSON object of all the key value pairs given,
+         Constructs a JSON object of all the key/value pairs given,
          or an empty object if none are given.
          <replaceable>key_expression</replaceable> is a scalar expression
          defining the <acronym>JSON</acronym> key, which is
          converted to the <type>text</type> type.
          It cannot be <literal>NULL</literal> nor can it
-         belong to a type that has a cast to the <type>json</type>.
-         If <literal>WITH UNIQUE</literal> is specified, there must not
+         belong to a type that has a cast to the <type>json</type> type.
+         If <literal>WITH UNIQUE KEYS</literal> is specified, there must not
          be any duplicate <replaceable>key_expression</replaceable>.
-         If <literal>ABSENT ON NULL</literal> is specified, the entire
-         pair is omitted if the <replaceable>value_expression</replaceable>
-         is <literal>NULL</literal>.
+         Any pair for which the <replaceable>value_expression</replaceable>
+         evaluates to <literal>NULL</literal> is omitted from the output
+         if <literal>ABSENT ON NULL</literal> is specified;
+         if <literal>NULL ON NULL</literal> is specified or the clause
+         omitted, the key is included with value <literal>NULL</literal>.
         </para>
         <para>
          <literal>json_object('code' VALUE 'P123', 'title': 'Jaws')</literal>
