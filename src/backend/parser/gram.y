@@ -826,7 +826,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %nonassoc	UNIQUE JSON
 %nonassoc	KEYS						/* UNIQUE [ KEYS ] */
 %nonassoc	OBJECT_P SCALAR VALUE_P		/* JSON [ OBJECT | SCALAR | VALUE ] */
-%nonassoc	empty_json_unique
 %nonassoc	WITHOUT_LA WITH_UNIQUE_LA
 
 /*
@@ -16468,10 +16467,10 @@ json_predicate_type_constraint:
 /* KEYS is a noise word here */
 json_key_uniqueness_constraint_opt:
 			WITH_UNIQUE_LA UNIQUE KEYS					{ $$ = true; }
-			| WITH_UNIQUE_LA UNIQUE				    	{ $$ = true; }
+			| WITH_UNIQUE_LA UNIQUE						{ $$ = true; }
 			| WITHOUT_LA UNIQUE KEYS					{ $$ = false; }
-			| WITHOUT_LA UNIQUE			    			{ $$ = false; }
-			| /* EMPTY */ 	%prec empty_json_unique		{ $$ = false; }
+			| WITHOUT_LA UNIQUE							{ $$ = false; }
+			| /* EMPTY */ 				%prec KEYS		{ $$ = false; }
 		;
 
 json_name_and_value_list:
