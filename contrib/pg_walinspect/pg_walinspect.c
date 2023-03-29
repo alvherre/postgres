@@ -186,6 +186,7 @@ GetWALRecordInfo(XLogReaderState *record, Datum *values,
 	RmgrData	desc;
 	uint32		fpi_len = 0;
 	StringInfoData rec_desc;
+	StringInfoData rec_blk_ref;
 	int			i = 0;
 
 	desc = GetRmgr(XLogRecGetRmid(record));
@@ -197,6 +198,12 @@ GetWALRecordInfo(XLogReaderState *record, Datum *values,
 	initStringInfo(&rec_desc);
 	desc.rm_desc(&rec_desc, record);
 
+	if (XLogRecHasAnyBlockRefs(record))
+	{
+		initStringInfo(&rec_blk_ref);
+		XLogRecGetBlockRefInfo(record, false, true, &rec_blk_ref, &fpi_len);
+	}
+
 	values[i++] = LSNGetDatum(record->ReadRecPtr);
 	values[i++] = LSNGetDatum(record->EndRecPtr);
 	values[i++] = LSNGetDatum(XLogRecGetPrev(record));
@@ -205,7 +212,6 @@ GetWALRecordInfo(XLogReaderState *record, Datum *values,
 	values[i++] = CStringGetTextDatum(id);
 	values[i++] = UInt32GetDatum(XLogRecGetTotalLen(record));
 	values[i++] = UInt32GetDatum(XLogRecGetDataLen(record));
-
 	values[i++] = UInt32GetDatum(fpi_len);
 
 	if (rec_desc.len > 0)
@@ -213,15 +219,8 @@ GetWALRecordInfo(XLogReaderState *record, Datum *values,
 	else
 		nulls[i++] = true;
 
-	/* Block references. */
 	if (XLogRecHasAnyBlockRefs(record))
-	{
-		StringInfoData rec_blk_ref;
-
-		initStringInfo(&rec_blk_ref);
-		XLogRecGetBlockRefInfo(record, false, true, &rec_blk_ref, &fpi_len);
 		values[i++] = CStringGetTextDatum(rec_blk_ref.data);
-	}
 	else
 		nulls[i++] = true;
 
@@ -379,7 +378,7 @@ pg_get_wal_block_info(PG_FUNCTION_ARGS)
 	xlogreader = InitXLogReaderState(start_lsn);
 
 	tmp_cxt = AllocSetContextCreate(CurrentMemoryContext,
-									"pg_get_block_fpi_info temporary cxt",
+									"pg_get_wal_block_info temporary cxt",
 									ALLOCSET_DEFAULT_SIZES);
 
 	while (ReadNextXLogRecord(xlogreader) &&

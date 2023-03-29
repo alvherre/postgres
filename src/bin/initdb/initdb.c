@@ -1695,20 +1695,7 @@ setup_description(FILE *cmdfd)
 static void
 setup_collation(FILE *cmdfd)
 {
-	/*
-	 * Add SQL-standard names.  We don't want to pin these, so they don't go
-	 * in pg_collation.dat.  But add them before reading system collations, so
-	 * that they win if libc defines a locale with the same name.
-	 */
-	PG_CMD_PRINTF("INSERT INTO pg_collation (oid, collname, collnamespace, collowner, collprovider, collisdeterministic, collencoding, colliculocale)"
-				  "VALUES (pg_nextoid('pg_catalog.pg_collation', 'oid', 'pg_catalog.pg_collation_oid_index'), 'unicode', 'pg_catalog'::regnamespace, %u, '%c', true, -1, 'und');\n\n",
-				  BOOTSTRAP_SUPERUSERID, COLLPROVIDER_ICU);
-
-	PG_CMD_PRINTF("INSERT INTO pg_collation (oid, collname, collnamespace, collowner, collprovider, collisdeterministic, collencoding, collcollate, collctype)"
-				  "VALUES (pg_nextoid('pg_catalog.pg_collation', 'oid', 'pg_catalog.pg_collation_oid_index'), 'ucs_basic', 'pg_catalog'::regnamespace, %u, '%c', true, %d, 'C', 'C');\n\n",
-				  BOOTSTRAP_SUPERUSERID, COLLPROVIDER_LIBC, PG_UTF8);
-
-	/* Now import all collations we can find in the operating system */
+	/* Import all collations we can find in the operating system */
 	PG_CMD_PUTS("SELECT pg_import_system_collations('pg_catalog');\n\n");
 }
 
@@ -2243,46 +2230,96 @@ check_icu_locale_encoding(int user_enc)
 }
 
 /*
- * Check that ICU accepts the locale name; or if not specified, retrieve the
- * default ICU locale.
+ * Perform best-effort check that the locale is a valid one. Should be
+ * consistent with pg_locale.c, except that it doesn't need to open the
+ * collator (that will happen during post-bootstrap initialization).
  */
 static void
-check_icu_locale(void)
+icu_validate_locale(const char *loc_str)
+{
+#ifdef USE_ICU
+	UErrorCode	 status;
+	char		 lang[ULOC_LANG_CAPACITY];
+	bool		 found	 = false;
+
+	/* validate that we can extract the language */
+	status = U_ZERO_ERROR;
+	uloc_getLanguage(loc_str, lang, ULOC_LANG_CAPACITY, &status);
+	if (U_FAILURE(status))
+	{
+		pg_fatal("could not get language from locale \"%s\": %s",
+				 loc_str, u_errorName(status));
+		return;
+	}
+
+	/* check for special language name */
+	if (strcmp(lang, "") == 0 ||
+		strcmp(lang, "root") == 0 || strcmp(lang, "und") == 0 ||
+		strcmp(lang, "c") == 0 || strcmp(lang, "posix") == 0)
+		found = true;
+
+	/* search for matching language within ICU */
+	for (int32_t i = 0; !found && i < uloc_countAvailable(); i++)
+	{
+		const char	*otherloc = uloc_getAvailable(i);
+		char		 otherlang[ULOC_LANG_CAPACITY];
+
+		status = U_ZERO_ERROR;
+		uloc_getLanguage(otherloc, otherlang, ULOC_LANG_CAPACITY, &status);
+		if (U_FAILURE(status))
+			continue;
+
+		if (strcmp(lang, otherlang) == 0)
+			found = true;
+	}
+
+	if (!found)
+		pg_fatal("locale \"%s\" has unknown language \"%s\"",
+				 loc_str, lang);
+#else
+	pg_fatal("ICU is not supported in this build");
+#endif
+}
+
+/*
+ * Determine default ICU locale by opening the default collator and reading
+ * its locale.
+ *
+ * NB: The default collator (opened using NULL) is different from the collator
+ * for the root locale (opened with "", "und", or "root"). The former depends
+ * on the environment (useful at initdb time) and the latter does not.
+ */
+static char *
+default_icu_locale(void)
 {
 #ifdef USE_ICU
 	UCollator	*collator;
 	UErrorCode   status;
+	const char	*valid_locale;
+	char		*default_locale;
 
 	status = U_ZERO_ERROR;
-	collator = ucol_open(icu_locale, &status);
+	collator = ucol_open(NULL, &status);
+	if (U_FAILURE(status))
+		pg_fatal("could not open collator for default locale: %s",
+				 u_errorName(status));
+
+	status = U_ZERO_ERROR;
+	valid_locale = ucol_getLocaleByType(collator, ULOC_VALID_LOCALE,
+										&status);
 	if (U_FAILURE(status))
 	{
-		if (icu_locale)
-			pg_fatal("could not open collator for locale \"%s\": %s",
-					 icu_locale, u_errorName(status));
-		else
-			pg_fatal("could not open collator for default locale: %s",
-					 u_errorName(status));
+		ucol_close(collator);
+		pg_fatal("could not determine default ICU locale");
 	}
 
-	/* if not specified, get locale from default collator */
-	if (icu_locale == NULL)
-	{
-		const char	*default_locale;
-
-		status = U_ZERO_ERROR;
-		default_locale = ucol_getLocaleByType(collator, ULOC_VALID_LOCALE,
-											  &status);
-		if (U_FAILURE(status))
-		{
-			ucol_close(collator);
-			pg_fatal("could not determine default ICU locale");
-		}
-
-		icu_locale = pg_strdup(default_locale);
-	}
+	default_locale = pg_strdup(valid_locale);
 
 	ucol_close(collator);
+
+	return default_locale;
+#else
+	pg_fatal("ICU is not supported in this build");
 #endif
 }
 
@@ -2339,11 +2376,18 @@ setlocales(void)
 
 	if (locale_provider == COLLPROVIDER_ICU)
 	{
-		check_icu_locale();
+		/* acquire default locale from the environment, if not specified */
+		if (icu_locale == NULL)
+		{
+			icu_locale = default_icu_locale();
+			printf(_("Using default ICU locale \"%s\".\n"), icu_locale);
+		}
+
+		icu_validate_locale(icu_locale);
 
 		/*
-		 * In supported builds, the ICU locale ID will be checked by the
-		 * backend during post-bootstrap initialization.
+		 * In supported builds, the ICU locale ID will be opened during
+		 * post-bootstrap initialization, which will perform extra checks.
 		 */
 #ifndef USE_ICU
 		pg_fatal("ICU is not supported in this build");
