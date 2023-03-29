@@ -155,6 +155,9 @@ filtered_base_yylex(void)
 				case ORDINALITY:
 					cur_token = WITH_LA;
 					break;
+				case UNIQUE:
+					cur_token = WITH_UNIQUE_LA;
+					break;
 			}
 			break;
 
