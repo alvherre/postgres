@@ -14867,10 +14867,9 @@ a_expr:		c_expr									{ $$ = $1; }
 					$$ = makeJsonIsPredicate($1, format, $3, $4, @1);
 				}
 			/*
-			 * Required by standard, but it would conflict with expressions
-			 * like: 'str' || format(...)
+			 * Required by SQL/JSON, but there are conflicts
 			| a_expr
-				FORMAT json_representation
+				FORMAT_LA JSON json_encoding_clause_opt
 				IS  json_predicate_type_constraint
 					json_key_uniqueness_constraint_opt		%prec IS
 				{
@@ -14887,10 +14886,9 @@ a_expr:		c_expr									{ $$ = $1; }
 					$$ = makeNotExpr(makeJsonIsPredicate($1, format, $4, $5, @1), @1);
 				}
 			/*
-			 * Required by standard, but it would conflict with expressions
-			 * like: 'str' || format(...)
+			 * Required by SQL/JSON, but there are conflicts
 			| a_expr
-				FORMAT json_representation
+				FORMAT_LA JSON json_encoding_clause_opt
 				IS NOT
 					json_predicate_type_constraint
 					json_key_uniqueness_constraint_opt		%prec IS
