@@ -823,8 +823,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 /* SQL/JSON related keywords */
 %nonassoc	UNIQUE JSON
-%nonassoc	KEYS						/* UNIQUE [ KEYS ] */
-%nonassoc	OBJECT_P SCALAR VALUE_P		/* JSON [ OBJECT | SCALAR | VALUE ] */
+%nonassoc	KEYS OBJECT_P SCALAR VALUE_P
 %nonassoc	WITHOUT_LA WITH_UNIQUE_LA
 
 /*
