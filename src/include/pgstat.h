@@ -235,7 +235,7 @@ typedef struct PgStat_TableXactStatus
  * ------------------------------------------------------------
  */
 
-#define PGSTAT_FILE_FORMAT_ID	0x01A5BCAA
+#define PGSTAT_FILE_FORMAT_ID	0x01A5BCAB
 
 typedef struct PgStat_ArchiverStats
 {
@@ -296,6 +296,7 @@ typedef enum IOOp
 	IOOP_EVICT,
 	IOOP_EXTEND,
 	IOOP_FSYNC,
+	IOOP_HIT,
 	IOOP_READ,
 	IOOP_REUSE,
 	IOOP_WRITE,
@@ -434,6 +435,21 @@ typedef struct PgStat_WalStats
 	PgStat_Counter wal_sync_time;
 	TimestampTz stat_reset_timestamp;
 } PgStat_WalStats;
+
+/*
+ * This struct stores wal-related durations as instr_time, which makes it
+ * cheaper and easier to accumulate them, by not requiring type
+ * conversions. During stats flush instr_time will be converted into
+ * microseconds.
+ */
+typedef struct PgStat_PendingWalStats
+{
+	PgStat_Counter wal_buffers_full;
+	PgStat_Counter wal_write;
+	PgStat_Counter wal_sync;
+	instr_time	wal_write_time;
+	instr_time	wal_sync_time;
+} PgStat_PendingWalStats;
 
 
 /*
@@ -748,7 +764,7 @@ extern PGDLLIMPORT SessionEndType pgStatSessionEndCause;
  */
 
 /* updated directly by backends and background processes */
-extern PGDLLIMPORT PgStat_WalStats PendingWalStats;
+extern PGDLLIMPORT PgStat_PendingWalStats PendingWalStats;
 
 
 #endif							/* PGSTAT_H */

@@ -4574,10 +4574,7 @@ ExecEvalJsonConstructor(ExprState *state, ExprEvalStep *op,
 										  jcstate->constructor->absent_on_null,
 										  jcstate->constructor->unique);
 	else
-	{
-		res = (Datum) 0;
 		elog(ERROR, "invalid JsonConstructorExpr type %d", ctor->type);
-	}
 
 	*op->resvalue = res;
 	*op->resnull = isnull;
