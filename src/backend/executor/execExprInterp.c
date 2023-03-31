@@ -4019,6 +4019,7 @@ ExecEvalJsonIsPredicate(ExprState *state, ExprEvalStep *op)
 	*op->resvalue = BoolGetDatum(res);
 }
 
+
 /*
  * ExecEvalGroupingFunc
  *
