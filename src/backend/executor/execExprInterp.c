@@ -1523,6 +1523,14 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			EEO_NEXT();
 		}
 
+		EEO_CASE(EEOP_IS_JSON)
+		{
+			/* too complex for an inline implementation */
+			ExecEvalJsonIsPredicate(state, op);
+
+			EEO_NEXT();
+		}
+
 		EEO_CASE(EEOP_AGGREF)
 		{
 			/*
@@ -1812,14 +1820,6 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 		{
 			/* too complex for an inline implementation */
 			ExecEvalAggOrderedTransTuple(state, op, econtext);
-
-			EEO_NEXT();
-		}
-
-		EEO_CASE(EEOP_IS_JSON)
-		{
-			/* too complex for an inline implementation */
-			ExecEvalJsonIsPredicate(state, op);
 
 			EEO_NEXT();
 		}
