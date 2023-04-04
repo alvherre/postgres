@@ -556,27 +556,26 @@ ALTER TABLE deferred_excl ADD EXCLUDE (f1 WITH =);
 
 DROP TABLE deferred_excl;
 
--- verify CHECK constraints created for NOT NULL clauses
+-- verify constraints created for NOT NULL clauses
 CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL);
 \d notnull_tbl1
+select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 -- DROP NOT NULL gets rid of both the attnotnull flag and the constraint itself
 ALTER TABLE notnull_tbl1 ALTER a DROP NOT NULL;
 \d notnull_tbl1
+select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 -- SET NOT NULL puts both back
 ALTER TABLE notnull_tbl1 ALTER a SET NOT NULL;
 \d notnull_tbl1
--- The simple syntax must not create redundant constraint
+select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
+-- Doing it twice doesn't create a redundant constraint
 ALTER TABLE notnull_tbl1 ALTER a SET NOT NULL;
+select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
+-- Using the "table constraint" syntax also works
+ALTER TABLE notnull_tbl1 ALTER a DROP NOT NULL;
+ALTER TABLE notnull_tbl1 ADD CONSTRAINT foobar NOT NULL a;
 \d notnull_tbl1
--- but this should create a second one
-ALTER TABLE notnull_tbl1 ADD check (a IS NOT NULL);
-\d notnull_tbl1
--- Dropping the first one keeps attnotnull intact
-ALTER TABLE notnull_tbl1 DROP CONSTRAINT notnull_tbl1_a_not_null;
-\d notnull_tbl1
--- but removing the second constraint resets the flag
-ALTER TABLE notnull_tbl1 DROP CONSTRAINT notnull_tbl1_a_not_null1;
-\d notnull_tbl1
+select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 DROP TABLE notnull_tbl1;
 
 CREATE TABLE notnull_tbl2 (a INTEGER PRIMARY KEY);
