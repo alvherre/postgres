@@ -835,7 +835,7 @@ btvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 	if (stats == NULL)
 	{
 		/* Check if VACUUM operation can entirely avoid btvacuumscan() call */
-		if (!_bt_vacuum_needs_cleanup(info->index))
+		if (!_bt_vacuum_needs_cleanup(info->index, info->heaprel))
 			return NULL;
 
 		/*
@@ -871,7 +871,7 @@ btvacuumcleanup(IndexVacuumInfo *info, IndexBulkDeleteResult *stats)
 	 */
 	Assert(stats->pages_deleted >= stats->pages_free);
 	num_delpages = stats->pages_deleted - stats->pages_free;
-	_bt_set_cleanup_info(info->index, num_delpages);
+	_bt_set_cleanup_info(info->index, info->heaprel, num_delpages);
 
 	/*
 	 * It's quite possible for us to be fooled by concurrent page splits into
@@ -1039,6 +1039,7 @@ btvacuumpage(BTVacState *vstate, BlockNumber scanblkno)
 	IndexBulkDeleteCallback callback = vstate->callback;
 	void	   *callback_state = vstate->callback_state;
 	Relation	rel = info->index;
+	Relation	heaprel = info->heaprel;
 	bool		attempt_pagedel;
 	BlockNumber blkno,
 				backtrack_to;
@@ -1124,7 +1125,7 @@ backtrack:
 		}
 	}
 
-	if (!opaque || BTPageIsRecyclable(page))
+	if (!opaque || BTPageIsRecyclable(page, heaprel))
 	{
 		/* Okay to recycle this page (which could be leaf or internal) */
 		RecordFreeIndexPage(rel, blkno);

@@ -132,6 +132,8 @@ void	   *referenced_functions[] =
 	ExecEvalSysVar,
 	ExecEvalWholeRowVar,
 	ExecEvalXmlExpr,
+	ExecEvalJsonConstructor,
+	ExecEvalJsonIsPredicate,
 	MakeExpandedObjectReadOnlyInternal,
 	slot_getmissingattrs,
 	slot_getsomeattrs_int,

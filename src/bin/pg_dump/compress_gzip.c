@@ -33,8 +33,73 @@ typedef struct GzipCompressorState
 } GzipCompressorState;
 
 /* Private routines that support gzip compressed data I/O */
+static void DeflateCompressorInit(CompressorState *cs);
+static void DeflateCompressorEnd(ArchiveHandle *AH, CompressorState *cs);
+static void DeflateCompressorCommon(ArchiveHandle *AH, CompressorState *cs,
+									bool flush);
+static void EndCompressorGzip(ArchiveHandle *AH, CompressorState *cs);
+static void WriteDataToArchiveGzip(ArchiveHandle *AH, CompressorState *cs,
+								   const void *data, size_t dLen);
+static void ReadDataFromArchiveGzip(ArchiveHandle *AH, CompressorState *cs);
+
 static void
-DeflateCompressorGzip(ArchiveHandle *AH, CompressorState *cs, bool flush)
+DeflateCompressorInit(CompressorState *cs)
+{
+	GzipCompressorState *gzipcs;
+	z_streamp	zp;
+
+	gzipcs = (GzipCompressorState *) pg_malloc0(sizeof(GzipCompressorState));
+	zp = gzipcs->zp = (z_streamp) pg_malloc(sizeof(z_stream));
+	zp->zalloc = Z_NULL;
+	zp->zfree = Z_NULL;
+	zp->opaque = Z_NULL;
+
+	/*
+	 * outsize is the buffer size we tell zlib it can output to.  We actually
+	 * allocate one extra byte because some routines want to append a trailing
+	 * zero byte to the zlib output.
+	 */
+	gzipcs->outsize = DEFAULT_IO_BUFFER_SIZE;
+	gzipcs->outbuf = pg_malloc(gzipcs->outsize + 1);
+
+	/* -Z 0 uses the "None" compressor -- not zlib with no compression */
+	Assert(cs->compression_spec.level != 0);
+
+	if (deflateInit(zp, cs->compression_spec.level) != Z_OK)
+		pg_fatal("could not initialize compression library: %s", zp->msg);
+
+	/* Just be paranoid - maybe End is called after Start, with no Write */
+	zp->next_out = gzipcs->outbuf;
+	zp->avail_out = gzipcs->outsize;
+
+	/* Keep track of gzipcs */
+	cs->private_data = gzipcs;
+}
+
+static void
+DeflateCompressorEnd(ArchiveHandle *AH, CompressorState *cs)
+{
+	GzipCompressorState *gzipcs = (GzipCompressorState *) cs->private_data;
+	z_streamp	zp;
+
+	zp = gzipcs->zp;
+	zp->next_in = NULL;
+	zp->avail_in = 0;
+
+	/* Flush any remaining data from zlib buffer */
+	DeflateCompressorCommon(AH, cs, true);
+
+	if (deflateEnd(zp) != Z_OK)
+		pg_fatal("could not close compression stream: %s", zp->msg);
+
+	pg_free(gzipcs->outbuf);
+	pg_free(gzipcs->zp);
+	pg_free(gzipcs);
+	cs->private_data = NULL;
+}
+
+static void
+DeflateCompressorCommon(ArchiveHandle *AH, CompressorState *cs, bool flush)
 {
 	GzipCompressorState *gzipcs = (GzipCompressorState *) cs->private_data;
 	z_streamp	zp = gzipcs->zp;
@@ -78,27 +143,9 @@ DeflateCompressorGzip(ArchiveHandle *AH, CompressorState *cs, bool flush)
 static void
 EndCompressorGzip(ArchiveHandle *AH, CompressorState *cs)
 {
-	GzipCompressorState *gzipcs = (GzipCompressorState *) cs->private_data;
-	z_streamp	zp;
-
-	if (gzipcs->zp)
-	{
-		zp = gzipcs->zp;
-		zp->next_in = NULL;
-		zp->avail_in = 0;
-
-		/* Flush any remaining data from zlib buffer */
-		DeflateCompressorGzip(AH, cs, true);
-
-		if (deflateEnd(zp) != Z_OK)
-			pg_fatal("could not close compression stream: %s", zp->msg);
-
-		pg_free(gzipcs->outbuf);
-		pg_free(gzipcs->zp);
-	}
-
-	pg_free(gzipcs);
-	cs->private_data = NULL;
+	/* If deflation was initialized, finalize it */
+	if (cs->private_data)
+		DeflateCompressorEnd(AH, cs);
 }
 
 static void
@@ -106,41 +153,10 @@ WriteDataToArchiveGzip(ArchiveHandle *AH, CompressorState *cs,
 					   const void *data, size_t dLen)
 {
 	GzipCompressorState *gzipcs = (GzipCompressorState *) cs->private_data;
-	z_streamp	zp;
-
-	if (!gzipcs->zp)
-	{
-		zp = gzipcs->zp = (z_streamp) pg_malloc(sizeof(z_stream));
-		zp->zalloc = Z_NULL;
-		zp->zfree = Z_NULL;
-		zp->opaque = Z_NULL;
-
-		/*
-		 * outsize is the buffer size we tell zlib it can output to.  We
-		 * actually allocate one extra byte because some routines want to
-		 * append a trailing zero byte to the zlib output.
-		 */
-		gzipcs->outbuf = pg_malloc(ZLIB_OUT_SIZE + 1);
-		gzipcs->outsize = ZLIB_OUT_SIZE;
-
-		/*
-		 * A level of zero simply copies the input one block at the time. This
-		 * is probably not what the user wanted when calling this interface.
-		 */
-		if (cs->compression_spec.level == 0)
-			pg_fatal("requested to compress the archive yet no level was specified");
-
-		if (deflateInit(zp, cs->compression_spec.level) != Z_OK)
-			pg_fatal("could not initialize compression library: %s", zp->msg);
-
-		/* Just be paranoid - maybe End is called after Start, with no Write */
-		zp->next_out = gzipcs->outbuf;
-		zp->avail_out = gzipcs->outsize;
-	}
 
 	gzipcs->zp->next_in = (void *) unconstify(void *, data);
 	gzipcs->zp->avail_in = dLen;
-	DeflateCompressorGzip(AH, cs, false);
+	DeflateCompressorCommon(AH, cs, false);
 }
 
 static void
@@ -158,10 +174,10 @@ ReadDataFromArchiveGzip(ArchiveHandle *AH, CompressorState *cs)
 	zp->zfree = Z_NULL;
 	zp->opaque = Z_NULL;
 
-	buf = pg_malloc(ZLIB_IN_SIZE);
-	buflen = ZLIB_IN_SIZE;
+	buflen = DEFAULT_IO_BUFFER_SIZE;
+	buf = pg_malloc(buflen);
 
-	out = pg_malloc(ZLIB_OUT_SIZE + 1);
+	out = pg_malloc(DEFAULT_IO_BUFFER_SIZE + 1);
 
 	if (inflateInit(zp) != Z_OK)
 		pg_fatal("could not initialize compression library: %s",
@@ -176,14 +192,14 @@ ReadDataFromArchiveGzip(ArchiveHandle *AH, CompressorState *cs)
 		while (zp->avail_in > 0)
 		{
 			zp->next_out = (void *) out;
-			zp->avail_out = ZLIB_OUT_SIZE;
+			zp->avail_out = DEFAULT_IO_BUFFER_SIZE;
 
 			res = inflate(zp, 0);
 			if (res != Z_OK && res != Z_STREAM_END)
 				pg_fatal("could not uncompress data: %s", zp->msg);
 
-			out[ZLIB_OUT_SIZE - zp->avail_out] = '\0';
-			ahwrite(out, 1, ZLIB_OUT_SIZE - zp->avail_out, AH);
+			out[DEFAULT_IO_BUFFER_SIZE - zp->avail_out] = '\0';
+			ahwrite(out, 1, DEFAULT_IO_BUFFER_SIZE - zp->avail_out, AH);
 		}
 	}
 
@@ -192,13 +208,13 @@ ReadDataFromArchiveGzip(ArchiveHandle *AH, CompressorState *cs)
 	while (res != Z_STREAM_END)
 	{
 		zp->next_out = (void *) out;
-		zp->avail_out = ZLIB_OUT_SIZE;
+		zp->avail_out = DEFAULT_IO_BUFFER_SIZE;
 		res = inflate(zp, 0);
 		if (res != Z_OK && res != Z_STREAM_END)
 			pg_fatal("could not uncompress data: %s", zp->msg);
 
-		out[ZLIB_OUT_SIZE - zp->avail_out] = '\0';
-		ahwrite(out, 1, ZLIB_OUT_SIZE - zp->avail_out, AH);
+		out[DEFAULT_IO_BUFFER_SIZE - zp->avail_out] = '\0';
+		ahwrite(out, 1, DEFAULT_IO_BUFFER_SIZE - zp->avail_out, AH);
 	}
 
 	if (inflateEnd(zp) != Z_OK)
@@ -214,17 +230,19 @@ void
 InitCompressorGzip(CompressorState *cs,
 				   const pg_compress_specification compression_spec)
 {
-	GzipCompressorState *gzipcs;
-
 	cs->readData = ReadDataFromArchiveGzip;
 	cs->writeData = WriteDataToArchiveGzip;
 	cs->end = EndCompressorGzip;
 
 	cs->compression_spec = compression_spec;
 
-	gzipcs = (GzipCompressorState *) pg_malloc0(sizeof(GzipCompressorState));
-
-	cs->private_data = gzipcs;
+	/*
+	 * If the caller has defined a write function, prepare the necessary
+	 * state.  Note that if the data is empty, End may be called immediately
+	 * after Init, without ever calling Write.
+	 */
+	if (cs->writeF)
+		DeflateCompressorInit(cs);
 }
 
 
@@ -233,14 +251,14 @@ InitCompressorGzip(CompressorState *cs,
  *----------------------
  */
 
-static size_t
-Gzip_read(void *ptr, size_t size, CompressFileHandle *CFH)
+static bool
+Gzip_read(void *ptr, size_t size, size_t *rsize, CompressFileHandle *CFH)
 {
 	gzFile		gzfp = (gzFile) CFH->private_data;
-	size_t		ret;
+	int			gzret;
 
-	ret = gzread(gzfp, ptr, size);
-	if (ret != size && !gzeof(gzfp))
+	gzret = gzread(gzfp, ptr, size);
+	if (gzret <= 0 && !gzeof(gzfp))
 	{
 		int			errnum;
 		const char *errmsg = gzerror(gzfp, &errnum);
@@ -249,15 +267,18 @@ Gzip_read(void *ptr, size_t size, CompressFileHandle *CFH)
 				 errnum == Z_ERRNO ? strerror(errno) : errmsg);
 	}
 
-	return ret;
+	if (rsize)
+		*rsize = (size_t) gzret;
+
+	return true;
 }
 
-static size_t
+static bool
 Gzip_write(const void *ptr, size_t size, CompressFileHandle *CFH)
 {
 	gzFile		gzfp = (gzFile) CFH->private_data;
 
-	return gzwrite(gzfp, ptr, size);
+	return gzwrite(gzfp, ptr, size) > 0;
 }
 
 static int
@@ -287,22 +308,22 @@ Gzip_gets(char *ptr, int size, CompressFileHandle *CFH)
 	return gzgets(gzfp, ptr, size);
 }
 
-static int
+static bool
 Gzip_close(CompressFileHandle *CFH)
 {
 	gzFile		gzfp = (gzFile) CFH->private_data;
 
 	CFH->private_data = NULL;
 
-	return gzclose(gzfp);
+	return gzclose(gzfp) == Z_OK;
 }
 
-static int
+static bool
 Gzip_eof(CompressFileHandle *CFH)
 {
 	gzFile		gzfp = (gzFile) CFH->private_data;
 
-	return gzeof(gzfp);
+	return gzeof(gzfp) == 1;
 }
 
 static const char *
@@ -319,7 +340,7 @@ Gzip_get_error(CompressFileHandle *CFH)
 	return errmsg;
 }
 
-static int
+static bool
 Gzip_open(const char *path, int fd, const char *mode, CompressFileHandle *CFH)
 {
 	gzFile		gzfp;
@@ -342,18 +363,18 @@ Gzip_open(const char *path, int fd, const char *mode, CompressFileHandle *CFH)
 		gzfp = gzopen(path, mode_compression);
 
 	if (gzfp == NULL)
-		return 1;
+		return false;
 
 	CFH->private_data = gzfp;
 
-	return 0;
+	return true;
 }
 
-static int
+static bool
 Gzip_open_write(const char *path, const char *mode, CompressFileHandle *CFH)
 {
 	char	   *fname;
-	int			ret;
+	bool		ret;
 	int			save_errno;
 
 	fname = psprintf("%s.gz", path);

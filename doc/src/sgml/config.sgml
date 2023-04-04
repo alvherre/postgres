@@ -1132,6 +1132,26 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
+     <varlistentry>
+      <term><varname>scram_iterations</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>scram_iterations</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        The number of computational iterations to be performed when encrypting
+        a password using SCRAM-SHA-256. The default is <literal>4096</literal>.
+        A higher number of iterations provides additional protection against
+        brute-force attacks on stored passwords, but makes authentication
+        slower. Changing the value has no effect on existing passwords
+        encrypted with SCRAM-SHA-256 as the iteration count is fixed at the
+        time of encryption. In order to make use of a changed value, a new
+        password must be set.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-krb-server-keyfile" xreflabel="krb_server_keyfile">
       <term><varname>krb_server_keyfile</varname> (<type>string</type>)
       <indexterm>
@@ -9300,8 +9320,12 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
        </para>
        <para>
         When the failsafe is triggered, any cost-based delay that is
-        in effect will no longer be applied, and further non-essential
-        maintenance tasks (such as index vacuuming) are bypassed.
+        in effect will no longer be applied, further non-essential
+        maintenance tasks (such as index vacuuming) are bypassed, and any
+        <glossterm linkend="glossary-buffer-access-strategy">Buffer Access Strategy</glossterm>
+        in use will be disabled resulting in <command>VACUUM</command> being
+        free to make use of all of
+        <glossterm linkend="glossary-shared-memory">shared buffers</glossterm>.
        </para>
        <para>
         The default is 1.6 billion transactions.  Although users can
@@ -9780,6 +9804,32 @@ SET XML OPTION { DOCUMENT | CONTENT };
         set to the empty string (which is the default) then the value
         is inherited from the execution environment of the server in a
         system-dependent way.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-icu-validation-level" xreflabel="icu_validation_level">
+      <term><varname>icu_validation_level</varname> (<type>enum</type>)
+      <indexterm>
+       <primary><varname>icu_validation_level</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        When ICU locale validation problems are encountered, controls which
+        <link linkend="runtime-config-severity-levels">message level</link> is
+        used to report the problem. Valid values are
+        <literal>DISABLED</literal>, <literal>DEBUG5</literal>,
+        <literal>DEBUG4</literal>, <literal>DEBUG3</literal>,
+        <literal>DEBUG2</literal>, <literal>DEBUG1</literal>,
+        <literal>INFO</literal>, <literal>NOTICE</literal>,
+        <literal>WARNING</literal>, <literal>ERROR</literal>, and
+        <literal>LOG</literal>.
+       </para>
+       <para>
+        If set to <literal>DISABLED</literal>, does not report validation
+        problems at all. Otherwise reports problems at the given message
+        level. The default is <literal>ERROR</literal>.
        </para>
       </listitem>
      </varlistentry>
@@ -11722,8 +11772,9 @@ LOG:  CleanUpLock: deleting: lock(0xb7acd844) id(24688,24696,0,0,0,1)
         On the publisher side, <varname>logical_replication_mode</varname>
         allows streaming or serializing changes immediately in logical decoding.
         When set to <literal>immediate</literal>, stream each change if the
-        <literal>streaming</literal> option (see optional parameters set by
-        <link linkend="sql-createsubscription"><command>CREATE SUBSCRIPTION</command></link>)
+        <link linkend="sql-createsubscription-with-streaming"><literal>streaming</literal></link>
+        option of
+        <link linkend="sql-createsubscription"><command>CREATE SUBSCRIPTION</command></link>
         is enabled, otherwise, serialize each change.  When set to
         <literal>buffered</literal>, the decoding will stream or serialize
         changes when <varname>logical_decoding_work_mem</varname> is reached.

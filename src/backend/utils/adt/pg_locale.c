@@ -58,6 +58,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_control.h"
 #include "mb/pg_wchar.h"
+#include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/formatting.h"
 #include "utils/guc_hooks.h"
@@ -94,6 +95,8 @@ char	   *locale_messages;
 char	   *locale_monetary;
 char	   *locale_numeric;
 char	   *locale_time;
+
+int			icu_validation_level = ERROR;
 
 /*
  * lc_time localization cache.
@@ -140,13 +143,15 @@ static char *IsoLocaleName(const char *);
  */
 static UConverter *icu_converter = NULL;
 
+static UCollator *pg_ucol_open(const char *loc_str);
 static void init_icu_converter(void);
 static size_t uchar_length(UConverter *converter,
 						   const char *str, int32_t len);
 static int32_t uchar_convert(UConverter *converter,
 							 UChar *dest, int32_t destlen,
 							 const char *str, int32_t srclen);
-static void icu_set_collation_attributes(UCollator *collator, const char *loc);
+static void icu_set_collation_attributes(UCollator *collator, const char *loc,
+										 UErrorCode *status);
 #endif
 
 /*
@@ -1284,15 +1289,12 @@ lookup_collation_cache(Oid collation, bool set_flags)
 		if (collform->collprovider == COLLPROVIDER_LIBC)
 		{
 			Datum		datum;
-			bool		isnull;
 			const char *collcollate;
 			const char *collctype;
 
-			datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_collcollate, &isnull);
-			Assert(!isnull);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collcollate);
 			collcollate = TextDatumGetCString(datum);
-			datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_collctype, &isnull);
-			Assert(!isnull);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collctype);
 			collctype = TextDatumGetCString(datum);
 
 			cache_entry->collate_is_c = ((strcmp(collcollate, "C") == 0) ||
@@ -1430,17 +1432,8 @@ make_icu_collator(const char *iculocstr,
 {
 #ifdef USE_ICU
 	UCollator  *collator;
-	UErrorCode	status;
 
-	status = U_ZERO_ERROR;
-	collator = ucol_open(iculocstr, &status);
-	if (U_FAILURE(status))
-		ereport(ERROR,
-				(errmsg("could not open collator for locale \"%s\": %s",
-						iculocstr, u_errorName(status))));
-
-	if (U_ICU_VERSION_MAJOR_NUM < 54)
-		icu_set_collation_attributes(collator, iculocstr);
+	collator = pg_ucol_open(iculocstr);
 
 	/*
 	 * If rules are specified, we extract the rules of the standard collation,
@@ -1451,6 +1444,7 @@ make_icu_collator(const char *iculocstr,
 		const UChar *default_rules;
 		UChar	   *agg_rules;
 		UChar	   *my_rules;
+		UErrorCode	status;
 		int32_t		length;
 
 		default_rules = ucol_getRules(collator, &length);
@@ -1584,11 +1578,9 @@ pg_newlocale_from_collation(Oid collid)
 			const char *collctype pg_attribute_unused();
 			locale_t	loc;
 
-			datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_collcollate, &isnull);
-			Assert(!isnull);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collcollate);
 			collcollate = TextDatumGetCString(datum);
-			datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_collctype, &isnull);
-			Assert(!isnull);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collctype);
 			collctype = TextDatumGetCString(datum);
 
 			if (strcmp(collcollate, collctype) == 0)
@@ -1644,8 +1636,7 @@ pg_newlocale_from_collation(Oid collid)
 			const char *iculocstr;
 			const char *icurules;
 
-			datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_colliculocale, &isnull);
-			Assert(!isnull);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_colliculocale);
 			iculocstr = TextDatumGetCString(datum);
 
 			datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_collicurules, &isnull);
@@ -1666,8 +1657,7 @@ pg_newlocale_from_collation(Oid collid)
 
 			collversionstr = TextDatumGetCString(datum);
 
-			datum = SysCacheGetAttr(COLLOID, tp, collform->collprovider == COLLPROVIDER_ICU ? Anum_pg_collation_colliculocale : Anum_pg_collation_collcollate, &isnull);
-			Assert(!isnull);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, collform->collprovider == COLLPROVIDER_ICU ? Anum_pg_collation_colliculocale : Anum_pg_collation_collcollate);
 
 			actual_versionstr = get_collation_actual_version(collform->collprovider,
 															 TextDatumGetCString(datum));
@@ -1722,16 +1712,11 @@ get_collation_actual_version(char collprovider, const char *collcollate)
 	if (collprovider == COLLPROVIDER_ICU)
 	{
 		UCollator  *collator;
-		UErrorCode	status;
 		UVersionInfo versioninfo;
 		char		buf[U_MAX_VERSION_STRING_LENGTH];
 
-		status = U_ZERO_ERROR;
-		collator = ucol_open(collcollate, &status);
-		if (U_FAILURE(status))
-			ereport(ERROR,
-					(errmsg("could not open collator for locale \"%s\": %s",
-							collcollate, u_errorName(status))));
+		collator = pg_ucol_open(collcollate);
+
 		ucol_getVersion(collator, versioninfo);
 		ucol_close(collator);
 
@@ -1790,7 +1775,7 @@ get_collation_actual_version(char collprovider, const char *collcollate)
 							collcollate,
 							GetLastError())));
 		}
-		collversion = psprintf("%ld.%ld,%ld.%ld",
+		collversion = psprintf("%lu.%lu,%lu.%lu",
 							   (version.dwNLSVersion >> 8) & 0xFFFF,
 							   version.dwNLSVersion & 0xFF,
 							   (version.dwDefinedVersion >> 8) & 0xFFFF,
@@ -2505,6 +2490,93 @@ pg_strnxfrm_prefix(char *dest, size_t destsize, const char *src,
 }
 
 #ifdef USE_ICU
+
+/*
+ * Wrapper around ucol_open() to handle API differences for older ICU
+ * versions.
+ */
+static UCollator *
+pg_ucol_open(const char *loc_str)
+{
+	UCollator  *collator;
+	UErrorCode	status;
+	const char *orig_str = loc_str;
+	char	   *fixed_str = NULL;
+
+	/*
+	 * Must never open default collator, because it depends on the environment
+	 * and may change at any time. Should not happen, but check here to catch
+	 * bugs that might be hard to catch otherwise.
+	 *
+	 * NB: the default collator is not the same as the collator for the root
+	 * locale. The root locale may be specified as the empty string, "und", or
+	 * "root". The default collator is opened by passing NULL to ucol_open().
+	 */
+	if (loc_str == NULL)
+		elog(ERROR, "opening default collator is not supported");
+
+	/*
+	 * In ICU versions 54 and earlier, "und" is not a recognized spelling of
+	 * the root locale. If the first component of the locale is "und", replace
+	 * with "root" before opening.
+	 */
+	if (U_ICU_VERSION_MAJOR_NUM < 55)
+	{
+		char		lang[ULOC_LANG_CAPACITY];
+
+		status = U_ZERO_ERROR;
+		uloc_getLanguage(loc_str, lang, ULOC_LANG_CAPACITY, &status);
+		if (U_FAILURE(status))
+		{
+			ereport(ERROR,
+					(errmsg("could not get language from locale \"%s\": %s",
+							loc_str, u_errorName(status))));
+		}
+
+		if (strcmp(lang, "und") == 0)
+		{
+			const char *remainder = loc_str + strlen("und");
+
+			fixed_str = palloc(strlen("root") + strlen(remainder) + 1);
+			strcpy(fixed_str, "root");
+			strcat(fixed_str, remainder);
+
+			loc_str = fixed_str;
+		}
+	}
+
+	status = U_ZERO_ERROR;
+	collator = ucol_open(loc_str, &status);
+	if (U_FAILURE(status))
+		ereport(ERROR,
+				/* use original string for error report */
+				(errmsg("could not open collator for locale \"%s\": %s",
+						orig_str, u_errorName(status))));
+
+	if (U_ICU_VERSION_MAJOR_NUM < 54)
+	{
+		status = U_ZERO_ERROR;
+		icu_set_collation_attributes(collator, loc_str, &status);
+
+		/*
+		 * Pretend the error came from ucol_open(), for consistent error
+		 * message across ICU versions.
+		 */
+		if (U_FAILURE(status))
+		{
+			ucol_close(collator);
+			ereport(ERROR,
+					(errmsg("could not open collator for locale \"%s\": %s",
+							orig_str, u_errorName(status))));
+		}
+	}
+
+	if (fixed_str != NULL)
+		pfree(fixed_str);
+
+	return collator;
+}
+
 static void
 init_icu_converter(void)
 {
@@ -2634,9 +2706,12 @@ icu_from_uchar(char **result, const UChar *buff_uchar, int32_t len_uchar)
 }
 
 /*
- * Parse collation attributes and apply them to the open collator.  This takes
- * a string like "und@colStrength=primary;colCaseLevel=yes" and parses and
- * applies the key-value arguments.
+ * Parse collation attributes from the given locale string and apply them to
+ * the open collator.
+ *
+ * First, the locale string is canonicalized to an ICU format locale ID such
+ * as "und@colStrength=primary;colCaseLevel=yes". Then, it parses and applies
+ * the key-value arguments.
  *
  * Starting with ICU version 54, the attributes are processed automatically by
  * ucol_open(), so this is only necessary for emulating this behavior on older
@@ -2644,11 +2719,34 @@ icu_from_uchar(char **result, const UChar *buff_uchar, int32_t len_uchar)
  */
 pg_attribute_unused()
 static void
-icu_set_collation_attributes(UCollator *collator, const char *loc)
+icu_set_collation_attributes(UCollator *collator, const char *loc,
+							 UErrorCode *status)
 {
-	char	   *str = asc_tolower(loc, strlen(loc));
+	int32_t		len;
+	char	   *icu_locale_id;
+	char	   *lower_str;
+	char	   *str;
 
-	str = strchr(str, '@');
+	/*
+	 * The input locale may be a BCP 47 language tag, e.g.
+	 * "und-u-kc-ks-level1", which expresses the same attributes in a
+	 * different form. It will be converted to the equivalent ICU format
+	 * locale ID, e.g. "und@colcaselevel=yes;colstrength=primary", by
+	 * uloc_canonicalize().
+	 */
+	*status = U_ZERO_ERROR;
+	len = uloc_canonicalize(loc, NULL, 0, status);
+	icu_locale_id = palloc(len + 1);
+	*status = U_ZERO_ERROR;
+	len = uloc_canonicalize(loc, icu_locale_id, len + 1, status);
+	if (U_FAILURE(*status))
+		return;
+
+	lower_str = asc_tolower(icu_locale_id, strlen(icu_locale_id));
+
+	pfree(icu_locale_id);
+
+	str = strchr(lower_str, '@');
 	if (!str)
 		return;
 	str++;
@@ -2663,9 +2761,8 @@ icu_set_collation_attributes(UCollator *collator, const char *loc)
 			char	   *value;
 			UColAttribute uattr;
 			UColAttributeValue uvalue;
-			UErrorCode	status;
 
-			status = U_ZERO_ERROR;
+			*status = U_ZERO_ERROR;
 
 			*e = '\0';
 			name = token;
@@ -2715,50 +2812,89 @@ icu_set_collation_attributes(UCollator *collator, const char *loc)
 			else if (strcmp(value, "upper") == 0)
 				uvalue = UCOL_UPPER_FIRST;
 			else
-				status = U_ILLEGAL_ARGUMENT_ERROR;
+			{
+				*status = U_ILLEGAL_ARGUMENT_ERROR;
+				break;
+			}
 
-			if (status == U_ZERO_ERROR)
-				ucol_setAttribute(collator, uattr, uvalue, &status);
-
-			/*
-			 * Pretend the error came from ucol_open(), for consistent error
-			 * message across ICU versions.
-			 */
-			if (U_FAILURE(status))
-				ereport(ERROR,
-						(errmsg("could not open collator for locale \"%s\": %s",
-								loc, u_errorName(status))));
+			ucol_setAttribute(collator, uattr, uvalue, status);
 		}
 	}
+
+	pfree(lower_str);
 }
 
-#endif							/* USE_ICU */
+#endif
 
 /*
- * Check if the given locale ID is valid, and ereport(ERROR) if it isn't.
+ * Perform best-effort check that the locale is a valid one.
  */
 void
-check_icu_locale(const char *icu_locale)
+icu_validate_locale(const char *loc_str)
 {
 #ifdef USE_ICU
-	UCollator  *collator;
-	UErrorCode	status;
+	UCollator	*collator;
+	UErrorCode	 status;
+	char		 lang[ULOC_LANG_CAPACITY];
+	bool		 found	 = false;
+	int			 elevel = icu_validation_level;
 
+	/* no validation */
+	if (elevel < 0)
+		return;
+
+	/* downgrade to WARNING during pg_upgrade */
+	if (IsBinaryUpgrade && elevel > WARNING)
+		elevel = WARNING;
+
+	/* validate that we can extract the language */
 	status = U_ZERO_ERROR;
-	collator = ucol_open(icu_locale, &status);
+	uloc_getLanguage(loc_str, lang, ULOC_LANG_CAPACITY, &status);
 	if (U_FAILURE(status))
-		ereport(ERROR,
-				(errmsg("could not open collator for locale \"%s\": %s",
-						icu_locale, u_errorName(status))));
+	{
+		ereport(elevel,
+				(errmsg("could not get language from ICU locale \"%s\": %s",
+						loc_str, u_errorName(status)),
+				 errhint("To disable ICU locale validation, set parameter icu_validation_level to DISABLED.")));
+		return;
+	}
 
-	if (U_ICU_VERSION_MAJOR_NUM < 54)
-		icu_set_collation_attributes(collator, icu_locale);
+	/* check for special language name */
+	if (strcmp(lang, "") == 0 ||
+		strcmp(lang, "root") == 0 || strcmp(lang, "und") == 0 ||
+		strcmp(lang, "c") == 0 || strcmp(lang, "posix") == 0)
+		found = true;
+
+	/* search for matching language within ICU */
+	for (int32_t i = 0; !found && i < uloc_countAvailable(); i++)
+	{
+		const char	*otherloc = uloc_getAvailable(i);
+		char		 otherlang[ULOC_LANG_CAPACITY];
+
+		status = U_ZERO_ERROR;
+		uloc_getLanguage(otherloc, otherlang, ULOC_LANG_CAPACITY, &status);
+		if (U_FAILURE(status))
+			continue;
+
+		if (strcmp(lang, otherlang) == 0)
+			found = true;
+	}
+
+	if (!found)
+		ereport(elevel,
+				(errmsg("ICU locale \"%s\" has unknown language \"%s\"",
+						loc_str, lang),
+				 errhint("To disable ICU locale validation, set parameter icu_validation_level to DISABLED.")));
+
+	/* check that it can be opened */
+	collator = pg_ucol_open(loc_str);
 	ucol_close(collator);
-#else
+#else							/* not USE_ICU */
+	/* could get here if a collation was created by a build with ICU */
 	ereport(ERROR,
 			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 			 errmsg("ICU is not supported in this build")));
-#endif
+#endif							/* not USE_ICU */
 }
 
 /*

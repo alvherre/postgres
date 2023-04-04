@@ -21,6 +21,7 @@
 struct ExprEvalStep;
 struct SubscriptingRefState;
 struct ScalarArrayOpExprHashTable;
+struct JsonConstructorExprState;
 
 /* Bits in ExprState->flags (see also execnodes.h for public flag bits): */
 /* expression's interpreter has been initialized */
@@ -234,6 +235,8 @@ typedef enum ExprEvalOp
 	EEOP_SCALARARRAYOP,
 	EEOP_HASHED_SCALARARRAYOP,
 	EEOP_XMLEXPR,
+	EEOP_JSON_CONSTRUCTOR,
+	EEOP_IS_JSON,
 	EEOP_AGGREF,
 	EEOP_GROUPING_FUNC,
 	EEOP_WINDOW_FUNC,
@@ -588,6 +591,12 @@ typedef struct ExprEvalStep
 			bool	   *argnull;
 		}			xmlexpr;
 
+		/* for EEOP_JSON_CONSTRUCTOR */
+		struct
+		{
+			struct JsonConstructorExprState *jcstate;
+		}			json_constructor;
+
 		/* for EEOP_AGGREF */
 		struct
 		{
@@ -666,6 +675,13 @@ typedef struct ExprEvalStep
 			int			transno;
 			int			setoff;
 		}			agg_trans;
+
+		/* for EEOP_IS_JSON */
+		struct
+		{
+			JsonIsPredicate *pred;	/* original expression node */
+		}			is_json;
+
 	}			d;
 } ExprEvalStep;
 
@@ -713,6 +729,21 @@ typedef struct SubscriptExecSteps
 	ExecEvalSubroutine sbs_assign;	/* assign to an element */
 	ExecEvalSubroutine sbs_fetch_old;	/* fetch old value for assignment */
 } SubscriptExecSteps;
+
+/* EEOP_JSON_CONSTRUCTOR state, too big to inline */
+typedef struct JsonConstructorExprState
+{
+	JsonConstructorExpr *constructor;
+	Datum	   *arg_values;
+	bool	   *arg_nulls;
+	Oid		   *arg_types;
+	struct
+	{
+		int			category;
+		Oid			outfuncid;
+	}		   *arg_type_cache; /* cache for datum_to_json[b]() */
+	int			nargs;
+} JsonConstructorExprState;
 
 
 /* functions in execExpr.c */
@@ -763,6 +794,9 @@ extern void ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op,
 extern void ExecEvalConstraintNotNull(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalConstraintCheck(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalXmlExpr(ExprState *state, ExprEvalStep *op);
+extern void ExecEvalJsonConstructor(ExprState *state, ExprEvalStep *op,
+									ExprContext *econtext);
+extern void ExecEvalJsonIsPredicate(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalGroupingFunc(ExprState *state, ExprEvalStep *op);
 extern void ExecEvalSubPlan(ExprState *state, ExprEvalStep *op,
 							ExprContext *econtext);

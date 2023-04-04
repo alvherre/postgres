@@ -95,6 +95,7 @@
 
 #authentication_timeout = 1min		# 1s-600s
 #password_encryption = scram-sha-256	# scram-sha-256 or md5
+#scram_iterations = 4096
 #db_user_namespace = off
 
 # GSSAPI using Kerberos
@@ -729,6 +730,9 @@
 #lc_monetary = 'C'			# locale for monetary formatting
 #lc_numeric = 'C'			# locale for number formatting
 #lc_time = 'C'				# locale for time formatting
+
+#icu_validation_level = ERROR		# report ICU locale validation
+					# errors at the given level
 
 # default configuration for text search
 #default_text_search_config = 'pg_catalog.simple'

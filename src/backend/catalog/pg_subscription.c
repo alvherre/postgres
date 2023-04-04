@@ -71,13 +71,12 @@ GetSubscription(Oid subid, bool missing_ok)
 	sub->stream = subform->substream;
 	sub->twophasestate = subform->subtwophasestate;
 	sub->disableonerr = subform->subdisableonerr;
+	sub->passwordrequired = subform->subpasswordrequired;
 
 	/* Get conninfo */
-	datum = SysCacheGetAttr(SUBSCRIPTIONOID,
-							tup,
-							Anum_pg_subscription_subconninfo,
-							&isnull);
-	Assert(!isnull);
+	datum = SysCacheGetAttrNotNull(SUBSCRIPTIONOID,
+								   tup,
+								   Anum_pg_subscription_subconninfo);
 	sub->conninfo = TextDatumGetCString(datum);
 
 	/* Get slotname */
@@ -91,27 +90,21 @@ GetSubscription(Oid subid, bool missing_ok)
 		sub->slotname = NULL;
 
 	/* Get synccommit */
-	datum = SysCacheGetAttr(SUBSCRIPTIONOID,
-							tup,
-							Anum_pg_subscription_subsynccommit,
-							&isnull);
-	Assert(!isnull);
+	datum = SysCacheGetAttrNotNull(SUBSCRIPTIONOID,
+								   tup,
+								   Anum_pg_subscription_subsynccommit);
 	sub->synccommit = TextDatumGetCString(datum);
 
 	/* Get publications */
-	datum = SysCacheGetAttr(SUBSCRIPTIONOID,
-							tup,
-							Anum_pg_subscription_subpublications,
-							&isnull);
-	Assert(!isnull);
+	datum = SysCacheGetAttrNotNull(SUBSCRIPTIONOID,
+								   tup,
+								   Anum_pg_subscription_subpublications);
 	sub->publications = textarray_to_stringlist(DatumGetArrayTypeP(datum));
 
 	/* Get origin */
-	datum = SysCacheGetAttr(SUBSCRIPTIONOID,
-							tup,
-							Anum_pg_subscription_suborigin,
-							&isnull);
-	Assert(!isnull);
+	datum = SysCacheGetAttrNotNull(SUBSCRIPTIONOID,
+								   tup,
+								   Anum_pg_subscription_suborigin);
 	sub->origin = TextDatumGetCString(datum);
 
 	ReleaseSysCache(tup);

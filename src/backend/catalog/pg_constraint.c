@@ -190,7 +190,7 @@ CreateConstraintEntry(const char *constraintName,
 	values[Anum_pg_constraint_confdeltype - 1] = CharGetDatum(foreignDeleteType);
 	values[Anum_pg_constraint_confmatchtype - 1] = CharGetDatum(foreignMatchType);
 	values[Anum_pg_constraint_conislocal - 1] = BoolGetDatum(conIsLocal);
-	values[Anum_pg_constraint_coninhcount - 1] = Int32GetDatum(conInhCount);
+	values[Anum_pg_constraint_coninhcount - 1] = Int16GetDatum(conInhCount);
 	values[Anum_pg_constraint_connoinherit - 1] = BoolGetDatum(conNoInherit);
 
 	if (conkeyArray)
@@ -906,6 +906,10 @@ ConstraintSetParentConstraint(Oid childConstrId,
 
 		constrForm->conislocal = false;
 		constrForm->coninhcount++;
+		if (constrForm->coninhcount < 0)
+			ereport(ERROR,
+					errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+					errmsg("too many inheritance parents"));
 		constrForm->conparentid = parentConstrId;
 
 		CatalogTupleUpdate(constrRel, &tuple->t_self, newtup);
@@ -1291,23 +1295,18 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 						   Oid *pf_eq_oprs, Oid *pp_eq_oprs, Oid *ff_eq_oprs,
 						   int *num_fk_del_set_cols, AttrNumber *fk_del_set_cols)
 {
-	Oid			constrId;
 	Datum		adatum;
 	bool		isNull;
 	ArrayType  *arr;
 	int			numkeys;
-
-	constrId = ((Form_pg_constraint) GETSTRUCT(tuple))->oid;
 
 	/*
 	 * We expect the arrays to be 1-D arrays of the right types; verify that.
 	 * We don't need to use deconstruct_array() since the array data is just
 	 * going to look like a C array of values.
 	 */
-	adatum = SysCacheGetAttr(CONSTROID, tuple,
-							 Anum_pg_constraint_conkey, &isNull);
-	if (isNull)
-		elog(ERROR, "null conkey for constraint %u", constrId);
+	adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
+									Anum_pg_constraint_conkey);
 	arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 	if (ARR_NDIM(arr) != 1 ||
 		ARR_HASNULL(arr) ||
@@ -1320,10 +1319,8 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 	if ((Pointer) arr != DatumGetPointer(adatum))
 		pfree(arr);				/* free de-toasted copy, if any */
 
-	adatum = SysCacheGetAttr(CONSTROID, tuple,
-							 Anum_pg_constraint_confkey, &isNull);
-	if (isNull)
-		elog(ERROR, "null confkey for constraint %u", constrId);
+	adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
+									Anum_pg_constraint_confkey);
 	arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 	if (ARR_NDIM(arr) != 1 ||
 		ARR_DIMS(arr)[0] != numkeys ||
@@ -1336,10 +1333,8 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 
 	if (pf_eq_oprs)
 	{
-		adatum = SysCacheGetAttr(CONSTROID, tuple,
-								 Anum_pg_constraint_conpfeqop, &isNull);
-		if (isNull)
-			elog(ERROR, "null conpfeqop for constraint %u", constrId);
+		adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
+										Anum_pg_constraint_conpfeqop);
 		arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 		/* see TryReuseForeignKey if you change the test below */
 		if (ARR_NDIM(arr) != 1 ||
@@ -1354,10 +1349,8 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 
 	if (pp_eq_oprs)
 	{
-		adatum = SysCacheGetAttr(CONSTROID, tuple,
-								 Anum_pg_constraint_conppeqop, &isNull);
-		if (isNull)
-			elog(ERROR, "null conppeqop for constraint %u", constrId);
+		adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
+										Anum_pg_constraint_conppeqop);
 		arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 		if (ARR_NDIM(arr) != 1 ||
 			ARR_DIMS(arr)[0] != numkeys ||
@@ -1371,10 +1364,8 @@ DeconstructFkConstraintRow(HeapTuple tuple, int *numfks,
 
 	if (ff_eq_oprs)
 	{
-		adatum = SysCacheGetAttr(CONSTROID, tuple,
-								 Anum_pg_constraint_conffeqop, &isNull);
-		if (isNull)
-			elog(ERROR, "null conffeqop for constraint %u", constrId);
+		adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
+										Anum_pg_constraint_conffeqop);
 		arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 		if (ARR_NDIM(arr) != 1 ||
 			ARR_DIMS(arr)[0] != numkeys ||

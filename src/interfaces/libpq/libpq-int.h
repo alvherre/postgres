@@ -26,7 +26,8 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <time.h>
-#ifndef WIN32
+/* MinGW has sys/time.h, but MSVC doesn't */
+#ifndef _MSC_VER
 #include <sys/time.h>
 #endif
 
@@ -81,6 +82,8 @@ typedef struct
 #define USE_SSL_ENGINE
 #endif
 #endif							/* USE_OPENSSL */
+
+#include "common/pg_prng.h"
 
 /*
  * POSTGRES backend dependent Constants.
@@ -242,6 +245,13 @@ typedef enum
 	SERVER_TYPE_PREFER_STANDBY_PASS2	/* second pass - behaves same as ANY */
 } PGTargetServerType;
 
+/* Target server type (decoded value of load_balance_hosts) */
+typedef enum
+{
+	LOAD_BALANCE_DISABLE = 0,	/* Use the existing host order (default) */
+	LOAD_BALANCE_RANDOM,		/* Randomly shuffle the hosts */
+} PGLoadBalanceType;
+
 /* Boolean value plus a not-known state, for GUCs we might have to fetch */
 typedef enum
 {
@@ -384,6 +394,7 @@ struct pg_conn
 	char	   *sslkey;			/* client key filename */
 	char	   *sslcert;		/* client certificate filename */
 	char	   *sslpassword;	/* client key file password */
+	char	   *sslcertmode;	/* client cert mode (require,allow,disable) */
 	char	   *sslrootcert;	/* root certificate filename */
 	char	   *sslcrl;			/* certificate revocation list filename */
 	char	   *sslcrldir;		/* certificate revocation list directory name */
@@ -397,6 +408,7 @@ struct pg_conn
 	char	   *ssl_max_protocol_version;	/* maximum TLS protocol version */
 	char	   *target_session_attrs;	/* desired session properties */
 	char	   *require_auth;	/* name of the expected auth method */
+	char	   *load_balance_hosts; /* load balance over hosts */
 
 	/* Optional file to write trace info to */
 	FILE	   *Pfdebug;
@@ -468,11 +480,14 @@ struct pg_conn
 
 	/* Transient state needed while establishing connection */
 	PGTargetServerType target_server_type;	/* desired session properties */
+	PGLoadBalanceType load_balance_type;	/* desired load balancing
+											 * algorithm */
 	bool		try_next_addr;	/* time to advance to next address/host? */
 	bool		try_next_host;	/* time to advance to next connhost[]? */
-	struct addrinfo *addrlist;	/* list of addresses for current connhost */
-	struct addrinfo *addr_cur;	/* the one currently being tried */
-	int			addrlist_family;	/* needed to know how to free addrlist */
+	int			naddr;			/* number of addresses returned by getaddrinfo */
+	int			whichaddr;		/* the address currently being tried */
+	AddrInfo   *addr;			/* the array of addresses for the currently
+								 * tried host */
 	bool		send_appname;	/* okay to send application_name? */
 
 	/* Miscellaneous stuff */
@@ -486,6 +501,8 @@ struct pg_conn
 	PGVerbosity verbosity;		/* error/notice message verbosity */
 	PGContextVisibility show_context;	/* whether to show CONTEXT field */
 	PGlobjfuncs *lobjfuncs;		/* private state for large-object access fns */
+	pg_prng_state prng_state;	/* prng state for load balancing connections */
+
 
 	/* Buffer for data received from backend and not yet processed */
 	char	   *inBuffer;		/* currently allocated buffer */
@@ -524,9 +541,12 @@ struct pg_conn
 	/* Assorted state for SASL, SSL, GSS, etc */
 	const pg_fe_sasl_mech *sasl;
 	void	   *sasl_state;
+	int			scram_sha_256_iterations;
 
 	/* SSL structures */
 	bool		ssl_in_use;
+	bool		ssl_cert_requested; /* Did the server ask us for a cert? */
+	bool		ssl_cert_sent;	/* Did we send one in reply? */
 
 #ifdef USE_SSL
 	bool		allow_ssl_try;	/* Allowed to try SSL negotiation */

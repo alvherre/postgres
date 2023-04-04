@@ -108,4 +108,13 @@ extern GroupingSet *makeGroupingSet(GroupingSetKind kind, List *content, int loc
 
 extern VacuumRelation *makeVacuumRelation(RangeVar *relation, Oid oid, List *va_cols);
 
+extern JsonFormat *makeJsonFormat(JsonFormatType type, JsonEncoding encoding,
+								  int location);
+extern JsonValueExpr *makeJsonValueExpr(Expr *expr, JsonFormat *format);
+extern Node *makeJsonKeyValue(Node *key, Node *value);
+extern Node *makeJsonIsPredicate(Node *expr, JsonFormat *format,
+								 JsonValueType item_type, bool unique_keys,
+								 int location);
+extern JsonEncoding makeJsonEncoding(char *name);
+
 #endif							/* MAKEFUNC_H */

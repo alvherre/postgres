@@ -177,6 +177,7 @@ gistRedoDeleteRecord(XLogReaderState *record)
 	gistxlogDelete *xldata = (gistxlogDelete *) XLogRecGetData(record);
 	Buffer		buffer;
 	Page		page;
+	OffsetNumber *toDelete = xldata->offsets;
 
 	/*
 	 * If we have any conflict processing to do, it must happen before we
@@ -203,14 +204,7 @@ gistRedoDeleteRecord(XLogReaderState *record)
 	{
 		page = (Page) BufferGetPage(buffer);
 
-		if (XLogRecGetDataLen(record) > SizeOfGistxlogDelete)
-		{
-			OffsetNumber *todelete;
-
-			todelete = (OffsetNumber *) ((char *) xldata + SizeOfGistxlogDelete);
-
-			PageIndexMultiDelete(page, todelete, xldata->ntodelete);
-		}
+		PageIndexMultiDelete(page, toDelete, xldata->ntodelete);
 
 		GistClearPageHasGarbage(page);
 		GistMarkTuplesDeleted(page);
@@ -597,7 +591,8 @@ gistXLogAssignLSN(void)
  * Write XLOG record about reuse of a deleted page.
  */
 void
-gistXLogPageReuse(Relation rel, BlockNumber blkno, FullTransactionId deleteXid)
+gistXLogPageReuse(Relation rel, Relation heaprel,
+				  BlockNumber blkno, FullTransactionId deleteXid)
 {
 	gistxlogPageReuse xlrec_reuse;
 
@@ -608,6 +603,7 @@ gistXLogPageReuse(Relation rel, BlockNumber blkno, FullTransactionId deleteXid)
 	 */
 
 	/* XLOG stuff */
+	xlrec_reuse.isCatalogRel = RelationIsAccessibleInLogicalDecoding(heaprel);
 	xlrec_reuse.locator = rel->rd_locator;
 	xlrec_reuse.block = blkno;
 	xlrec_reuse.snapshotConflictHorizon = deleteXid;
@@ -672,11 +668,12 @@ gistXLogUpdate(Buffer buffer,
  */
 XLogRecPtr
 gistXLogDelete(Buffer buffer, OffsetNumber *todelete, int ntodelete,
-			   TransactionId snapshotConflictHorizon)
+			   TransactionId snapshotConflictHorizon, Relation heaprel)
 {
 	gistxlogDelete xlrec;
 	XLogRecPtr	recptr;
 
+	xlrec.isCatalogRel = RelationIsAccessibleInLogicalDecoding(heaprel);
 	xlrec.snapshotConflictHorizon = snapshotConflictHorizon;
 	xlrec.ntodelete = ntodelete;
 

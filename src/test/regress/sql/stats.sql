@@ -541,6 +541,7 @@ SELECT pg_stat_get_subscription_stats(NULL);
 -- - writes of shared buffers to permanent storage
 -- - extends of relations using shared buffers
 -- - fsyncs done to ensure the durability of data dirtying shared buffers
+-- - shared buffer hits
 
 -- There is no test for blocks evicted from shared buffers, because we cannot
 -- be sure of the state of shared buffers at the point the test is run.
@@ -549,6 +550,9 @@ SELECT pg_stat_get_subscription_stats(NULL);
 -- extends.
 SELECT sum(extends) AS io_sum_shared_before_extends
   FROM pg_stat_io WHERE io_context = 'normal' AND io_object = 'relation' \gset
+SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
+  FROM pg_stat_io
+  WHERE io_object = 'relation' \gset io_sum_shared_before_
 CREATE TABLE test_io_shared(a int);
 INSERT INTO test_io_shared SELECT i FROM generate_series(1,100)i;
 SELECT pg_stat_force_next_flush();
@@ -558,16 +562,12 @@ SELECT :io_sum_shared_after_extends > :io_sum_shared_before_extends;
 
 -- After a checkpoint, there should be some additional IOCONTEXT_NORMAL writes
 -- and fsyncs.
-SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
-  FROM pg_stat_io
-  WHERE io_context = 'normal' AND io_object = 'relation' \gset io_sum_shared_before_
 -- See comment above for rationale for two explicit CHECKPOINTs.
 CHECKPOINT;
 CHECKPOINT;
 SELECT sum(writes) AS writes, sum(fsyncs) AS fsyncs
   FROM pg_stat_io
-  WHERE io_context = 'normal' AND io_object = 'relation' \gset io_sum_shared_after_
-
+  WHERE io_object = 'relation' \gset io_sum_shared_after_
 SELECT :io_sum_shared_after_writes > :io_sum_shared_before_writes;
 SELECT current_setting('fsync') = 'off'
   OR :io_sum_shared_after_fsyncs > :io_sum_shared_before_fsyncs;
@@ -588,6 +588,25 @@ SELECT pg_stat_force_next_flush();
 SELECT sum(reads) AS io_sum_shared_after_reads
   FROM pg_stat_io WHERE io_context = 'normal' AND io_object = 'relation'  \gset
 SELECT :io_sum_shared_after_reads > :io_sum_shared_before_reads;
+
+SELECT sum(hits) AS io_sum_shared_before_hits
+  FROM pg_stat_io WHERE io_context = 'normal' AND io_object = 'relation' \gset
+-- Select from the table again to count hits.
+-- Ensure we generate hits by forcing a nested loop self-join with no
+-- materialize node. The outer side's buffer will stay pinned, preventing its
+-- eviction, while we loop through the inner side and generate hits.
+BEGIN;
+SET LOCAL enable_nestloop TO on; SET LOCAL enable_mergejoin TO off;
+SET LOCAL enable_hashjoin TO off; SET LOCAL enable_material TO off;
+-- ensure plan stays as we expect it to
+EXPLAIN (COSTS OFF) SELECT COUNT(*) FROM test_io_shared t1 INNER JOIN test_io_shared t2 USING (a);
+SELECT COUNT(*) FROM test_io_shared t1 INNER JOIN test_io_shared t2 USING (a);
+COMMIT;
+SELECT pg_stat_force_next_flush();
+SELECT sum(hits) AS io_sum_shared_after_hits
+  FROM pg_stat_io WHERE io_context = 'normal' AND io_object = 'relation' \gset
+SELECT :io_sum_shared_after_hits > :io_sum_shared_before_hits;
+
 DROP TABLE test_io_shared;
 
 -- Test that the follow IOCONTEXT_LOCAL IOOps are tracked in pg_stat_io:
@@ -675,10 +694,10 @@ SELECT :io_sum_bulkwrite_strategy_extends_after > :io_sum_bulkwrite_strategy_ext
 
 -- Test IO stats reset
 SELECT pg_stat_have_stats('io', 0, 0);
-SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) AS io_stats_pre_reset
+SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) + sum(hits) AS io_stats_pre_reset
   FROM pg_stat_io \gset
 SELECT pg_stat_reset_shared('io');
-SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) AS io_stats_post_reset
+SELECT sum(evictions) + sum(reuses) + sum(extends) + sum(fsyncs) + sum(reads) + sum(writes) + sum(hits) AS io_stats_post_reset
   FROM pg_stat_io \gset
 SELECT :io_stats_post_reset < :io_stats_pre_reset;
 

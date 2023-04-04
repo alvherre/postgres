@@ -48,7 +48,13 @@ mkdir $datadir;
 	local (%ENV) = %ENV;
 	delete $ENV{TZ};
 
-	command_ok([ 'initdb', '-N', '-T', 'german', '-X', $xlogdir, $datadir ],
+	# while we are here, also exercise -T and -c options
+	command_ok(
+		[
+			'initdb', '-N', '-T', 'german', '-c',
+			'default_text_search_config=german',
+			'-X', $xlogdir, $datadir
+		],
 		'successful creation');
 
 	# Permissions on PGDATA should be default
@@ -122,6 +128,24 @@ if ($ENV{with_icu} eq 'yes')
 		],
 		qr/error: encoding mismatch/,
 		'fails for encoding not supported by ICU');
+
+	command_fails_like(
+		[
+			'initdb',                '--no-sync',
+			'--locale-provider=icu',
+			'--icu-locale=nonsense-nowhere', "$tempdir/dataX"
+		],
+		qr/error: locale "nonsense-nowhere" has unknown language "nonsense"/,
+		'fails for nonsense language');
+
+	command_fails_like(
+		[
+			'initdb',                '--no-sync',
+			'--locale-provider=icu',
+			'--icu-locale=@colNumeric=lower', "$tempdir/dataX"
+		],
+		qr/could not open collator for locale "\@colNumeric=lower": U_ILLEGAL_ARGUMENT_ERROR/,
+		'fails for invalid collation argument');
 }
 else
 {
@@ -141,5 +165,8 @@ command_fails(
 		"$tempdir/dataX"
 	],
 	'fails for invalid option combination');
+
+command_fails([ 'initdb', '--no-sync', '--set', 'foo=bar', "$tempdir/dataX" ],
+	'fails for invalid --set option');
 
 done_testing();
