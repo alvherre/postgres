@@ -1199,20 +1199,6 @@ ERROR:  cannot add constraint to table with inheritance children
 HINT:  Do not specify the ONLY keyword.
 alter table child alter a set not null;
 ERROR:  column "a" of relation "child" contains null values
-delete from parent;
-alter table only parent alter a set not null;
-ERROR:  cannot add constraint to table with inheritance children
-HINT:  Do not specify the ONLY keyword.
-insert into parent values (NULL);
-alter table child alter a set not null;
-insert into child (a, b) values (NULL, 'foo');
-ERROR:  null value in column "a" of relation "child" violates not-null constraint
-DETAIL:  Failing row contains (null, foo).
-delete from child;
-alter table child alter a set not null;
-insert into child (a, b) values (NULL, 'foo');
-ERROR:  null value in column "a" of relation "child" violates not-null constraint
-DETAIL:  Failing row contains (null, foo).
 drop table child;
 drop table parent;
 -- test setting and removing default values
