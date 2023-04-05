@@ -2775,13 +2775,17 @@ list_cookedconstr_attnum_cmp(const ListCell *p1, const ListCell *p2)
  * NOT NULL constraint in the parent, which have a name already, and those
  * coming from a PRIMARY KEY in the parent, which don't.  Any name specified
  * in a parent is disregarded in case of a conflict.
+ *
+ * Returns a list of AttrNumber for columns that need to have the attnotnull
+ * column set.
  */
-void
+List *
 AddRelationNotNullConstraints(Relation rel, List *constraints,
 							  List *old_notnulls)
 {
 	List	   *nnnames = NIL;
 	List	   *givennames = NIL;
+	List	   *nncols = NIL;
 	AttrNumber	prev_attnum;
 	ListCell   *lc;
 
@@ -2845,6 +2849,8 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		StoreRelNotNull(rel, conname,
 						attnum, true, is_local,
 						inhcount, false);
+
+		nncols = lappend_int(nncols, attnum);
 	}
 
 	/*
@@ -2916,8 +2922,12 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 						false, inhcount,
 						false);
 
+		nncols = lappend_int(nncols, cooked->attnum);
+
 		prev_attnum = cooked->attnum;
 	}
+
+	return nncols;
 }
 
 /*

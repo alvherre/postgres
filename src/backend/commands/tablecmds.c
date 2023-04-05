@@ -434,11 +434,13 @@ static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
 static void add_column_collation_dependency(Oid relid, int32 attnum, Oid collid);
 static ObjectAddress ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 									   LOCKMODE lockmode);
-static ObjectAddress ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab,
-									  Relation rel, char *constrname, char *colName,
+static void set_attnotnull(List **wqueue, Relation rel,
+						   AttrNumber attnum, bool recurse, LOCKMODE lockmode);
+static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
+									  char *constrname, char *colName,
 									  bool recurse, bool recursing,
 									  List **readyRels, LOCKMODE lockmode);
-static void ATExecSetAttNotNull(AlteredTableInfo *tab, Relation rel,
+static void ATExecSetAttNotNull(List **wqueue, Relation rel,
 								const char *colName, LOCKMODE lockmode);
 static void ATExecCheckNotNull(AlteredTableInfo *tab, Relation rel,
 							   const char *colName, LOCKMODE lockmode);
@@ -622,7 +624,7 @@ static void RemoveInheritance(Relation child_rel, Relation parent_rel,
 static ObjectAddress ATExecAttachPartition(List **wqueue, Relation rel,
 										   PartitionCmd *cmd,
 										   AlterTableUtilityContext *context);
-static void AttachPartitionEnsureIndexes(Relation rel, Relation attachrel);
+static void AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel);
 static void QueuePartitionConstraintValidation(List **wqueue, Relation scanrel,
 											   List *partConstraint,
 											   bool validate_default);
@@ -681,6 +683,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	List	   *old_notnulls;
 	List	   *rawDefaults;
 	List	   *cookedDefaults;
+	List	   *nncols;
 	Datum		reloptions;
 	ListCell   *listptr;
 	AttrNumber	attnum;
@@ -1262,10 +1265,13 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	/*
 	 * Finally, merge the NOT NULL constraints that are directly declared with
 	 * those that come from parent relations (making sure to count inheritance
-	 * appropriately for each), and create them.
+	 * appropriately for each), create them, and set the attnotnull flag on
+	 * columns that don't yet have it.
 	 */
-	AddRelationNotNullConstraints(rel, stmt->nnconstraints,
-								  old_notnulls);
+	nncols = AddRelationNotNullConstraints(rel, stmt->nnconstraints,
+										   old_notnulls);
+	foreach(listptr, nncols)
+		set_attnotnull(NULL, rel, lfirst_int(listptr), false, NoLock);
 
 	ObjectAddressSet(address, RelationRelationId, relationId);
 
@@ -2475,6 +2481,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		ListCell   *lc1;
 		ListCell   *lc2;
 		Bitmapset  *pkattrs;
+		Bitmapset  *nncols = NULL;
+
 
 		/* caller already got lock */
 		relation = table_open(parent, NoLock);
@@ -2564,14 +2572,18 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		inherited_defaults = cols_with_defaults = NIL;
 
 		/*
-		 * All columns that are part of the parent's primary key need to get a
-		 * NOT NULL constraint, if they don't have one already.
+		 * All columns that are part of the parent's primary key need to be
+		 * NOT NULL; if partition just the attnotnull bit, otherwise a full
+		 * constraint (if they don't have one already).  Also, we request
+		 * attnotnull on columns that have a NOT NULL constraint that's not
+		 * marked NO INHERIT.
 		 */
-		if (!is_partition)
-			pkattrs = RelationGetIndexAttrBitmap(relation,
-												 INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		else
-			pkattrs = NULL;		/* keep compiler quiet */
+		pkattrs = RelationGetIndexAttrBitmap(relation,
+											 INDEX_ATTR_BITMAP_PRIMARY_KEY);
+		nnconstrs = RelationGetNotNullConstraints(relation, true);
+		foreach(lc1, nnconstrs)
+			nncols = bms_add_member(nncols,
+									((CookedConstraint *) lfirst(lc1))->attnum);
 
 		for (parent_attno = 1; parent_attno <= tupleDesc->natts;
 			 parent_attno++)
@@ -2694,9 +2706,12 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				}
 
 				/*
-				 * Merge of NOT NULL constraints = OR 'em together
+				 * mark attnotnull if parent has it and it's not NO INHERIT
 				 */
-				def->is_not_null |= attribute->attnotnull;
+				if (bms_is_member(parent_attno, nncols) ||
+					bms_is_member(parent_attno - FirstLowInvalidHeapAttributeNumber,
+								  pkattrs))
+					def->is_not_null = true;
 
 				/*
 				 * Check for GENERATED conflicts
@@ -2730,7 +2745,11 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 													attribute->atttypmod);
 				def->inhcount = 1;
 				def->is_local = false;
-				def->is_not_null = attribute->attnotnull;
+				/* mark attnotnull if parent has it and it's not NO INHERIT */
+				if (bms_is_member(parent_attno, nncols) ||
+					bms_is_member(parent_attno - FirstLowInvalidHeapAttributeNumber,
+								  pkattrs))
+					def->is_not_null = true;
 				def->is_from_type = false;
 				def->storage = attribute->attstorage;
 				def->raw_default = NULL;
@@ -2919,9 +2938,9 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		}
 
 		/*
-		 * Also copy the NOT NULL constraints from this parent.
+		 * Also copy the NOT NULL constraints from this parent.  The
+		 * attnotnull markings were already installed above.
 		 */
-		nnconstrs = RelationGetNotNullConstraints(relation, true);
 		foreach(lc1, nnconstrs)
 		{
 			CookedConstraint *nn = lfirst(lc1);
@@ -3302,6 +3321,9 @@ MergeCheckConstraint(List *constraints, char *name, Node *expr)
  * Caller can request cooked constraints, or raw.
  *
  * This is seldom needed, so we just scan pg_constraint each time.
+ *
+ * XXX This is only used to create derived tables, so NO INHERIT constraints
+ * are always skipped.
  */
 List *
 RelationGetNotNullConstraints(Relation relation, bool cooked)
@@ -3326,6 +3348,8 @@ RelationGetNotNullConstraints(Relation relation, bool cooked)
 		AttrNumber	colnum;
 
 		if (conForm->contype != CONSTRAINT_NOTNULL)
+			continue;
+		if (conForm->connoinherit)
 			continue;
 
 		colnum = extractNotNullColumn(htup);
@@ -5221,11 +5245,11 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab,
 			address = ATExecDropNotNull(rel, cmd->name, cmd->recurse, lockmode);
 			break;
 		case AT_SetNotNull:		/* ALTER COLUMN SET NOT NULL */
-			address = ATExecSetNotNull(wqueue, tab, rel, NULL, cmd->name,
+			address = ATExecSetNotNull(wqueue, rel, NULL, cmd->name,
 									   cmd->recurse, false, NULL, lockmode);
 			break;
 		case AT_SetAttNotNull:	/* set pg_attribute.attnotnull */
-			ATExecSetAttNotNull(tab, rel, cmd->name, lockmode);
+			ATExecSetAttNotNull(wqueue, rel, cmd->name, lockmode);
 			break;
 		case AT_CheckNotNull:	/* check column is already marked NOT NULL */
 			ATExecCheckNotNull(tab, rel, cmd->name, lockmode);
@@ -7617,53 +7641,72 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 /*
  * Helper to set pg_attribute.attnotnull if it isn't set, and to tell phase 3
- * to verify it.
+ * to verify it; recurses to apply the same to children.
+ *
+ * When called to alter an existing table, 'wqueue' must be given so that we can
+ * queue a check that existing tuples pass the constraint.  When called from
+ * table creation, 'wqueue' should be passed as NULL.
  */
 static void
-setnotnull_flag(AlteredTableInfo *tab, const char *colName, LOCKMODE lockmode)
+set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
+			   LOCKMODE lockmode)
 {
-	Relation	attr_rel;
 	HeapTuple	tuple;
-	bool		opened_rel = false;
+	Form_pg_attribute attForm;
+	List	   *children;
+	ListCell   *lc;
 
-	attr_rel = table_open(AttributeRelationId, RowExclusiveLock);
-
-	/*
-	 * When recursing to children, phase 2 might not have the rel already
-	 * open.  Do that transiently here.  It'd be better to clean this up ...
-	 */
-	if (tab->rel == NULL)
-	{
-		opened_rel = true;
-		tab->rel = table_open(tab->relid, lockmode);
-	}
-
-	tuple = SearchSysCacheCopyAttName(RelationGetRelid(tab->rel), colName);
+	tuple = SearchSysCacheCopyAttNum(RelationGetRelid(rel), attnum);
 	if (!HeapTupleIsValid(tuple))
-		ereport(ERROR,
-				errcode(ERRCODE_UNDEFINED_COLUMN),
-				errmsg("column \"%s\" of relation \"%s\" does not exist",
-					   colName, RelationGetRelationName(tab->rel)));
-	if (!((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull)
+		elog(ERROR, "cache lookup failed for attribute %d of relation %u",
+			 attnum, RelationGetRelid(rel));
+	attForm = (Form_pg_attribute) GETSTRUCT(tuple);
+	if (!attForm->attnotnull)
 	{
-		((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull = true;
+		Relation	attr_rel;
+
+		attr_rel = table_open(AttributeRelationId, RowExclusiveLock);
+
+		attForm->attnotnull = true;
 		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
+
+		table_close(attr_rel, RowExclusiveLock);
 
 		/*
 		 * And set up for existing values to be checked, unless another constraint
 		 * already proves this.
 		 */
-		if (!NotNullImpliedByRelConstraints(tab->rel, (Form_pg_attribute) GETSTRUCT(tuple)))
+		if (wqueue && !NotNullImpliedByRelConstraints(rel, attForm))
+		{
+			AlteredTableInfo *tab;
+
+			tab = ATGetQueueEntry(wqueue, rel);
 			tab->verify_new_notnull = true;
+		}
 	}
 
-	if (opened_rel)
+	/* if no recursion is desired, we're done */
+	if (!recurse)
+		return;
+
+	children = find_inheritance_children(RelationGetRelid(rel), lockmode);
+	foreach(lc, children)
 	{
-		table_close(tab->rel, NoLock);
-		tab->rel = NULL;
-	}
+		Oid			childrelid = lfirst_oid(lc);
+		Relation	childrel;
+		AttrNumber	childattno;
 
-	table_close(attr_rel, RowExclusiveLock);
+		/* find_inheritance_children already got lock */
+		childrel = table_open(childrelid, NoLock);
+		CheckTableNotInUse(childrel, "ALTER TABLE");
+
+		childattno = get_attnum(RelationGetRelid(childrel),
+								get_attname(RelationGetRelid(rel), attnum,
+											false));
+		set_attnotnull(wqueue, childrel, childattno,
+					   recurse, lockmode);
+		table_close(childrel, NoLock);
+	}
 }
 
 /*
@@ -7674,15 +7717,10 @@ setnotnull_flag(AlteredTableInfo *tab, const char *colName, LOCKMODE lockmode)
  * added, or InvalidObjectAddress otherwise.
  *
  * We must recurse to child tables during execution, rather than using
- * ALTER TABLE's normal prep-time recursion.  The reason is that all the
- * constraints *must* be given the same name, else they won't be seen as
- * related later.  Because the user cannot specify a constraint name in
- * this command form, we must scan the hierarchy to choose a good one
- * from the beginning, and pass that down to all children.
+ * ALTER TABLE's normal prep-time recursion.
  */
 static ObjectAddress
-ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
-				 char *conName, char *colName,
+ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 				 bool recurse, bool recursing, List **readyRels,
 				 LOCKMODE lockmode)
 {
@@ -7833,11 +7871,10 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ccon = linitial(cooked);
 	ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 
-	setnotnull_flag(tab, colName, lockmode);
+	set_attnotnull(wqueue, rel, attnum, false, lockmode);
 
 	/*
 	 * Recurse to propagate the constraint to children that don't have one.
-	 * This also renames it in those that do have it.
 	 */
 	if (recurse)
 	{
@@ -7849,13 +7886,11 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 		foreach(lc, children)
 		{
-			AlteredTableInfo *childtab;
 			Relation	childrel;
 
 			childrel = table_open(lfirst_oid(lc), NoLock);
-			childtab = ATGetQueueEntry(wqueue, childrel);
 
-			ATExecSetNotNull(wqueue, childtab, childrel,
+			ATExecSetNotNull(wqueue, childrel,
 							 conName, colName, recurse, true,
 							 readyRels, lockmode);
 
@@ -7873,10 +7908,19 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
  * primary key and the column is not already marked attnotnull.
  */
 static void
-ATExecSetAttNotNull(AlteredTableInfo *tab, Relation rel,
+ATExecSetAttNotNull(List **wqueue, Relation rel,
 					const char *colName, LOCKMODE lockmode)
 {
-	setnotnull_flag(tab, colName, lockmode);
+	AttrNumber	attnum;
+
+	attnum = get_attnum(RelationGetRelid(rel), colName);
+	if (attnum == InvalidAttrNumber)	/* XXX should not happen .. elog? */
+		ereport(ERROR,
+				errcode(ERRCODE_UNDEFINED_COLUMN),
+				errmsg("column \"%s\" of relation \"%s\" does not exist",
+					   colName, RelationGetRelationName(rel)));
+
+	set_attnotnull(wqueue, rel, attnum, false, lockmode);
 }
 
 /*
@@ -9300,13 +9344,6 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 										NULL);	/* queryString not available
 												 * here */
 
-	/*
-	 * If we're adding a NOT NULL constraint, set the pg_attribute flag and
-	 * tell phase 3 to verify existing rows, if needed.
-	 */
-	if (constr->contype == CONSTR_NOTNULL)
-		setnotnull_flag(tab, constr->colname, lockmode);
-
 	/* we don't expect more than one constraint here */
 	Assert(list_length(newcons) <= 1);
 
@@ -9331,6 +9368,14 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		/* Save the actually assigned name if it was defaulted */
 		if (constr->conname == NULL)
 			constr->conname = ccon->name;
+
+		/*
+		 * If adding a NOT NULL constraint, set the pg_attribute flag and
+		 * tell phase 3 to verify existing rows, if needed.
+		 */
+		if (constr->contype == CONSTR_NOTNULL)
+			set_attnotnull(wqueue, rel, ccon->attnum,
+						   !ccon->is_no_inherit, lockmode);
 
 		ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 	}
@@ -18433,7 +18478,7 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd,
 	StorePartitionBound(attachrel, rel, cmd->bound);
 
 	/* Ensure there exists a correct set of indexes in the partition. */
-	AttachPartitionEnsureIndexes(rel, attachrel);
+	AttachPartitionEnsureIndexes(wqueue, rel, attachrel);
 
 	/* and triggers */
 	CloneRowTriggersToPartition(rel, attachrel);
@@ -18546,13 +18591,12 @@ ATExecAttachPartition(List **wqueue, Relation rel, PartitionCmd *cmd,
  * partitioned table.
  */
 static void
-AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
+AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel)
 {
 	List	   *idxes;
 	List	   *attachRelIdxs;
 	Relation   *attachrelIdxRels;
 	IndexInfo **attachInfos;
-	int			i;
 	ListCell   *cell;
 	MemoryContext cxt;
 	MemoryContext oldcxt;
@@ -18568,14 +18612,13 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 	attachInfos = palloc(sizeof(IndexInfo *) * list_length(attachRelIdxs));
 
 	/* Build arrays of all existing indexes and their IndexInfos */
-	i = 0;
 	foreach(cell, attachRelIdxs)
 	{
 		Oid			cldIdxId = lfirst_oid(cell);
+		int			i = foreach_current_index(cell);
 
 		attachrelIdxRels[i] = index_open(cldIdxId, AccessShareLock);
 		attachInfos[i] = BuildIndexInfo(attachrelIdxRels[i]);
-		i++;
 	}
 
 	/*
@@ -18641,7 +18684,7 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 		 * the first matching, unattached one we find, if any, as partition of
 		 * the parent index.  If we find one, we're done.
 		 */
-		for (i = 0; i < list_length(attachRelIdxs); i++)
+		for (int i = 0; i < list_length(attachRelIdxs); i++)
 		{
 			Oid			cldIdxId = RelationGetRelid(attachrelIdxRels[i]);
 			Oid			cldConstrOid = InvalidOid;
@@ -18697,6 +18740,28 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 			stmt = generateClonedIndexStmt(NULL,
 										   idxRel, attmap,
 										   &conOid);
+
+			/*
+			 * If the index is a primary key, mark all columns as NOT NULL if
+			 * they aren't already.
+			 */
+			if (stmt->primary)
+			{
+				MemoryContextSwitchTo(oldcxt);
+				for (int j = 0; j < info->ii_NumIndexKeyAttrs; j++)
+				{
+					AttrNumber	childattno;
+
+					childattno = get_attnum(RelationGetRelid(attachrel),
+											get_attname(RelationGetRelid(rel),
+														info->ii_IndexAttrNumbers[j],
+														false));
+					set_attnotnull(wqueue, attachrel, childattno,
+								   true, AccessExclusiveLock);
+				}
+				MemoryContextSwitchTo(cxt);
+			}
+
 			DefineIndex(RelationGetRelid(attachrel), stmt, InvalidOid,
 						RelationGetRelid(idxRel),
 						conOid,
@@ -18709,7 +18774,7 @@ AttachPartitionEnsureIndexes(Relation rel, Relation attachrel)
 
 out:
 	/* Clean up. */
-	for (i = 0; i < list_length(attachRelIdxs); i++)
+	for (int i = 0; i < list_length(attachRelIdxs); i++)
 		index_close(attachrelIdxRels[i], AccessShareLock);
 	MemoryContextSwitchTo(oldcxt);
 	MemoryContextDelete(cxt);

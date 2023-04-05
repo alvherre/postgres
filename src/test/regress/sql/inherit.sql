@@ -279,8 +279,8 @@ select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg
 insert into ac (aa) values (NULL);
 insert into bc (aa) values (NULL);
 
-alter table bc drop constraint ac_aa_not_null;  -- fail, disallowed
-alter table ac drop constraint ac_aa_not_null;
+alter table bc drop constraint ac_aa_check;  -- fail, disallowed
+alter table ac drop constraint ac_aa_check;
 select pc.relname, pgc.conname, pgc.contype, pgc.conislocal, pgc.coninhcount, pg_get_expr(pgc.conbin, pc.oid) as consrc from pg_class as pc inner join pg_constraint as pgc on (pgc.conrelid = pc.oid) where pc.relname in ('ac', 'bc') order by 1,2;
 
 alter table ac add constraint ac_check check (aa is not null);
@@ -698,19 +698,23 @@ alter table pp1 alter column f1 set not null;
 \d cc2
 
 -- have a look at pg_constraint
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+select conrelid::regclass, conname, contype, conkey,
+ (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+ coninhcount, conislocal
  from pg_constraint where contype = 'n' and
  conrelid in ('pp1'::regclass, 'cc1'::regclass, 'cc2'::regclass)
  order by 2, 1;
 
--- remove constraint from cc2; one is gone, the other stays
+-- remove constraint from cc2: no dice, it's inherited
 alter table cc2 alter column a2 drop not null;
 
 -- remove constraint cc1, should succeed
 alter table cc1 alter column a2 drop not null;
 
 -- have a look at pg_constraint
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+select conrelid::regclass, conname, contype, conkey,
+ (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+ coninhcount, conislocal
  from pg_constraint where contype = 'n' and
  conrelid in ('pp1'::regclass, 'cc1'::regclass, 'cc2'::regclass)
  order by 2, 1;
@@ -725,7 +729,9 @@ alter table cc1 alter column f1 drop not null;
 alter table pp1 alter column f1 drop not null;
 
 -- have a look at pg_constraint
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+select conrelid::regclass, conname, contype, conkey,
+ (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+ coninhcount, conislocal
  from pg_constraint where contype = 'n' and
  conrelid in ('pp1'::regclass, 'cc1'::regclass, 'cc2'::regclass)
  order by 2, 1;
@@ -733,6 +739,22 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
 drop table pp1 cascade;
 \d cc1
 \d cc2
+
+-- NOT NULL NO INHERIT
+create table inh_parent(a int);
+create table inh_child() inherits (inh_parent);
+alter table inh_parent add not null a no inherit;
+create table inh_child2() inherits (inh_parent);
+select conrelid::regclass, conname, contype, conkey,
+ (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+ coninhcount, conislocal, connoinherit
+ from pg_constraint where contype = 'n' and
+ conrelid in ('inh_parent'::regclass, 'inh_child'::regclass, 'inh_child2'::regclass)
+ order by 2, 1;
+\d inh_parent
+\d inh_child
+\d inh_child2
+drop table inh_parent, inh_child, inh_child2;
 
 --
 -- test inherit/deinherit

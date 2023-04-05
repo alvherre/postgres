@@ -4108,7 +4108,7 @@ ConstraintElem:
 					n->colname = $3;
 					processCASbits($4, @4, "NOT NULL",
 								   NULL, NULL, NULL,
-								   NULL, yyscanner);
+								   &n->is_no_inherit, yyscanner);
 					n->initially_valid = !n->skip_validation;
 					$$ = (Node *) n;
 				}

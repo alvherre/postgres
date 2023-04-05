@@ -2334,6 +2334,22 @@ ALTER TABLE ataddindex
 \d ataddindex
 DROP TABLE ataddindex;
 
+CREATE TABLE atnotnull1 ();
+ALTER TABLE atnotnull1
+  ADD COLUMN a INT,
+  ALTER a SET NOT NULL;
+ALTER TABLE atnotnull1
+  ADD COLUMN b INT,
+  ADD NOT NULL b;
+ALTER TABLE atnotnull1
+  ADD COLUMN c INT,
+  ADD PRIMARY KEY (c);
+SELECT conrelid::regclass, conname, contype, conkey,
+ (SELECT attname FROM pg_attribute WHERE attrelid = conrelid AND attnum = conkey[1]),
+ coninhcount, conislocal
+ FROM pg_constraint WHERE contype IN ('n','p') AND
+ conrelid IN ('atnotnull1'::regclass);
+
 -- unsupported constraint types for partitioned tables
 CREATE TABLE partitioned (
 	a int,
