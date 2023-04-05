@@ -7616,6 +7616,57 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 }
 
 /*
+ * Helper to set pg_attribute.attnotnull if it isn't set, and to tell phase 3
+ * to verify it.
+ */
+static void
+setnotnull_flag(AlteredTableInfo *tab, const char *colName, LOCKMODE lockmode)
+{
+	Relation	attr_rel;
+	HeapTuple	tuple;
+	bool		opened_rel = false;
+
+	attr_rel = table_open(AttributeRelationId, RowExclusiveLock);
+
+	/*
+	 * When recursing to children, phase 2 might not have the rel already
+	 * open.  Do that transiently here.  It'd be better to clean this up ...
+	 */
+	if (tab->rel == NULL)
+	{
+		opened_rel = true;
+		tab->rel = table_open(tab->relid, lockmode);
+	}
+
+	tuple = SearchSysCacheCopyAttName(RelationGetRelid(tab->rel), colName);
+	if (!HeapTupleIsValid(tuple))
+		ereport(ERROR,
+				errcode(ERRCODE_UNDEFINED_COLUMN),
+				errmsg("column \"%s\" of relation \"%s\" does not exist",
+					   colName, RelationGetRelationName(tab->rel)));
+	if (!((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull)
+	{
+		((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull = true;
+		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
+
+		/*
+		 * And set up for existing values to be checked, unless another constraint
+		 * already proves this.
+		 */
+		if (!NotNullImpliedByRelConstraints(tab->rel, (Form_pg_attribute) GETSTRUCT(tuple)))
+			tab->verify_new_notnull = true;
+	}
+
+	if (opened_rel)
+	{
+		table_close(tab->rel, NoLock);
+		tab->rel = NULL;
+	}
+
+	table_close(attr_rel, RowExclusiveLock);
+}
+
+/*
  * ALTER TABLE ALTER COLUMN SET NOT NULL
  *
  * Add a NOT NULL constraint to a single table and its children.  Returns
@@ -7636,7 +7687,6 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 				 LOCKMODE lockmode)
 {
 	HeapTuple	tuple;
-	Relation	attr_rel;
 	Relation	constr_rel;
 	ScanKeyData skey;
 	SysScanDesc conscan;
@@ -7783,26 +7833,7 @@ ATExecSetNotNull(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ccon = linitial(cooked);
 	ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 
-	/* Set pg_attribute.attnotnull, if it isn't set */
-	attr_rel = table_open(AttributeRelationId, RowExclusiveLock);
-	tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
-	if (!HeapTupleIsValid(tuple))
-		elog(ERROR, "cache lookup failure for attribute \"%s\" of relation %u",
-			 colName, RelationGetRelid(rel));
-	if (!((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull)
-	{
-		((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull = true;
-		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
-	}
-
-	/*
-	 * And set up for existing values to be checked, unless another constraint
-	 * already proves this.
-	 */
-	if (!NotNullImpliedByRelConstraints(rel, (Form_pg_attribute) GETSTRUCT(tuple)))
-		tab->verify_new_notnull = true;
-
-	table_close(attr_rel, RowExclusiveLock);
+	setnotnull_flag(tab, colName, lockmode);
 
 	/*
 	 * Recurse to propagate the constraint to children that don't have one.
@@ -7845,31 +7876,7 @@ static void
 ATExecSetAttNotNull(AlteredTableInfo *tab, Relation rel,
 					const char *colName, LOCKMODE lockmode)
 {
-	HeapTuple	tuple;
-	Form_pg_attribute attForm;
-
-	tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), colName);
-	if (!HeapTupleIsValid(tuple))
-		ereport(ERROR,
-				errcode(ERRCODE_UNDEFINED_COLUMN),
-				errmsg("column \"%s\" of relation \"%s\" does not exist",
-					   colName, RelationGetRelationName(rel)));
-	attForm = (Form_pg_attribute) GETSTRUCT(tuple);
-
-	if (!attForm->attnotnull)
-	{
-		Relation	attrel = table_open(AttributeRelationId, RowExclusiveLock);
-
-		attForm->attnotnull = true;
-		CatalogTupleUpdate(attrel, &tuple->t_self, tuple);
-
-		if (!NotNullImpliedByRelConstraints(rel, attForm))
-			tab->verify_new_notnull = true;
-
-		table_close(attrel, RowExclusiveLock);
-	}
-
-	heap_freetuple(tuple);
+	setnotnull_flag(tab, colName, lockmode);
 }
 
 /*
@@ -9292,6 +9299,13 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 										is_readd,	/* is_internal */
 										NULL);	/* queryString not available
 												 * here */
+
+	/*
+	 * If we're adding a NOT NULL constraint, set the pg_attribute flag and
+	 * tell phase 3 to verify existing rows, if needed.
+	 */
+	if (constr->contype == CONSTR_NOTNULL)
+		setnotnull_flag(tab, constr->colname, lockmode);
 
 	/* we don't expect more than one constraint here */
 	Assert(list_length(newcons) <= 1);
