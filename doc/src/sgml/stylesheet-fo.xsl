@@ -138,10 +138,4 @@
   </fo:bookmark>
 </xsl:template>
 
-<!-- Every sect1 in the contrib appendix gets a page break -->
-<xsl:template match="id('contrib')/sect1">
-  <fo:block break-after='page'/>
-  <xsl:apply-imports/>
-</xsl:template>
-
 </xsl:stylesheet>
