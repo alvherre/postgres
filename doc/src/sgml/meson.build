@@ -5,9 +5,6 @@ installdocs = []
 alldocs = []
 doc_generated = []
 
-xmllint_bin = find_program(get_option('XMLLINT'), native: true, required: false)
-
-
 version_sgml = configure_file(
   input: 'version.sgml.in',
   output: 'version.sgml',
@@ -68,8 +65,6 @@ if not xmllint_bin.found()
 endif
 
 pandoc = find_program('pandoc', native: true, required: false)
-xsltproc_bin = find_program(get_option('XSLTPROC'), native: true, required: false)
-fop = find_program('fop', native: true, required: false)
 
 xmltools_wrapper = [
   python, files('xmltools_dep_wrapper'),
@@ -97,26 +92,33 @@ docs += postgres_full_xml
 alldocs += postgres_full_xml
 
 
-#
-# Full documentation as html, text
-#
 if xsltproc_bin.found()
   xsltproc_flags = [
     '--nonet',
     '--stringparam', 'pg.version', pg_version,
-    '--param', 'website.stylesheet', '1'
+    '--path', '@OUTDIR@', '--path', '@CURRENT_SOURCE_DIR@',
   ]
 
   xsltproc = xmltools_wrapper + [
     '--tool', xsltproc_bin, '--',
   ]
 
+  xsltproc_html_flags = xsltproc_flags
+  if get_option('docs_html_style') == 'website'
+    xsltproc_html_flags += ['--param', 'website.stylesheet', '1']
+  endif
+endif
+
+
+#
+# Full documentation as html, text
+#
+if docs_dep.found()
   html = custom_target('html',
     input: ['stylesheet.xsl', postgres_full_xml],
     output: 'html',
     depfile: 'html.d',
-    depends: doc_generated,
-    command: [xsltproc, '-o', '@OUTDIR@/', xsltproc_flags, '@INPUT@'],
+    command: [xsltproc, '-o', '@OUTDIR@/', xsltproc_html_flags, '@INPUT@'],
     build_by_default: false,
   )
   alldocs += html
@@ -135,24 +137,12 @@ if xsltproc_bin.found()
   installdocs += install_doc_html
 
 
-  htmlhelp = custom_target('htmlhelp',
-    input: ['stylesheet-hh.xsl', postgres_full_xml],
-    output: 'htmlhelp',
-    depfile: 'htmlhelp.d',
-    depends: doc_generated,
-    command: [xsltproc, '--path', '@OUTDIR@', '-o', '@OUTDIR@/', xsltproc_flags, '@INPUT@'],
-    build_by_default: false,
-  )
-  alldocs += htmlhelp
-
-
   # single-page HTML
   postgres_html = custom_target('postgres.html',
     input: ['stylesheet-html-nochunk.xsl', postgres_full_xml],
     output: 'postgres.html',
     depfile: 'postgres.html.d',
-    depends: doc_generated,
-    command: [xsltproc, '--path', '@OUTDIR@', '-o', '@OUTPUT@', xsltproc_flags, '@INPUT@'],
+    command: [xsltproc, '-o', '@OUTPUT@', xsltproc_html_flags, '@INPUT@'],
     build_by_default: false,
   )
   alldocs += postgres_html
@@ -162,7 +152,6 @@ if xsltproc_bin.found()
     postgres_txt = custom_target('postgres.txt',
       input: [postgres_html],
       output: 'postgres.txt',
-      depends: doc_generated,
       command: [pandoc, '-t', 'plain', '-o', '@OUTPUT@', '@INPUT@'],
       build_by_default: false,
     )
@@ -174,20 +163,22 @@ endif
 #
 # INSTALL in html, text
 #
-if xsltproc_bin.found()
+if docs_dep.found()
+  # Depend on postgres_full_xml, so validity errors are raised in one place,
+  # and so dependencies don't need to be re-specified.
   install_xml = custom_target('INSTALL.xml',
     input: ['standalone-profile.xsl', 'standalone-install.xml'],
     output: 'INSTALL.xml',
     depfile: 'INSTALL.xml.d',
-    depends: doc_generated + [postgres_full_xml],
-    command: [xsltproc, '--path', '@OUTDIR@', '-o', '@OUTPUT@', xsltproc_flags, '--xinclude', '@INPUT@'],
+    depends: postgres_full_xml,
+    command: [xsltproc, '-o', '@OUTPUT@', xsltproc_flags, '--xinclude', '@INPUT@'],
     build_by_default: false,
   )
   install_html = custom_target('INSTALL.html',
     input: ['stylesheet-text.xsl', install_xml],
     output: 'INSTALL.html',
     depfile: 'INSTALL.html.d',
-    command: [xsltproc, '--path', '@OUTDIR@', '-o', '@OUTPUT@', xsltproc_flags, '@INPUT@'],
+    command: [xsltproc, '-o', '@OUTPUT@', xsltproc_html_flags, '@INPUT@'],
     build_by_default: false,
   )
   alldocs += install_html
@@ -209,14 +200,13 @@ endif
 #
 # Man pages
 #
-if xsltproc_bin.found()
+if docs_dep.found()
   # FIXME: implement / consider sqlmansectnum logic
   man = custom_target('man',
     input: ['stylesheet-man.xsl', postgres_full_xml],
     output: ['man1', 'man3', 'man7'],
     depfile: 'man.d',
-    depends: doc_generated,
-    command: [xsltproc, '--path', '@OUTDIR@', '-o', '@OUTDIR@/', xsltproc_flags, '@INPUT@'],
+    command: [xsltproc, '-o', '@OUTDIR@/', xsltproc_html_flags, '@INPUT@'],
     build_by_default: false,
   )
   alldocs += man
@@ -239,8 +229,10 @@ endif
 #
 # Full documentation as PDF
 #
-if fop.found() and xsltproc_bin.found()
-  xsltproc_fo_flags = xsltproc_flags + ['--stringparam', 'img.src.path', meson.current_source_dir() + '/']
+if docs_pdf_dep.found()
+  xsltproc_fo_flags = xsltproc_flags + [
+    '--stringparam', 'img.src.path', meson.current_source_dir() + '/'
+  ]
 
   foreach format, detail: {'A4': 'A4', 'US': 'USletter'}
     postgres_x_fo_f = 'postgres-@0@.fo'.format(format)
@@ -250,9 +242,8 @@ if fop.found() and xsltproc_bin.found()
     postgres_x_fo = custom_target(postgres_x_fo_f,
       input: ['stylesheet-fo.xsl', postgres_full_xml],
       output: postgres_x_fo_f,
-      depends: doc_generated,
       depfile: postgres_x_fo_dep,
-      command: [xsltproc, '--path', '@OUTDIR@/', xsltproc_fo_flags,
+      command: [xsltproc, xsltproc_fo_flags,
                 '--stringparam', 'paper.type', detail,
                 '-o', '@OUTPUT@', '@INPUT@'],
       build_by_default: false,
@@ -296,7 +287,7 @@ db2x_xsltproc = find_program('db2x_xsltproc', native: true, required: false)
 db2x_texixml = find_program('db2x_texixml', native: true, required: false)
 makeinfo = find_program('makeinfo', native: true, required: false)
 
-if db2x_texixml.found() and db2x_xsltproc.found() and makeinfo.found()
+if xsltproc_bin.found() and db2x_texixml.found() and db2x_xsltproc.found() and makeinfo.found()
   postgres_texixml = custom_target('postgres.texixml',
     output: 'postgres.texixml',
     command: [db2x_xsltproc, '-s', 'texi',
@@ -320,15 +311,11 @@ if db2x_texixml.found() and db2x_xsltproc.found() and makeinfo.found()
 endif
 
 
-if docs.length() == 0
-  run_target('docs', command: [missing, 'xsltproc'])
-else
+if docs_dep.found()
   alias_target('docs', docs)
   alias_target('install-docs', installdocs)
 endif
 
-if alldocs.length() == 0
-  run_target('alldocs', command: [missing, 'xsltproc'])
-else
+if alldocs.length() != 0
   alias_target('alldocs', alldocs)
 endif
