@@ -7639,12 +7639,6 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 	conForm = (Form_pg_constraint) GETSTRUCT(conTup);
 
-	if (conForm->coninhcount > 0)
-		ereport(ERROR,
-				errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				errmsg("cannot drop inherited constraint \"%s\" of relation \"%s\"",
-					   NameStr(conForm->conname), RelationGetRelationName(rel)));
-
 	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
 							false, NULL, lockmode);
 
@@ -12409,6 +12403,27 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	con = (Form_pg_constraint) GETSTRUCT(constraintTup);
 	constrName = NameStr(con->conname);
 
+	/*
+	 * If the constraint is marked conislocal and is also inherited, then we
+	 * just set conislocal false and we're done.  The constraint doesn't go
+	 * away, and we don't modify any children.
+	 */
+	if (con->conislocal && con->coninhcount > 0)
+	{
+		HeapTuple	copytup;
+
+		/* make a copy we can scribble on */
+		copytup = heap_copytuple(constraintTup);
+		con = (Form_pg_constraint) GETSTRUCT(copytup);
+		con->conislocal = false;
+		CatalogTupleUpdate(conrel, &copytup->t_self, copytup);
+
+		table_close(conrel, RowExclusiveLock);
+
+		ObjectAddressSet(conobj, ConstraintRelationId, con->oid);
+		return conobj;
+	}
+
 	/* Don't drop inherited constraints */
 	if (con->coninhcount > 0 && !recursing)
 		ereport(ERROR,
@@ -12482,9 +12497,9 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	performDeletion(&conobj, behavior, 0);
 
 	/*
-	 * If this was a CHECK (col IS NOT NULL) or the primary key, the
-	 * constrained columns must have had pg_attribute.attnotnull set.  See if
-	 * we need to reset it, and do so.
+	 * If this was a NOT NULL or the primary key, the constrained columns must
+	 * have had pg_attribute.attnotnull set.  See if we need to reset it, and
+	 * do so.
 	 */
 	if (unconstrained_cols)
 	{
