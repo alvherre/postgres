@@ -7523,7 +7523,6 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 {
 	HeapTuple	tuple;
 	HeapTuple	conTup;
-	Form_pg_constraint conForm;
 	Form_pg_attribute attTup;
 	AttrNumber	attnum;
 	Relation	attr_rel;
@@ -7636,8 +7635,6 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 		/* this shouldn't happen */
 		elog(ERROR, "no NOT NULL constraint found to drop");
 	}
-
-	conForm = (Form_pg_constraint) GETSTRUCT(conTup);
 
 	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
 							false, NULL, lockmode);
