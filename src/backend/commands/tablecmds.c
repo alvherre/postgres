@@ -15868,7 +15868,8 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 		HeapTuple	child_tuple;
 		bool		found = false;
 
-		if (parent_con->contype != CONSTRAINT_CHECK)
+		if (parent_con->contype != CONSTRAINT_CHECK &&
+			parent_con->contype != CONSTRAINT_NOTNULL)
 			continue;
 
 		/* if the parent's constraint is marked NO INHERIT, it's not inherited */
@@ -15888,14 +15889,30 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			Form_pg_constraint child_con = (Form_pg_constraint) GETSTRUCT(child_tuple);
 			HeapTuple	child_copy;
 
-			if (child_con->contype != CONSTRAINT_CHECK)
+			if (child_con->contype != parent_con->contype)
 				continue;
 
-			if (strcmp(NameStr(parent_con->conname),
+			/*
+			 * CHECK constraint are matched by name, NOT NULL ones by
+			 * attribute number
+			 */
+			if (child_con->contype == CONSTRAINT_CHECK &&
+				strcmp(NameStr(parent_con->conname),
 					   NameStr(child_con->conname)) != 0)
 				continue;
+			else if (child_con->contype == CONSTRAINT_NOTNULL)
+			{
+				AttrNumber	parent_attno = extractNotNullColumn(parent_tuple);
+				AttrNumber	child_attno = extractNotNullColumn(child_tuple);
 
-			if (!constraints_equivalent(parent_tuple, child_tuple, tuple_desc))
+				if (strcmp(get_attname(parent_relid, parent_attno, false),
+						   get_attname(RelationGetRelid(child_rel), child_attno,
+									   false)) != 0)
+					continue;
+			}
+
+			if (child_con->contype == CONSTRAINT_CHECK &&
+				!constraints_equivalent(parent_tuple, child_tuple, tuple_desc))
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
 						 errmsg("child table \"%s\" has different definition for check constraint \"%s\"",
@@ -16103,6 +16120,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	HeapTuple	attributeTuple,
 				constraintTuple;
 	List	   *connames;
+	List	   *nncolumns;
 	bool		found;
 	bool		child_is_partition = false;
 
@@ -16173,6 +16191,8 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	 * this, we first need a list of the names of the parent's check
 	 * constraints.  (We cheat a bit by only checking for name matches,
 	 * assuming that the expressions will match.)
+	 *
+	 * For NOT NULL columns, we store column numbers to match.
 	 */
 	catalogRelation = table_open(ConstraintRelationId, RowExclusiveLock);
 	ScanKeyInit(&key[0],
@@ -16183,6 +16203,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 							  true, NULL, 1, key);
 
 	connames = NIL;
+	nncolumns = NIL;
 
 	while (HeapTupleIsValid(constraintTuple = systable_getnext(scan)))
 	{
@@ -16190,6 +16211,8 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 
 		if (con->contype == CONSTRAINT_CHECK)
 			connames = lappend(connames, pstrdup(NameStr(con->conname)));
+		if (con->contype == CONSTRAINT_NOTNULL)
+			nncolumns = lappend_int(nncolumns, extractNotNullColumn(constraintTuple));
 	}
 
 	systable_endscan(scan);
@@ -16205,22 +16228,40 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	while (HeapTupleIsValid(constraintTuple = systable_getnext(scan)))
 	{
 		Form_pg_constraint con = (Form_pg_constraint) GETSTRUCT(constraintTuple);
-		bool		match;
+		bool		match = false;
 		ListCell   *lc;
 
-		if (con->contype != CONSTRAINT_CHECK &&
-			con->contype != CONSTRAINT_NOTNULL)
-			continue;
-
-		match = false;
-		foreach(lc, connames)
+		/*
+		 * Match CHECK constraints by name, NOT NULL constraints by column
+		 * number, and ignore all others.
+		 */
+		if (con->contype == CONSTRAINT_CHECK)
 		{
-			if (strcmp(NameStr(con->conname), (char *) lfirst(lc)) == 0)
+			foreach(lc, connames)
 			{
-				match = true;
-				break;
+				if (con->contype == CONSTRAINT_CHECK &&
+					strcmp(NameStr(con->conname), (char *) lfirst(lc)) == 0)
+				{
+					match = true;
+					break;
+				}
 			}
 		}
+		else if (con->contype == CONSTRAINT_NOTNULL)
+		{
+			AttrNumber	child_attno = extractNotNullColumn(constraintTuple);
+
+			foreach(lc, nncolumns)
+			{
+				if (lfirst_int(lc) == child_attno)
+				{
+					match = true;
+					break;
+				}
+			}
+		}
+		else
+			continue;
 
 		if (match)
 		{
