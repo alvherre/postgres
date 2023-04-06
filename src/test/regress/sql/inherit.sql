@@ -743,19 +743,19 @@ drop table pp1 cascade;
 -- test "dropping" a not null constraint that's also inherited
 create table inh_parent (a int not null);
 create table inh_child (a int not null) inherits (inh_parent);
-select conrelid::regclass, conname, contype, conkey, conkey,
+select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and
  conrelid in ('inh_child'::regclass, 'inh_parent'::regclass);
 alter table inh_child alter a drop not null;
-select conrelid::regclass, conname, contype, conkey, conkey,
+select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and
  conrelid in ('inh_child'::regclass, 'inh_parent'::regclass);
 alter table inh_parent alter a drop not null;
-select conrelid::regclass, conname, contype, conkey, conkey,
+select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and

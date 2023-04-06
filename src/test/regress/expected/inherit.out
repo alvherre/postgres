@@ -1993,37 +1993,37 @@ drop cascades to table cc2
 create table inh_parent (a int not null);
 create table inh_child (a int not null) inherits (inh_parent);
 NOTICE:  merging column "a" with inherited definition
-select conrelid::regclass, conname, contype, conkey, conkey,
+select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and
  conrelid in ('inh_child'::regclass, 'inh_parent'::regclass);
-  conrelid  |        conname        | contype | conkey | conkey | attname | coninhcount | conislocal | connoinherit 
-------------+-----------------------+---------+--------+--------+---------+-------------+------------+--------------
- inh_parent | inh_parent_a_not_null | n       | {1}    | {1}    | a       |           0 | t          | f
- inh_child  | inh_child_a_not_null  | n       | {1}    | {1}    | a       |           1 | t          | f
+  conrelid  |        conname        | contype | conkey | attname | coninhcount | conislocal | connoinherit 
+------------+-----------------------+---------+--------+---------+-------------+------------+--------------
+ inh_parent | inh_parent_a_not_null | n       | {1}    | a       |           0 | t          | f
+ inh_child  | inh_child_a_not_null  | n       | {1}    | a       |           1 | t          | f
 (2 rows)
 
 alter table inh_child alter a drop not null;
-select conrelid::regclass, conname, contype, conkey, conkey,
+select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and
  conrelid in ('inh_child'::regclass, 'inh_parent'::regclass);
-  conrelid  |        conname        | contype | conkey | conkey | attname | coninhcount | conislocal | connoinherit 
-------------+-----------------------+---------+--------+--------+---------+-------------+------------+--------------
- inh_parent | inh_parent_a_not_null | n       | {1}    | {1}    | a       |           0 | t          | f
- inh_child  | inh_child_a_not_null  | n       | {1}    | {1}    | a       |           1 | f          | f
+  conrelid  |        conname        | contype | conkey | attname | coninhcount | conislocal | connoinherit 
+------------+-----------------------+---------+--------+---------+-------------+------------+--------------
+ inh_parent | inh_parent_a_not_null | n       | {1}    | a       |           0 | t          | f
+ inh_child  | inh_child_a_not_null  | n       | {1}    | a       |           1 | f          | f
 (2 rows)
 
 alter table inh_parent alter a drop not null;
-select conrelid::regclass, conname, contype, conkey, conkey,
+select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and
  conrelid in ('inh_child'::regclass, 'inh_parent'::regclass);
- conrelid | conname | contype | conkey | conkey | attname | coninhcount | conislocal | connoinherit 
-----------+---------+---------+--------+--------+---------+-------------+------------+--------------
+ conrelid | conname | contype | conkey | attname | coninhcount | conislocal | connoinherit 
+----------+---------+---------+--------+---------+-------------+------------+--------------
 (0 rows)
 
 drop table inh_parent, inh_child;
