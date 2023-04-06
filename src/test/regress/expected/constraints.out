@@ -288,6 +288,28 @@ ERROR:  new row for relation "atacc1" violates check constraint "atacc1_test2_ch
 DETAIL:  Failing row contains (null, 3).
 DROP TABLE ATACC1 CASCADE;
 NOTICE:  drop cascades to table atacc2
+-- NOT NULL NO INHERIT
+CREATE TABLE ATACC1 (a int, not null a no inherit);
+CREATE TABLE ATACC2 () INHERITS (ATACC1);
+\d ATACC2
+               Table "public.atacc2"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+Inherits: atacc1
+
+DROP TABLE ATACC1, ATACC2;
+CREATE TABLE ATACC1 (a int);
+ALTER TABLE ATACC1 ADD NOT NULL a NO INHERIT;
+CREATE TABLE ATACC2 () INHERITS (ATACC1);
+\d ATACC2
+               Table "public.atacc2"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ a      | integer |           |          | 
+Inherits: atacc1
+
+DROP TABLE ATACC1, ATACC2;
 --
 -- Check constraints on INSERT INTO
 --

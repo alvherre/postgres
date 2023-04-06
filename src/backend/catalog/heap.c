@@ -2848,7 +2848,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		StoreRelNotNull(rel, conname,
 						attnum, true, is_local,
-						inhcount, false);
+						inhcount, constr->is_no_inherit);
 
 		nncols = lappend_int(nncols, attnum);
 	}
@@ -2920,7 +2920,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		StoreRelNotNull(rel, conname, cooked->attnum, true,
 						false, inhcount,
-						false);
+						cooked->is_no_inherit);
 
 		nncols = lappend_int(nncols, cooked->attnum);
 

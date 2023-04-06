@@ -2481,6 +2481,8 @@ pg_get_constraintdef_worker(Oid constraintId, bool fullCommand,
 				appendStringInfo(&buf, "NOT NULL %s",
 								 quote_identifier(get_attname(conForm->conrelid,
 															  attnum, false)));
+				if (((Form_pg_constraint) GETSTRUCT(tup))->connoinherit)
+					appendStringInfoString(&buf, " NO INHERIT");
 				break;
 			}
 
