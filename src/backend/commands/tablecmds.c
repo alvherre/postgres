@@ -7796,6 +7796,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 			continue;
 
 		copytup = heap_copytuple(tuple);
+		conForm = (Form_pg_constraint) GETSTRUCT(copytup);
 
 		/*
 		 * If we find an appropriate constraint, we're almost done, but just
@@ -7878,6 +7879,10 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	ccon = linitial(cooked);
 	ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 
+	/*
+	 * Mark pg_attribute.attnotnull for the column. Tell that function not to
+	 * recurse, because we're going to do it here.
+	 */
 	set_attnotnull(wqueue, rel, attnum, false, lockmode);
 
 	/*
