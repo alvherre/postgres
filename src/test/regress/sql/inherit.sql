@@ -866,25 +866,26 @@ create table inh_p2(f1 int not null);
 create table inh_p3(f2 int);
 create table inh_p4(f1 int not null, f3 text not null);
 
-create table c() inherits(inh_p1, inh_p2, inh_p3, inh_p4);
+create table inh_multiparent() inherits(inh_p1, inh_p2, inh_p3, inh_p4);
 
 -- constraint on f1 should have three parents
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+select conrelid::regclass, contype, conname,
+  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+  coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_p1'::regclass, 'inh_p2'::regclass, 'inh_p3'::regclass, 'inh_p4'::regclass, 'c'::regclass)
- order by 2, 1;
+ conrelid::regclass in ('inh_p1', 'inh_p2', 'inh_p3', 'inh_p4',
+	'inh_multiparent')
+ order by 1, 2;
 
-create table d(a int not null, f1 int) inherits(inh_p3, c);
-
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+create table inh_multiparent2 (a int not null, f1 int) inherits(inh_p3, inh_multiparent);
+select conrelid::regclass, contype, conname,
+  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+  coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_p1'::regclass, 'inh_p2'::regclass, 'inh_p3'::regclass, 'inh_p4'::regclass, 'c'::regclass, 'd'::regclass)
- order by 2, 1;
+ conrelid::regclass in ('inh_p3', 'inh_multiparent', 'inh_multiparent2')
+ order by 1, 2;
 
-drop table inh_p1 cascade;
-drop table inh_p2;
-drop table inh_p3;
-drop table inh_p4;
+drop table inh_p1, inh_p2, inh_p3, inh_p4 cascade;
 
 --
 -- Check use of temporary tables with inheritance trees

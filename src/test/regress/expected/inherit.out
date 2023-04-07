@@ -2208,41 +2208,49 @@ create table inh_p1(f1 int not null);
 create table inh_p2(f1 int not null);
 create table inh_p3(f2 int);
 create table inh_p4(f1 int not null, f3 text not null);
-create table c() inherits(inh_p1, inh_p2, inh_p3, inh_p4);
+create table inh_multiparent() inherits(inh_p1, inh_p2, inh_p3, inh_p4);
 NOTICE:  merging multiple inherited definitions of column "f1"
 NOTICE:  merging multiple inherited definitions of column "f1"
-ERROR:  relation "c" already exists
 -- constraint on f1 should have three parents
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+select conrelid::regclass, contype, conname,
+  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+  coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_p1'::regclass, 'inh_p2'::regclass, 'inh_p3'::regclass, 'inh_p4'::regclass, 'c'::regclass)
- order by 2, 1;
- conrelid |      conname       | contype | coninhcount | conislocal 
-----------+--------------------+---------+-------------+------------
- inh_p1   | inh_p1_f1_not_null | n       |           0 | t
- inh_p2   | inh_p2_f1_not_null | n       |           0 | t
- inh_p4   | inh_p4_f1_not_null | n       |           0 | t
- inh_p4   | inh_p4_f3_not_null | n       |           0 | t
-(4 rows)
+ conrelid::regclass in ('inh_p1', 'inh_p2', 'inh_p3', 'inh_p4',
+	'inh_multiparent')
+ order by 1, 2;
+    conrelid     | contype |      conname       | attname | coninhcount | conislocal 
+-----------------+---------+--------------------+---------+-------------+------------
+ inh_p1          | n       | inh_p1_f1_not_null | f1      |           0 | t
+ inh_p2          | n       | inh_p2_f1_not_null | f1      |           0 | t
+ inh_p4          | n       | inh_p4_f1_not_null | f1      |           0 | t
+ inh_p4          | n       | inh_p4_f3_not_null | f3      |           0 | t
+ inh_multiparent | n       | inh_p1_f1_not_null | f1      |           3 | f
+ inh_multiparent | n       | inh_p4_f3_not_null | f3      |           1 | f
+(6 rows)
 
-create table d(a int not null, f1 int) inherits(inh_p3, c);
-ERROR:  relation "d" already exists
-select conrelid::regclass, conname, contype, coninhcount, conislocal
+create table inh_multiparent2 (a int not null, f1 int) inherits(inh_p3, inh_multiparent);
+NOTICE:  merging multiple inherited definitions of column "f2"
+NOTICE:  merging column "f1" with inherited definition
+select conrelid::regclass, contype, conname,
+  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
+  coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_p1'::regclass, 'inh_p2'::regclass, 'inh_p3'::regclass, 'inh_p4'::regclass, 'c'::regclass, 'd'::regclass)
- order by 2, 1;
- conrelid |      conname       | contype | coninhcount | conislocal 
-----------+--------------------+---------+-------------+------------
- inh_p1   | inh_p1_f1_not_null | n       |           0 | t
- inh_p2   | inh_p2_f1_not_null | n       |           0 | t
- inh_p4   | inh_p4_f1_not_null | n       |           0 | t
- inh_p4   | inh_p4_f3_not_null | n       |           0 | t
-(4 rows)
+ conrelid::regclass in ('inh_p3', 'inh_multiparent', 'inh_multiparent2')
+ order by 1, 2;
+     conrelid     | contype |           conname           | attname | coninhcount | conislocal 
+------------------+---------+-----------------------------+---------+-------------+------------
+ inh_multiparent  | n       | inh_p1_f1_not_null          | f1      |           1 | f
+ inh_multiparent  | n       | inh_p4_f3_not_null          | f3      |           1 | f
+ inh_multiparent2 | n       | inh_multiparent2_a_not_null | a       |           0 | t
+ inh_multiparent2 | n       | inh_p1_f1_not_null          | f1      |           1 | f
+ inh_multiparent2 | n       | inh_p4_f3_not_null          | f3      |           1 | f
+(5 rows)
 
-drop table inh_p1 cascade;
-drop table inh_p2;
-drop table inh_p3;
-drop table inh_p4;
+drop table inh_p1, inh_p2, inh_p3, inh_p4 cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table inh_multiparent
+drop cascades to table inh_multiparent2
 --
 -- Check use of temporary tables with inheritance trees
 --
