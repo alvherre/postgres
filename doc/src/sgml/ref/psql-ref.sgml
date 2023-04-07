@@ -3551,12 +3551,16 @@ testdb=&gt; <userinput>\setenv LESS -imx4F</userinput>
 
 
       <varlistentry id="app-psql-meta-command-watch">
-        <term><literal>\watch [ <replaceable class="parameter">seconds</replaceable> ]</literal></term>
+        <term><literal>\watch [ i[nterval]=<replaceable class="parameter">seconds</replaceable> ] [ c[ount]=<replaceable class="parameter">times</replaceable> ] [ <replaceable class="parameter">seconds</replaceable> ]</literal></term>
         <listitem>
         <para>
         Repeatedly execute the current query buffer (as <literal>\g</literal> does)
-        until interrupted or the query fails.  Wait the specified number of
-        seconds (default 2) between executions.  Each query result is
+        until interrupted, or the query fails, or the execution count limit
+        (if given) is reached.  Wait the specified number of
+        seconds (default 2) between executions.  For backwards compatibility,
+        <replaceable class="parameter">seconds</replaceable> can be specified
+        with or without an <literal>interval=</literal> prefix.
+        Each query result is
         displayed with a header that includes the <literal>\pset title</literal>
         string (if any), the time as of query start, and the delay interval.
         </para>
@@ -4273,8 +4277,12 @@ bar
         <para>
          <literal>true</literal> if the last shell command
          failed, <literal>false</literal> if it succeeded.
-         This applies to shell commands invoked via the <literal>\!</literal>
-         meta-command or backquote (<literal>`</literal>) expansion.
+         This applies to shell commands invoked via the <literal>\!</literal>,
+         <literal>\g</literal>, <literal>\o</literal>, <literal>\w</literal>,
+         and <literal>\copy</literal> meta-commands, as well as backquote
+         (<literal>`</literal>) expansion.  Note that
+         for <literal>\o</literal>, this variable is updated when the output
+         pipe is closed by the next <literal>\o</literal> command.
          See also <varname>SHELL_EXIT_CODE</varname>.
         </para>
        </listitem>
@@ -4288,8 +4296,12 @@ bar
          0&ndash;127 represent program exit codes, 128&ndash;255
          indicate termination by a signal, and -1 indicates failure
          to launch a program or to collect its exit status.
-         This applies to shell commands invoked via the <literal>\!</literal>
-         meta-command or backquote (<literal>`</literal>) expansion.
+         This applies to shell commands invoked via the <literal>\!</literal>,
+         <literal>\g</literal>, <literal>\o</literal>, <literal>\w</literal>,
+         and <literal>\copy</literal> meta-commands, as well as backquote
+         (<literal>`</literal>) expansion.  Note that
+         for <literal>\o</literal>, this variable is updated when the output
+         pipe is closed by the next <literal>\o</literal> command.
          See also <varname>SHELL_ERROR</varname>.
         </para>
        </listitem>
