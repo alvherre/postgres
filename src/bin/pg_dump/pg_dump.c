@@ -8471,12 +8471,16 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 						 "), E',\n    ') AS attfdwoptions,\n");
 
 	/*
-	 * Write out NOT NULL, except if it's marked connoinherit.
+	 * Write out NOT NULL.  In 16 and up we have to read pg_constraint, and we
+	 * only print it for constraints that aren't connoinherit.  A NULL result
+	 * means there's no contype='n' row for the column, so we mustn't print
+	 * anything then either.  We also track conislocal so that we can handle
+	 * the case of partitioned tables and binary upgrade especially.
 	 */
 	if (fout->remoteVersion >= 160000)
 		appendPQExpBufferStr(q,
-							 "co.conname IS NOT NULL AS attnotnull,\n"
-							 "co.conislocal AS local_notnull,\n");
+							 "co.connoinherit IS NOT NULL AS attnotnull,\n"
+							 "coalesce(co.conislocal, false) AS local_notnull,\n");
 	else
 		appendPQExpBufferStr(q,
 							 "a.attnotnull, false AS local_notnull,\n");
@@ -8517,12 +8521,17 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 					  "LEFT JOIN pg_catalog.pg_type t "
 					  "ON (a.atttypid = t.oid)\n",
 					  tbloids->data);
+
+	/* in 16, need pg_constraint for NOT NULLs */
 	if (fout->remoteVersion >= 160000)
 		appendPQExpBufferStr(q,
-							 " LEFT JOIN pg_catalog.pg_constraint co ON (a.attrelid = co.conrelid\n"
-							 "   AND co.contype = 'n' AND co.conkey = array[a.attnum])\n"
-							 "WHERE a.attnum > 0::pg_catalog.int2\n"
-							 "ORDER BY a.attrelid, a.attnum");
+							 " LEFT JOIN pg_catalog.pg_constraint co ON "
+							 "(a.attrelid = co.conrelid\n"
+							 "   AND co.contype = 'n' AND "
+							 "co.conkey = array[a.attnum])\n");
+	appendPQExpBufferStr(q,
+						 "WHERE a.attnum > 0::pg_catalog.int2\n"
+						 "ORDER BY a.attrelid, a.attnum");
 
 	res = ExecuteSqlQuery(fout, q->data, PGRES_TUPLES_OK);
 
@@ -8936,7 +8945,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 		/*
 		 * Only constraints marked connoinherit need to be handled here;
-		 * most of them are instead handled when columns are defined.
+		 * the normal constraints are instead handled by writing NOT NULL
+		 * when each column is defined.
 		 */
 		resetPQExpBuffer(q);
 		appendPQExpBuffer(q,
@@ -8946,7 +8956,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 						  "FROM unnest('%s'::pg_catalog.oid[]) AS src(tbloid)\n"
 						  "JOIN pg_catalog.pg_constraint co ON (src.tbloid = co.conrelid)\n"
 						  "JOIN pg_catalog.pg_class c ON (conrelid = c.oid)\n"
-						  "WHERE contype = 'n' AND (connoinherit OR relispartition)\n"
+						  "WHERE contype = 'n' AND connoinherit\n"
 						  "ORDER BY co.conrelid, co.conname",
 						  tbloids->data);
 
@@ -16089,7 +16099,8 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			 * we have to mark it separately.
 			 */
 			if (!shouldPrintColumn(dopt, tbinfo, j) &&
-				tbinfo->notnull[j] && tbinfo->localNotNull[j])
+				tbinfo->notnull[j] && tbinfo->localNotNull[j] &&
+				tbinfo->ispartition)
 				appendPQExpBuffer(q,
 								  "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET NOT NULL;\n",
 								  foreign, qualrelname,
