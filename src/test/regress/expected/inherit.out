@@ -2173,7 +2173,7 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
  inh_parent | inh_parent_f1_not_null | n       |           0 | t
  c1         | inh_parent_f1_not_null | n       |           1 | f
  c2         | inh_parent_f1_not_null | n       |           1 | f
- d1         | inh_parent_f1_not_null | n       |           1 | f
+ d1         | inh_parent_f1_not_null | n       |           2 | f
 (4 rows)
 
 drop table inh_parent cascade;
@@ -2240,7 +2240,7 @@ select conrelid::regclass, contype, conname,
  order by 1, 2;
      conrelid     | contype |           conname           | attname | coninhcount | conislocal 
 ------------------+---------+-----------------------------+---------+-------------+------------
- inh_multiparent  | n       | inh_p1_f1_not_null          | f1      |           1 | f
+ inh_multiparent  | n       | inh_p1_f1_not_null          | f1      |           3 | f
  inh_multiparent  | n       | inh_p4_f3_not_null          | f3      |           1 | f
  inh_multiparent2 | n       | inh_multiparent2_a_not_null | a       |           0 | t
  inh_multiparent2 | n       | inh_p1_f1_not_null          | f1      |           1 | f

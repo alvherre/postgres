@@ -2167,7 +2167,7 @@ StoreRelCheck(Relation rel, const char *ccname, Node *expr,
  */
 static Oid
 StoreRelNotNull(Relation rel, const char *nnname, AttrNumber attnum,
-				bool is_validated, bool is_local, bool inhcount,
+				bool is_validated, bool is_local, int inhcount,
 				bool is_no_inherit)
 {
 	int16		attNos;
@@ -2777,7 +2777,7 @@ list_cookedconstr_attnum_cmp(const ListCell *p1, const ListCell *p2)
  * in a parent is disregarded in case of a conflict.
  *
  * Returns a list of AttrNumber for columns that need to have the attnotnull
- * column set.
+ * flag set.
  */
 List *
 AddRelationNotNullConstraints(Relation rel, List *constraints,
@@ -2786,7 +2786,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	List	   *nnnames = NIL;
 	List	   *givennames = NIL;
 	List	   *nncols = NIL;
-	AttrNumber	prev_attnum;
 	ListCell   *lc;
 
 	/*
@@ -2857,42 +2856,45 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * If any column remains in the additional_notnulls list, we must create a
 	 * NOT NULL constraint marked not-local.  Because multiple parents could
 	 * specify a NOT NULL for the same column, we must count how many there
-	 * are and set inhcount accordingly.  Note that unlike the loop above, we
-	 * cannot delete elements in the inner foreach here!  So we keep track of
-	 * the element we just saw and skip any that are identical.  This requires
-	 * the list to be sorted!  Most of the time, this list will be empty.
+	 * are and set inhcount accordingly, deleting elements we've already
+	 * processed.
+	 *
+	 * We don't use foreach() here because we have two nested loops over the
+	 * cooked constraint list, with possible element deletions in the inner one.
+	 * If we used foreach_delete_current() it could only fix up the state of one
+	 * of the loops, so it seems cleaner to use looping over list indexes for
+	 * both loops.  Note that any deletion will happen beyond where the outer
+	 * loop is, so its index never needs adjustment.
 	 */
 	list_sort(old_notnulls, list_cookedconstr_attnum_cmp);
-	prev_attnum = InvalidAttrNumber;
-	foreach(lc, old_notnulls)
+	for (int outerpos = 0; outerpos < list_length(old_notnulls); outerpos++)
 	{
-		CookedConstraint *cooked = (CookedConstraint *) lfirst(lc);
+		CookedConstraint *cooked;
 		char	   *conname = NULL;
 		int			inhcount = 1;
 		ListCell   *lc2;
 
-		if (cooked->attnum == prev_attnum)
-			continue;
+		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
 
 		/* We just preserve the first constraint name we come across, if any */
 		if (conname == NULL && cooked->name)
 			conname = cooked->name;
 
-		foreach(lc2, old_notnulls)
+		for (int restpos = outerpos + 1; restpos < list_length(old_notnulls);)
 		{
-			CookedConstraint *other = (CookedConstraint *) lfirst(lc2);
+			CookedConstraint *other;
 
-			if (lc2 == lc)
-				continue;
-
+			other = (CookedConstraint *) list_nth(old_notnulls, restpos);
 			if (other->attnum == cooked->attnum)
 			{
 				if (conname == NULL && other->name)
 					conname = other->name;
 
 				inhcount++;
-				/* can't delete element here; must skip later */
+				old_notnulls = list_delete_nth_cell(old_notnulls, restpos);
 			}
+			else
+				restpos++;
 		}
 
 		/* If we got a name, make sure it isn't one we've already used */
@@ -2923,8 +2925,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 						cooked->is_no_inherit);
 
 		nncols = lappend_int(nncols, cooked->attnum);
-
-		prev_attnum = cooked->attnum;
 	}
 
 	return nncols;
