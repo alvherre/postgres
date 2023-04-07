@@ -7847,7 +7847,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 		else
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("cannot add constraint to table with inheritance children"),
+					errmsg("cannot add constraint only to table with inheritance children"),
 					errhint("Do not specify the ONLY keyword."));
 	}
 
@@ -12544,8 +12544,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			 * Since the above deletion has been made visible, we can now
 			 * search for any remaining constraints on this column (or these
 			 * columns, in the case we're dropping a multicol primary key.)
-			 * Then, verify whether any further NOT NULL or primary key exist,
-			 * and reset attnotnull if none.
+			 * Then, verify whether any further NOT NULL or primary key
+			 * exists, and reset attnotnull if none.
 			 *
 			 * However, if this is a generated identity column, abort the
 			 * whole thing with a specific error message, because the
@@ -19893,9 +19893,9 @@ validatePartitionedIndex(Relation partedIdx, Relation partedTbl)
 }
 
 /*
- * When a primary key index on a partitioned table is to be attached an index
- * on a partition, the partition's columns should also be marked NOT NULL.
- * Ensure that is the case.
+ * When attaching an index as a partition of a partitioned index which is a
+ * primary key, verify that all the columns in the partition are marked NOT
+ * NULL.
  */
 static void
 verifyPartitionIndexNotNull(IndexInfo *iinfo, Relation partition)
@@ -19914,7 +19914,6 @@ verifyPartitionIndexNotNull(IndexInfo *iinfo, Relation partition)
 							  RelationGetRelationName(partition)));
 	}
 }
-
 
 /*
  * Return an OID list of constraints that reference the given relation

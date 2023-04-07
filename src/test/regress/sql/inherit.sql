@@ -845,7 +845,7 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
 drop table inh_parent cascade;
 
 -- test child table with inherited columns and
--- with explicitely specified not null constraints
+-- with explicitly specified not null constraints
 create table inh_parent_1(f1 int);
 create table inh_parent_2(f2 text);
 create table child(f1 int not null, f2 text not null) inherits(inh_parent_1, inh_parent_2);

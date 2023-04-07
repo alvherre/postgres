@@ -639,15 +639,12 @@ extractNotNullColumn(HeapTuple constrTup)
 	AttrNumber	colnum;
 	Datum		adatum;
 	ArrayType  *arr;
-	bool		isnull;
 
 	/* only tuples for CHECK constraints should be given */
 	Assert(conForm->contype == CONSTRAINT_NOTNULL);
 
-	adatum = SysCacheGetAttr(CONSTROID, constrTup,
-							 Anum_pg_constraint_conkey, &isnull);
-	if (isnull)
-		elog(ERROR, "null conkey for NOT NULL constraint %u", conForm->oid);
+	adatum = SysCacheGetAttrNotNull(CONSTROID, constrTup,
+									Anum_pg_constraint_conkey);
 	arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 	if (ARR_NDIM(arr) != 1 ||
 		ARR_HASNULL(arr) ||
