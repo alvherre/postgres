@@ -203,8 +203,7 @@ typedef struct AlteredTableInfo
 typedef struct NewConstraint
 {
 	char	   *name;			/* Constraint name, or NULL if none */
-	ConstrType	contype;		/* CHECK, NOTNULL, FOREIGN */
-	AttrNumber	attnum;			/* column number, if NOTNULL */
+	ConstrType	contype;		/* CHECK, FOREIGN */
 	Oid			refrelid;		/* PK rel, if FOREIGN */
 	Oid			refindid;		/* OID of PK's index, if FOREIGN */
 	Oid			conid;			/* OID of pg_constraint entry, if FOREIGN */
@@ -5973,7 +5972,6 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	TupleDesc	oldTupDesc;
 	TupleDesc	newTupDesc;
 	bool		needscan = false;
-	bool		verify_new_notnull = false;
 	List	   *notnull_attrs;
 	int			i;
 	ListCell   *l;
@@ -6034,12 +6032,6 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 			case CONSTR_FOREIGN:
 				/* Nothing to do here */
 				break;
-			case CONSTR_NOTNULL:
-				if (!NotNullImpliedByRelConstraints(oldrel,
-													TupleDescAttr(oldTupDesc,
-																  con->attnum - 1)))
-					verify_new_notnull = true;
-				break;
 			default:
 				elog(ERROR, "unrecognized constraint type: %d",
 					 (int) con->contype);
@@ -6062,7 +6054,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	}
 
 	notnull_attrs = NIL;
-	if (newrel || tab->verify_new_notnull || verify_new_notnull)
+	if (newrel || tab->verify_new_notnull)
 	{
 		/*
 		 * If we are rebuilding the tuples OR if we added any new but not
@@ -9364,12 +9356,11 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	{
 		CookedConstraint *ccon = (CookedConstraint *) lfirst(lcon);
 
-		if (!ccon->skip_validation)
+		if (!ccon->skip_validation && ccon->contype != CONSTR_NOTNULL)
 		{
 			NewConstraint *newcon;
 
 			newcon = (NewConstraint *) palloc0(sizeof(NewConstraint));
-			newcon->attnum = ccon->attnum;
 			newcon->name = ccon->name;
 			newcon->contype = ccon->contype;
 			newcon->qual = ccon->expr;

@@ -34,7 +34,7 @@ typedef struct RawColumnDefault
 
 typedef struct CookedConstraint
 {
-	ConstrType	contype;		/* CONSTR_DEFAULT or CONSTR_CHECK */
+	ConstrType	contype;		/* CONSTR_DEFAULT, CONSTR_CHECK, CONSTR_NOTNULL */
 	Oid			conoid;			/* constr OID if created, otherwise Invalid */
 	char	   *name;			/* name, or NULL if none */
 	AttrNumber	attnum;			/* which attr (only for NOTNULL, DEFAULT) */
