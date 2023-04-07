@@ -635,13 +635,12 @@ findNotNullConstraint(Relation rel, const char *colname)
 AttrNumber
 extractNotNullColumn(HeapTuple constrTup)
 {
-	Form_pg_constraint conForm = (Form_pg_constraint) GETSTRUCT(constrTup);
 	AttrNumber	colnum;
 	Datum		adatum;
 	ArrayType  *arr;
 
 	/* only tuples for CHECK constraints should be given */
-	Assert(conForm->contype == CONSTRAINT_NOTNULL);
+	Assert(((Form_pg_constraint) GETSTRUCT(constrTup))->contype == CONSTRAINT_NOTNULL);
 
 	adatum = SysCacheGetAttrNotNull(CONSTROID, constrTup,
 									Anum_pg_constraint_conkey);
