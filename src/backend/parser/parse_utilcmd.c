@@ -536,8 +536,8 @@ static void
 transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 {
 	bool		is_serial;
-	bool		saw_default;
 	bool		saw_nullable;
+	bool		saw_default;
 	bool		saw_identity;
 	bool		saw_generated;
 	bool		need_notnull = false;
