@@ -1703,6 +1703,7 @@ PGEventResultDestroy
 PGFInfoFunction
 PGFileType
 PGFunction
+PGIOAlignedBlock
 PGLZ_HistEntry
 PGLZ_Strategy
 PGLoadBalanceType
@@ -2053,6 +2054,7 @@ PgStat_Kind
 PgStat_KindInfo
 PgStat_LocalState
 PgStat_PendingDroppedStatsItem
+PgStat_PendingIO
 PgStat_PendingWalStats
 PgStat_SLRUStats
 PgStat_ShmemControl
@@ -2337,6 +2339,7 @@ ReplicaIdentityStmt
 ReplicationKind
 ReplicationSlot
 ReplicationSlotCtlData
+ReplicationSlotInvalidationCause
 ReplicationSlotOnDisk
 ReplicationSlotPersistency
 ReplicationSlotPersistentData

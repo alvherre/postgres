@@ -541,8 +541,11 @@ PrefetchSharedBuffer(SMgrRelation smgr_reln,
 		 * Try to initiate an asynchronous read.  This returns false in
 		 * recovery if the relation file doesn't exist.
 		 */
-		if (smgrprefetch(smgr_reln, forkNum, blockNum))
+		if ((io_direct_flags & IO_DIRECT_DATA) == 0 &&
+			smgrprefetch(smgr_reln, forkNum, blockNum))
+		{
 			result.initiated_io = true;
+		}
 #endif							/* USE_PREFETCH */
 	}
 	else
@@ -588,11 +591,11 @@ PrefetchSharedBuffer(SMgrRelation smgr_reln,
  * the kernel and therefore didn't really initiate I/O, and no way to know when
  * the I/O completes other than using synchronous ReadBuffer().
  *
- * 3.  Otherwise, the buffer wasn't already cached by PostgreSQL, and either
+ * 3.  Otherwise, the buffer wasn't already cached by PostgreSQL, and
  * USE_PREFETCH is not defined (this build doesn't support prefetching due to
- * lack of a kernel facility), or the underlying relation file wasn't found and
- * we are in recovery.  (If the relation file wasn't found and we are not in
- * recovery, an error is raised).
+ * lack of a kernel facility), direct I/O is enabled, or the underlying
+ * relation file wasn't found and we are in recovery.  (If the relation file
+ * wasn't found and we are not in recovery, an error is raised).
  */
 PrefetchBufferResult
 PrefetchBuffer(Relation reln, ForkNumber forkNum, BlockNumber blockNum)
@@ -1112,23 +1115,12 @@ ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
 		MemSet((char *) bufBlock, 0, BLCKSZ);
 	else
 	{
-		instr_time	io_start,
-					io_time;
-
-		if (track_io_timing)
-			INSTR_TIME_SET_CURRENT(io_start);
+		instr_time	io_start = pgstat_prepare_io_time();
 
 		smgrread(smgr, forkNum, blockNum, bufBlock);
 
-		if (track_io_timing)
-		{
-			INSTR_TIME_SET_CURRENT(io_time);
-			INSTR_TIME_SUBTRACT(io_time, io_start);
-			pgstat_count_buffer_read_time(INSTR_TIME_GET_MICROSEC(io_time));
-			INSTR_TIME_ADD(pgBufferUsage.blk_read_time, io_time);
-		}
-
-		pgstat_count_io_op(io_object, io_context, IOOP_READ);
+		pgstat_count_io_op_time(io_object, io_context,
+								IOOP_READ, io_start, 1);
 
 		/* check for garbage data */
 		if (!PageIsVerifiedExtended((Page) bufBlock, blockNum,
@@ -1837,6 +1829,7 @@ ExtendBufferedRelShared(ExtendBufferedWhat eb,
 {
 	BlockNumber first_block;
 	IOContext	io_context = IOContextForStrategy(strategy);
+	instr_time	io_start;
 
 	LimitAdditionalPins(&extend_by);
 
@@ -2044,6 +2037,8 @@ ExtendBufferedRelShared(ExtendBufferedWhat eb,
 		}
 	}
 
+	io_start = pgstat_prepare_io_time();
+
 	/*
 	 * Note: if smgzerorextend fails, we will end up with buffers that are
 	 * allocated but not marked BM_VALID.  The next relation extension will
@@ -2065,6 +2060,9 @@ ExtendBufferedRelShared(ExtendBufferedWhat eb,
 	 */
 	if (!(flags & EB_SKIP_EXTENSION_LOCK))
 		UnlockRelationForExtension(eb.rel, ExclusiveLock);
+
+	pgstat_count_io_op_time(IOOBJECT_RELATION, io_context, IOOP_EXTEND,
+							io_start, extend_by);
 
 	/* Set BM_VALID, terminate IO, and wake up any waiters */
 	for (int i = 0; i < extend_by; i++)
@@ -2089,8 +2087,6 @@ ExtendBufferedRelShared(ExtendBufferedWhat eb,
 	}
 
 	pgBufferUsage.shared_blks_written += extend_by;
-	pgstat_count_io_op_n(IOOBJECT_RELATION, io_context, IOOP_EXTEND,
-						 extend_by);
 
 	*extended_by = extend_by;
 
@@ -3344,8 +3340,7 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln, IOObject io_object,
 {
 	XLogRecPtr	recptr;
 	ErrorContextCallback errcallback;
-	instr_time	io_start,
-				io_time;
+	instr_time	io_start;
 	Block		bufBlock;
 	char	   *bufToWrite;
 	uint32		buf_state;
@@ -3420,10 +3415,7 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln, IOObject io_object,
 	 */
 	bufToWrite = PageSetChecksumCopy((Page) bufBlock, buf->tag.blockNum);
 
-	if (track_io_timing)
-		INSTR_TIME_SET_CURRENT(io_start);
-	else
-		INSTR_TIME_SET_ZERO(io_start);
+	io_start = pgstat_prepare_io_time();
 
 	/*
 	 * bufToWrite is either the shared buffer or a copy, as appropriate.
@@ -3452,15 +3444,8 @@ FlushBuffer(BufferDesc *buf, SMgrRelation reln, IOObject io_object,
 	 * When a strategy is not in use, the write can only be a "regular" write
 	 * of a dirty shared buffer (IOCONTEXT_NORMAL IOOP_WRITE).
 	 */
-	pgstat_count_io_op(IOOBJECT_RELATION, io_context, IOOP_WRITE);
-
-	if (track_io_timing)
-	{
-		INSTR_TIME_SET_CURRENT(io_time);
-		INSTR_TIME_SUBTRACT(io_time, io_start);
-		pgstat_count_buffer_write_time(INSTR_TIME_GET_MICROSEC(io_time));
-		INSTR_TIME_ADD(pgBufferUsage.blk_write_time, io_time);
-	}
+	pgstat_count_io_op_time(IOOBJECT_RELATION, io_context,
+							IOOP_WRITE, io_start, 1);
 
 	pgBufferUsage.shared_blks_written++;
 
@@ -4068,6 +4053,7 @@ FlushRelationBuffers(Relation rel)
 		for (i = 0; i < NLocBuffer; i++)
 		{
 			uint32		buf_state;
+			instr_time	io_start;
 
 			bufHdr = GetLocalBufferDescriptor(i);
 			if (BufTagMatchesRelFileLocator(&bufHdr->tag, &rel->rd_locator) &&
@@ -4087,16 +4073,22 @@ FlushRelationBuffers(Relation rel)
 
 				PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 
+				io_start = pgstat_prepare_io_time();
+
 				smgrwrite(RelationGetSmgr(rel),
 						  BufTagGetForkNum(&bufHdr->tag),
 						  bufHdr->tag.blockNum,
 						  localpage,
 						  false);
 
+				pgstat_count_io_op_time(IOOBJECT_TEMP_RELATION,
+										IOCONTEXT_NORMAL, IOOP_WRITE,
+										io_start, 1);
+
 				buf_state &= ~(BM_DIRTY | BM_JUST_DIRTIED);
 				pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
 
-				pgstat_count_io_op(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_WRITE);
+				pgBufferUsage.local_blks_written++;
 
 				/* Pop the error context stack */
 				error_context_stack = errcallback.previous;
@@ -4261,7 +4253,7 @@ RelationCopyStorageUsingBuffer(RelFileLocator srclocator,
 	bool		use_wal;
 	BlockNumber nblocks;
 	BlockNumber blkno;
-	PGAlignedBlock buf;
+	PGIOAlignedBlock buf;
 	BufferAccessStrategy bstrategy_src;
 	BufferAccessStrategy bstrategy_dst;
 
@@ -5199,7 +5191,7 @@ AbortBufferIO(Buffer buf)
 	}
 	else
 	{
-		Assert(!(buf_state & BM_DIRTY));
+		Assert(buf_state & BM_DIRTY);
 		UnlockBufHdr(buf_hdr, buf_state);
 
 		/* Issue notice if this is not the first failure... */
@@ -5450,6 +5442,9 @@ void
 ScheduleBufferTagForWriteback(WritebackContext *context, BufferTag *tag)
 {
 	PendingWriteback *pending;
+
+	if (io_direct_flags & IO_DIRECT_DATA)
+		return;
 
 	/*
 	 * Add buffer to the pending writeback array, unless writeback control is

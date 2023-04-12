@@ -92,8 +92,11 @@ PrefetchLocalBuffer(SMgrRelation smgr, ForkNumber forkNum,
 	{
 #ifdef USE_PREFETCH
 		/* Not in buffers, so initiate prefetch */
-		smgrprefetch(smgr, forkNum, blockNum);
-		result.initiated_io = true;
+		if ((io_direct_flags & IO_DIRECT_DATA) == 0 &&
+			smgrprefetch(smgr, forkNum, blockNum))
+		{
+			result.initiated_io = true;
+		}
 #endif							/* USE_PREFETCH */
 	}
 
@@ -231,6 +234,7 @@ GetLocalVictimBuffer(void)
 	 */
 	if (buf_state & BM_DIRTY)
 	{
+		instr_time	io_start;
 		SMgrRelation oreln;
 		Page		localpage = (char *) LocalBufHdrGetBlock(bufHdr);
 
@@ -239,6 +243,8 @@ GetLocalVictimBuffer(void)
 
 		PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
 
+		io_start = pgstat_prepare_io_time();
+
 		/* And write... */
 		smgrwrite(oreln,
 				  BufTagGetForkNum(&bufHdr->tag),
@@ -246,12 +252,14 @@ GetLocalVictimBuffer(void)
 				  localpage,
 				  false);
 
+		/* Temporary table I/O does not use Buffer Access Strategies */
+		pgstat_count_io_op_time(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL,
+								IOOP_WRITE, io_start, 1);
+
 		/* Mark not-dirty now in case we error out below */
 		buf_state &= ~BM_DIRTY;
 		pg_atomic_unlocked_write_u32(&bufHdr->state, buf_state);
 
-		/* Temporary table I/O does not use Buffer Access Strategies */
-		pgstat_count_io_op(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_WRITE);
 		pgBufferUsage.local_blks_written++;
 	}
 
@@ -309,6 +317,7 @@ ExtendBufferedRelLocal(ExtendBufferedWhat eb,
 					   uint32 *extended_by)
 {
 	BlockNumber first_block;
+	instr_time	io_start;
 
 	/* Initialize local buffers if first request in this session */
 	if (LocalBufHash == NULL)
@@ -399,8 +408,13 @@ ExtendBufferedRelLocal(ExtendBufferedWhat eb,
 		}
 	}
 
+	io_start = pgstat_prepare_io_time();
+
 	/* actually extend relation */
 	smgrzeroextend(eb.smgr, fork, first_block, extend_by, false);
+
+	pgstat_count_io_op_time(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_EXTEND,
+							io_start, extend_by);
 
 	for (int i = 0; i < extend_by; i++)
 	{
@@ -418,8 +432,6 @@ ExtendBufferedRelLocal(ExtendBufferedWhat eb,
 	*extended_by = extend_by;
 
 	pgBufferUsage.temp_blks_written += extend_by;
-	pgstat_count_io_op_n(IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_EXTEND,
-						 extend_by);
 
 	return first_block;
 }
@@ -735,8 +747,11 @@ GetLocalBufferStorage(void)
 		/* And don't overflow MaxAllocSize, either */
 		num_bufs = Min(num_bufs, MaxAllocSize / BLCKSZ);
 
-		cur_block = (char *) MemoryContextAlloc(LocalBufferContext,
-												num_bufs * BLCKSZ);
+		/* Buffers should be I/O aligned. */
+		cur_block = (char *)
+			TYPEALIGN(PG_IO_ALIGN_SIZE,
+					  MemoryContextAlloc(LocalBufferContext,
+										 num_bufs * BLCKSZ + PG_IO_ALIGN_SIZE));
 		next_buf_in_block = 0;
 		num_bufs_in_block = num_bufs;
 	}

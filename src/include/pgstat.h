@@ -235,7 +235,7 @@ typedef struct PgStat_TableXactStatus
  * ------------------------------------------------------------
  */
 
-#define PGSTAT_FILE_FORMAT_ID	0x01A5BCAB
+#define PGSTAT_FILE_FORMAT_ID	0x01A5BCAC
 
 typedef struct PgStat_ArchiverStats
 {
@@ -306,7 +306,8 @@ typedef enum IOOp
 
 typedef struct PgStat_BktypeIO
 {
-	PgStat_Counter data[IOOBJECT_NUM_TYPES][IOCONTEXT_NUM_TYPES][IOOP_NUM_TYPES];
+	PgStat_Counter counts[IOOBJECT_NUM_TYPES][IOCONTEXT_NUM_TYPES][IOOP_NUM_TYPES];
+	PgStat_Counter times[IOOBJECT_NUM_TYPES][IOCONTEXT_NUM_TYPES][IOOP_NUM_TYPES];
 } PgStat_BktypeIO;
 
 typedef struct PgStat_IO
@@ -331,6 +332,7 @@ typedef struct PgStat_StatDBEntry
 	PgStat_Counter conflict_tablespace;
 	PgStat_Counter conflict_lock;
 	PgStat_Counter conflict_snapshot;
+	PgStat_Counter conflict_logicalslot;
 	PgStat_Counter conflict_bufferpin;
 	PgStat_Counter conflict_startup_deadlock;
 	PgStat_Counter temp_files;
@@ -517,6 +519,10 @@ extern bool pgstat_bktype_io_stats_valid(PgStat_BktypeIO *context_ops,
 										 BackendType bktype);
 extern void pgstat_count_io_op(IOObject io_object, IOContext io_context, IOOp io_op);
 extern void pgstat_count_io_op_n(IOObject io_object, IOContext io_context, IOOp io_op, uint32 cnt);
+extern instr_time pgstat_prepare_io_time(void);
+extern void pgstat_count_io_op_time(IOObject io_object, IOContext io_context,
+									IOOp io_op, instr_time time, uint32 cnt);
+
 extern PgStat_IO *pgstat_fetch_stat_io(void);
 extern const char *pgstat_get_io_context_name(IOContext io_context);
 extern const char *pgstat_get_io_object_name(IOObject io_object);
