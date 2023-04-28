@@ -7633,6 +7633,9 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 	heap_freetuple(conTup);
 
+	InvokeObjectPostAlterHook(RelationRelationId,
+							  RelationGetRelid(rel), attnum);
+
 	table_close(attr_rel, RowExclusiveLock);
 
 	return address;
@@ -7870,6 +7873,9 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 									   false, !recursing, false, NULL);
 	ccon = linitial(cooked);
 	ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
+
+	InvokeObjectPostAlterHook(RelationRelationId,
+							  RelationGetRelid(rel), attnum);
 
 	/*
 	 * Mark pg_attribute.attnotnull for the column. Tell that function not to
