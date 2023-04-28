@@ -2853,8 +2853,8 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	}
 
 	/*
-	 * If any column remains in the additional_notnulls list, we must create a
-	 * NOT NULL constraint marked not-local.  Because multiple parents could
+	 * If any column remains in the old_notnulls list, we must create a NOT
+	 * NULL constraint marked not-local.  Because multiple parents could
 	 * specify a NOT NULL for the same column, we must count how many there
 	 * are and set inhcount accordingly, deleting elements we've already
 	 * processed.
