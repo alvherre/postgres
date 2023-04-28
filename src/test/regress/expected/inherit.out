@@ -2162,28 +2162,28 @@ NOTICE:  drop cascades to table inh_child2
 -- test multi inheritance tree
 --
 create table inh_parent(f1 int not null);
-create table c1() inherits(inh_parent);
-create table c2() inherits(inh_parent);
-create table d1() inherits(c1, c2);
+create table inh_child1() inherits(inh_parent);
+create table inh_child2() inherits(inh_parent);
+create table inh_grandchld() inherits(inh_child1, inh_child2);
 NOTICE:  merging multiple inherited definitions of column "f1"
 -- show constraint info
 select conrelid::regclass, conname, contype, coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_parent'::regclass, 'c1'::regclass, 'c2'::regclass, 'd1'::regclass)
- order by 2, 1;
-  conrelid  |        conname         | contype | coninhcount | conislocal 
-------------+------------------------+---------+-------------+------------
- inh_parent | inh_parent_f1_not_null | n       |           0 | t
- c1         | inh_parent_f1_not_null | n       |           1 | f
- c2         | inh_parent_f1_not_null | n       |           1 | f
- d1         | inh_parent_f1_not_null | n       |           2 | f
+ conrelid in ('inh_parent'::regclass, 'inh_child1'::regclass, 'inh_child2'::regclass, 'inh_grandchld'::regclass)
+ order by 2, conrelid::regclass::text;
+   conrelid    |        conname         | contype | coninhcount | conislocal 
+---------------+------------------------+---------+-------------+------------
+ inh_child1    | inh_parent_f1_not_null | n       |           1 | f
+ inh_child2    | inh_parent_f1_not_null | n       |           1 | f
+ inh_grandchld | inh_parent_f1_not_null | n       |           2 | f
+ inh_parent    | inh_parent_f1_not_null | n       |           0 | t
 (4 rows)
 
 drop table inh_parent cascade;
 NOTICE:  drop cascades to 3 other objects
-DETAIL:  drop cascades to table c1
-drop cascades to table c2
-drop cascades to table d1
+DETAIL:  drop cascades to table inh_child1
+drop cascades to table inh_child2
+drop cascades to table inh_grandchld
 -- test child table with inherited columns and
 -- with explicitly specified not null constraints
 create table inh_parent_1(f1 int);
@@ -2195,7 +2195,7 @@ NOTICE:  merging column "f2" with inherited definition
 select conrelid::regclass, conname, contype, coninhcount, conislocal
  from pg_constraint where contype = 'n' and
  conrelid in ('inh_parent_1'::regclass, 'inh_parent_2'::regclass, 'inh_child'::regclass)
- order by 2, 1;
+ order by 2, conrelid::regclass::text;
  conrelid  |        conname        | contype | coninhcount | conislocal 
 -----------+-----------------------+---------+-------------+------------
  inh_child | inh_child_f1_not_null | n       |           0 | t

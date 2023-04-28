@@ -835,15 +835,15 @@ drop table inh_child1 cascade;
 -- test multi inheritance tree
 --
 create table inh_parent(f1 int not null);
-create table c1() inherits(inh_parent);
-create table c2() inherits(inh_parent);
-create table d1() inherits(c1, c2);
+create table inh_child1() inherits(inh_parent);
+create table inh_child2() inherits(inh_parent);
+create table inh_grandchld() inherits(inh_child1, inh_child2);
 
 -- show constraint info
 select conrelid::regclass, conname, contype, coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_parent'::regclass, 'c1'::regclass, 'c2'::regclass, 'd1'::regclass)
- order by 2, 1;
+ conrelid in ('inh_parent'::regclass, 'inh_child1'::regclass, 'inh_child2'::regclass, 'inh_grandchld'::regclass)
+ order by 2, conrelid::regclass::text;
 
 drop table inh_parent cascade;
 
@@ -857,7 +857,7 @@ create table inh_child(f1 int not null, f2 text not null) inherits(inh_parent_1,
 select conrelid::regclass, conname, contype, coninhcount, conislocal
  from pg_constraint where contype = 'n' and
  conrelid in ('inh_parent_1'::regclass, 'inh_parent_2'::regclass, 'inh_child'::regclass)
- order by 2, 1;
+ order by 2, conrelid::regclass::text;
 
 -- also drops inh_child table
 drop table inh_parent_1 cascade;
