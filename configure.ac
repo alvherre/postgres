@@ -853,13 +853,17 @@ AC_SUBST(enable_thread_safety)
 # ICU
 #
 AC_MSG_CHECKING([whether to build with ICU support])
-PGAC_ARG_BOOL(with, icu, no, [build with ICU support],
+PGAC_ARG_BOOL(with, icu, yes, [build without ICU support],
               [AC_DEFINE([USE_ICU], 1, [Define to build with ICU support. (--with-icu)])])
 AC_MSG_RESULT([$with_icu])
 AC_SUBST(with_icu)
 
 if test "$with_icu" = yes; then
-  PKG_CHECK_MODULES(ICU, icu-uc icu-i18n)
+  PKG_CHECK_MODULES(ICU, icu-uc icu-i18n, [],
+    [AC_MSG_ERROR([ICU library not found
+If you have ICU already installed, see config.log for details on the
+failure.  It is possible the compiler isn't looking in the proper directory.
+Use --without-icu to disable ICU support.])])
 fi
 
 #
@@ -1340,8 +1344,8 @@ fi
 
 if test "$with_gssapi" = yes ; then
   if test "$PORTNAME" != "win32"; then
-    AC_SEARCH_LIBS(gss_init_sec_context, [gssapi_krb5 gss 'gssapi -lkrb5 -lcrypto'], [],
-                   [AC_MSG_ERROR([could not find function 'gss_init_sec_context' required for GSSAPI])])
+    AC_SEARCH_LIBS(gss_store_cred_into, [gssapi_krb5 gss 'gssapi -lkrb5 -lcrypto'], [],
+                   [AC_MSG_ERROR([could not find function 'gss_store_cred_into' required for GSSAPI])])
   else
     LIBS="$LIBS -lgssapi32"
   fi
@@ -1562,6 +1566,8 @@ fi
 if test "$with_gssapi" = yes ; then
   AC_CHECK_HEADERS(gssapi/gssapi.h, [],
 	[AC_CHECK_HEADERS(gssapi.h, [], [AC_MSG_ERROR([gssapi.h header file is required for GSSAPI])])])
+  AC_CHECK_HEADERS(gssapi/gssapi_ext.h, [],
+	[AC_CHECK_HEADERS(gssapi_ext.h, [], [AC_MSG_ERROR([gssapi_ext.h header file is required for GSSAPI])])])
 fi
 
 PGAC_PATH_PROGS(OPENSSL, openssl)

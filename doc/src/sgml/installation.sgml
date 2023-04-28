@@ -146,6 +146,35 @@ documentation.  See standalone-profile.xsl for details.
       <application>pg_restore</application>.
      </para>
     </listitem>
+
+    <listitem>
+     <para>
+      The ICU locale provider (see <xref linkend="locale-providers"/>) is used by default. If you don't want to use it then you must specify the <option>--without-icu</option> option to <filename>configure</filename>. Using this option disables support for ICU collation features (see <xref linkend="collation"/>).
+     </para>
+     <para>
+      ICU support requires the <productname>ICU4C</productname> package to be
+      installed.  The minimum required version of
+      <productname>ICU4C</productname> is currently 4.2.
+     </para>
+
+     <para>
+      By default,
+      <productname>pkg-config</productname><indexterm><primary>pkg-config</primary></indexterm>
+      will be used to find the required compilation options.  This is
+      supported for <productname>ICU4C</productname> version 4.6 and later.
+      For older versions, or if <productname>pkg-config</productname> is not
+      available, the variables <envar>ICU_CFLAGS</envar> and
+      <envar>ICU_LIBS</envar> can be specified to
+      <filename>configure</filename>, like in this example:
+<programlisting>
+./configure ... ICU_CFLAGS='-I/some/where/include' ICU_LIBS='-L/some/where/lib -licui18n -licuuc -licudata'
+</programlisting>
+      (If <productname>ICU4C</productname> is in the default search path
+      for the compiler, then you still need to specify nonempty strings in
+      order to avoid use of <productname>pkg-config</productname>, for
+      example, <literal>ICU_CFLAGS=' '</literal>.)
+     </para>
+    </listitem>
    </itemizedlist>
   </para>
 
@@ -252,9 +281,9 @@ documentation.  See standalone-profile.xsl for details.
 
     <listitem>
      <para>
-      You need <application>Kerberos</application>, <productname>OpenLDAP</productname>,
-      and/or <application>PAM</application>, if you want to support authentication
-      using those services.
+      You need <application>MIT Kerberos</application> (for GSSAPI),
+      <productname>OpenLDAP</productname>, and/or <application>PAM</application>,
+      if you want to support authentication using those services.
      </para>
     </listitem>
 
@@ -926,40 +955,6 @@ build-postgresql:
        </listitem>
       </varlistentry>
 
-      <varlistentry id="configure-option-with-icu">
-       <term><option>--with-icu</option></term>
-       <listitem>
-        <para>
-         Build with support for
-         the <productname>ICU</productname><indexterm><primary>ICU</primary></indexterm>
-         library, enabling use of ICU collation
-         features<phrase condition="standalone-ignore"> (see
-         <xref linkend="collation"/>)</phrase>.
-         This requires the <productname>ICU4C</productname> package
-         to be installed.  The minimum required version
-         of <productname>ICU4C</productname> is currently 4.2.
-        </para>
-
-        <para>
-         By default,
-         <productname>pkg-config</productname><indexterm><primary>pkg-config</primary></indexterm>
-         will be used to find the required compilation options.  This is
-         supported for <productname>ICU4C</productname> version 4.6 and later.
-         For older versions, or if <productname>pkg-config</productname> is
-         not available, the variables <envar>ICU_CFLAGS</envar>
-         and <envar>ICU_LIBS</envar> can be specified
-         to <filename>configure</filename>, like in this example:
-<programlisting>
-./configure ... --with-icu ICU_CFLAGS='-I/some/where/include' ICU_LIBS='-L/some/where/lib -licui18n -licuuc -licudata'
-</programlisting>
-         (If <productname>ICU4C</productname> is in the default search path
-         for the compiler, then you still need to specify nonempty strings in
-         order to avoid use of <productname>pkg-config</productname>, for
-         example, <literal>ICU_CFLAGS=' '</literal>.)
-        </para>
-       </listitem>
-      </varlistentry>
-
       <varlistentry id="configure-with-llvm">
        <term><option>--with-llvm</option></term>
        <listitem>
@@ -1048,9 +1043,9 @@ build-postgresql:
        <term><option>--with-gssapi</option></term>
        <listitem>
         <para>
-         Build with support for GSSAPI authentication. On many systems, the
-         GSSAPI system (usually a part of the Kerberos installation) is not
-         installed in a location
+         Build with support for GSSAPI authentication. MIT Kerberos is required
+         to be installed for GSSAPI.  On many systems, the GSSAPI system (a part
+         of the MIT Kerberos installation) is not installed in a location
          that is searched by default (e.g., <filename>/usr/include</filename>,
          <filename>/usr/lib</filename>), so you must use the options
          <option>--with-includes</option> and <option>--with-libraries</option> in
@@ -1230,6 +1225,19 @@ build-postgresql:
     </para>
 
      <variablelist>
+
+      <varlistentry id="configure-option-without-icu">
+       <term><option>--without-icu</option></term>
+       <listitem>
+        <para>
+         Build without support for the
+         <productname>ICU</productname><indexterm><primary>ICU</primary></indexterm>
+         library, disabling the use of ICU collation features<phrase
+         condition="standalone-ignore"> (see <xref
+         linkend="collation"/>)</phrase>.
+        </para>
+       </listitem>
+      </varlistentry>
 
       <varlistentry id="configure-option-without-readline">
        <term><option>--without-readline</option></term>
@@ -2497,10 +2505,11 @@ ninja install
       <term><option>-Dgssapi={ auto | enabled | disabled }</option></term>
       <listitem>
        <para>
-        Build with support for GSSAPI authentication. On many systems, the
-        GSSAPI system (usually a part of the Kerberos installation) is not
-        installed in a location that is searched by default (e.g.,
-        <filename>/usr/include</filename>, <filename>/usr/lib</filename>).  In
+        Build with support for GSSAPI authentication. MIT Kerberos is required
+        to be installed for GSSAPI.  On many systems, the GSSAPI system (a part
+        of the MIT Kerberos installation) is not installed in a location
+        that is searched by default (e.g., <filename>/usr/include</filename>,
+        <filename>/usr/lib</filename>).  In
         those cases, PostgreSQL will query <command>pkg-config</command> to
         detect the required compiler and linker options.  Defaults to auto.
         <filename>meson configure</filename> will check for the required

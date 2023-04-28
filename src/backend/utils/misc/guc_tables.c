@@ -1728,6 +1728,16 @@ struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"gss_accept_deleg", PGC_SIGHUP, CONN_AUTH_AUTH,
+			gettext_noop("Sets whether GSSAPI delegation should be accepted from the client."),
+			NULL
+		},
+		&pg_gss_accept_deleg,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"escape_string_warning", PGC_USERSET, COMPAT_OPTIONS_PREVIOUS,
 			gettext_noop("Warn about backslash escapes in ordinary string literals."),
 			NULL
@@ -2566,15 +2576,6 @@ struct config_int ConfigureNamesInt[] =
 		NULL, NULL, NULL
 	},
 
-	{
-		{"vacuum_defer_cleanup_age", PGC_SIGHUP, REPLICATION_PRIMARY,
-			gettext_noop("Number of transactions by which VACUUM and HOT cleanup should be deferred, if any."),
-			NULL
-		},
-		&vacuum_defer_cleanup_age,
-		0, 0, 1000000,			/* see ComputeXidHorizons */
-		NULL, NULL, NULL
-	},
 	{
 		{"vacuum_failsafe_age", PGC_USERSET, CLIENT_CONN_STATEMENT,
 			gettext_noop("Age at which VACUUM should trigger failsafe to avoid a wraparound outage."),

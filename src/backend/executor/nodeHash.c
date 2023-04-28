@@ -1724,6 +1724,7 @@ retry:
 		/* Store the hash value in the HashJoinTuple header. */
 		hashTuple->hashvalue = hashvalue;
 		memcpy(HJTUPLE_MINTUPLE(hashTuple), tuple, tuple->t_len);
+		HeapTupleHeaderClearMatch(HJTUPLE_MINTUPLE(hashTuple));
 
 		/* Push it onto the front of the bucket's list */
 		ExecParallelHashPushTuple(&hashtable->buckets.shared[bucketno],
@@ -2115,7 +2116,6 @@ ExecParallelPrepHashTableForUnmatched(HashJoinState *hjstate)
 
 	/* Now we are alone with this batch. */
 	Assert(BarrierPhase(&batch->batch_barrier) == PHJ_BATCH_SCAN);
-	Assert(BarrierParticipants(&batch->batch_barrier) == 1);
 
 	/*
 	 * Has another process decided to give up early and command all processes

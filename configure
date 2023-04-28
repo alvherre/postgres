@@ -1558,7 +1558,7 @@ Optional Packages:
                           set WAL block size in kB [8]
   --with-CC=CMD           set compiler (deprecated)
   --with-llvm             build with LLVM based JIT support
-  --with-icu              build with ICU support
+  --without-icu           build without ICU support
   --with-tcl              build Tcl modules (PL/Tcl)
   --with-tclconfig=DIR    tclConfig.sh is in DIR
   --with-perl             build Perl modules (PL/Perl)
@@ -8401,7 +8401,9 @@ $as_echo "#define USE_ICU 1" >>confdefs.h
   esac
 
 else
-  with_icu=no
+  with_icu=yes
+
+$as_echo "#define USE_ICU 1" >>confdefs.h
 
 fi
 
@@ -8470,31 +8472,17 @@ fi
 	# Put the nasty error message in config.log where it belongs
 	echo "$ICU_PKG_ERRORS" >&5
 
-	as_fn_error $? "Package requirements (icu-uc icu-i18n) were not met:
-
-$ICU_PKG_ERRORS
-
-Consider adjusting the PKG_CONFIG_PATH environment variable if you
-installed software in a non-standard prefix.
-
-Alternatively, you may set the environment variables ICU_CFLAGS
-and ICU_LIBS to avoid the need to call pkg-config.
-See the pkg-config man page for more details." "$LINENO" 5
+	as_fn_error $? "ICU library not found
+If you have ICU already installed, see config.log for details on the
+failure.  It is possible the compiler isn't looking in the proper directory.
+Use --without-icu to disable ICU support." "$LINENO" 5
 elif test $pkg_failed = untried; then
         { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
-	{ { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
-$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
-as_fn_error $? "The pkg-config script could not be found or is too old.  Make sure it
-is in your PATH or set the PKG_CONFIG environment variable to the full
-path to pkg-config.
-
-Alternatively, you may set the environment variables ICU_CFLAGS
-and ICU_LIBS to avoid the need to call pkg-config.
-See the pkg-config man page for more details.
-
-To get pkg-config, see <http://pkg-config.freedesktop.org/>.
-See \`config.log' for more details" "$LINENO" 5; }
+	as_fn_error $? "ICU library not found
+If you have ICU already installed, see config.log for details on the
+failure.  It is possible the compiler isn't looking in the proper directory.
+Use --without-icu to disable ICU support." "$LINENO" 5
 else
 	ICU_CFLAGS=$pkg_cv_ICU_CFLAGS
 	ICU_LIBS=$pkg_cv_ICU_LIBS
@@ -9724,7 +9712,7 @@ fi
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether it is possible to strip libraries" >&5
 $as_echo_n "checking whether it is possible to strip libraries... " >&6; }
   if test x"$STRIP" != x"" && "$STRIP" -V 2>&1 | grep "GNU strip" >/dev/null; then
-    STRIP_STATIC_LIB="$STRIP -x"
+    STRIP_STATIC_LIB="$STRIP --strip-unneeded"
     STRIP_SHARED_LIB="$STRIP --strip-unneeded"
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
@@ -12635,9 +12623,9 @@ fi
 
 if test "$with_gssapi" = yes ; then
   if test "$PORTNAME" != "win32"; then
-    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing gss_init_sec_context" >&5
-$as_echo_n "checking for library containing gss_init_sec_context... " >&6; }
-if ${ac_cv_search_gss_init_sec_context+:} false; then :
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing gss_store_cred_into" >&5
+$as_echo_n "checking for library containing gss_store_cred_into... " >&6; }
+if ${ac_cv_search_gss_store_cred_into+:} false; then :
   $as_echo_n "(cached) " >&6
 else
   ac_func_search_save_LIBS=$LIBS
@@ -12650,11 +12638,11 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 #ifdef __cplusplus
 extern "C"
 #endif
-char gss_init_sec_context ();
+char gss_store_cred_into ();
 int
 main ()
 {
-return gss_init_sec_context ();
+return gss_store_cred_into ();
   ;
   return 0;
 }
@@ -12667,30 +12655,30 @@ for ac_lib in '' gssapi_krb5 gss 'gssapi -lkrb5 -lcrypto'; do
     LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
   fi
   if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_search_gss_init_sec_context=$ac_res
+  ac_cv_search_gss_store_cred_into=$ac_res
 fi
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext
-  if ${ac_cv_search_gss_init_sec_context+:} false; then :
+  if ${ac_cv_search_gss_store_cred_into+:} false; then :
   break
 fi
 done
-if ${ac_cv_search_gss_init_sec_context+:} false; then :
+if ${ac_cv_search_gss_store_cred_into+:} false; then :
 
 else
-  ac_cv_search_gss_init_sec_context=no
+  ac_cv_search_gss_store_cred_into=no
 fi
 rm conftest.$ac_ext
 LIBS=$ac_func_search_save_LIBS
 fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_gss_init_sec_context" >&5
-$as_echo "$ac_cv_search_gss_init_sec_context" >&6; }
-ac_res=$ac_cv_search_gss_init_sec_context
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_gss_store_cred_into" >&5
+$as_echo "$ac_cv_search_gss_store_cred_into" >&6; }
+ac_res=$ac_cv_search_gss_store_cred_into
 if test "$ac_res" != no; then :
   test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
 
 else
-  as_fn_error $? "could not find function 'gss_init_sec_context' required for GSSAPI" "$LINENO" 5
+  as_fn_error $? "could not find function 'gss_store_cred_into' required for GSSAPI" "$LINENO" 5
 fi
 
   else
@@ -14098,6 +14086,33 @@ _ACEOF
 
 else
   as_fn_error $? "gssapi.h header file is required for GSSAPI" "$LINENO" 5
+fi
+
+done
+
+fi
+
+done
+
+  for ac_header in gssapi/gssapi_ext.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "gssapi/gssapi_ext.h" "ac_cv_header_gssapi_gssapi_ext_h" "$ac_includes_default"
+if test "x$ac_cv_header_gssapi_gssapi_ext_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_GSSAPI_GSSAPI_EXT_H 1
+_ACEOF
+
+else
+  for ac_header in gssapi_ext.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "gssapi_ext.h" "ac_cv_header_gssapi_ext_h" "$ac_includes_default"
+if test "x$ac_cv_header_gssapi_ext_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_GSSAPI_EXT_H 1
+_ACEOF
+
+else
+  as_fn_error $? "gssapi_ext.h header file is required for GSSAPI" "$LINENO" 5
 fi
 
 done

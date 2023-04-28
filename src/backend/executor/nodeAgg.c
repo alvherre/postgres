@@ -778,12 +778,10 @@ advance_transition_function(AggState *aggstate,
 	/*
 	 * If pass-by-ref datatype, must copy the new value into aggcontext and
 	 * free the prior transValue.  But if transfn returned a pointer to its
-	 * first input, we don't need to do anything.  Also, if transfn returned a
-	 * pointer to a R/W expanded object that is already a child of the
-	 * aggcontext, assume we can adopt that value without copying it.
+	 * first input, we don't need to do anything.
 	 *
 	 * It's safe to compare newVal with pergroup->transValue without regard
-	 * for either being NULL, because ExecAggTransReparent() takes care to set
+	 * for either being NULL, because ExecAggCopyTransValue takes care to set
 	 * transValue to 0 when NULL. Otherwise we could end up accidentally not
 	 * reparenting, when the transValue has the same numerical value as
 	 * newValue, despite being NULL.  This is a somewhat hot path, making it
@@ -793,10 +791,10 @@ advance_transition_function(AggState *aggstate,
 	 */
 	if (!pertrans->transtypeByVal &&
 		DatumGetPointer(newVal) != DatumGetPointer(pergroupstate->transValue))
-		newVal = ExecAggTransReparent(aggstate, pertrans,
-									  newVal, fcinfo->isnull,
-									  pergroupstate->transValue,
-									  pergroupstate->transValueIsNull);
+		newVal = ExecAggCopyTransValue(aggstate, pertrans,
+									   newVal, fcinfo->isnull,
+									   pergroupstate->transValue,
+									   pergroupstate->transValueIsNull);
 
 	pergroupstate->transValue = newVal;
 	pergroupstate->transValueIsNull = fcinfo->isnull;
@@ -1040,9 +1038,10 @@ process_ordered_aggregate_multi(AggState *aggstate,
  * (But note that in some cases, such as when there is no finalfn, the
  * result might be a pointer to or into the agg's transition value.)
  *
- * The finalfn uses the state as set in the transno. This also might be
+ * The finalfn uses the state as set in the transno.  This also might be
  * being used by another aggregate function, so it's important that we do
- * nothing destructive here.
+ * nothing destructive here.  Moreover, the aggregate's final value might
+ * get used in multiple places, so we mustn't return a R/W expanded datum.
  */
 static void
 finalize_aggregate(AggState *aggstate,
@@ -1116,8 +1115,13 @@ finalize_aggregate(AggState *aggstate,
 		}
 		else
 		{
-			*resultVal = FunctionCallInvoke(fcinfo);
+			Datum		result;
+
+			result = FunctionCallInvoke(fcinfo);
 			*resultIsNull = fcinfo->isnull;
+			*resultVal = MakeExpandedObjectReadOnly(result,
+													fcinfo->isnull,
+													peragg->resulttypeLen);
 		}
 		aggstate->curperagg = NULL;
 	}
@@ -1165,6 +1169,7 @@ finalize_partialaggregate(AggState *aggstate,
 		else
 		{
 			FunctionCallInfo fcinfo = pertrans->serialfn_fcinfo;
+			Datum		result;
 
 			fcinfo->args[0].value =
 				MakeExpandedObjectReadOnly(pergroupstate->transValue,
@@ -1173,8 +1178,11 @@ finalize_partialaggregate(AggState *aggstate,
 			fcinfo->args[0].isnull = pergroupstate->transValueIsNull;
 			fcinfo->isnull = false;
 
-			*resultVal = FunctionCallInvoke(fcinfo);
+			result = FunctionCallInvoke(fcinfo);
 			*resultIsNull = fcinfo->isnull;
+			*resultVal = MakeExpandedObjectReadOnly(result,
+													fcinfo->isnull,
+													peragg->resulttypeLen);
 		}
 	}
 	else
@@ -4071,7 +4079,7 @@ build_pertrans_for_aggref(AggStatePerTrans pertrans,
 	numTransArgs = pertrans->numTransInputs + 1;
 
 	/*
-	 * Set up infrastructure for calling the transfn.  Note that invtrans is
+	 * Set up infrastructure for calling the transfn.  Note that invtransfn is
 	 * not needed here.
 	 */
 	build_aggregate_transfn_expr(inputTypes,

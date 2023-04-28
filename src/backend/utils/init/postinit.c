@@ -282,15 +282,17 @@ PerformAuthentication(Port *port)
 
 			if (princ)
 				appendStringInfo(&logmsg,
-								 _(" GSS (authenticated=%s, encrypted=%s, principal=%s)"),
+								 _(" GSS (authenticated=%s, encrypted=%s, deleg_credentials=%s, principal=%s)"),
 								 be_gssapi_get_auth(port) ? _("yes") : _("no"),
 								 be_gssapi_get_enc(port) ? _("yes") : _("no"),
+								 be_gssapi_get_deleg(port) ? _("yes") : _("no"),
 								 princ);
 			else
 				appendStringInfo(&logmsg,
-								 _(" GSS (authenticated=%s, encrypted=%s)"),
+								 _(" GSS (authenticated=%s, encrypted=%s, deleg_credentials=%s)"),
 								 be_gssapi_get_auth(port) ? _("yes") : _("no"),
-								 be_gssapi_get_enc(port) ? _("yes") : _("no"));
+								 be_gssapi_get_enc(port) ? _("yes") : _("no"),
+								 be_gssapi_get_deleg(port) ? _("yes") : _("no"));
 		}
 #endif
 
@@ -484,8 +486,6 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 	/* Make the locale settings visible as GUC variables, too */
 	SetConfigOption("lc_collate", collate, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 	SetConfigOption("lc_ctype", ctype, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
-
-	check_strxfrm_bug();
 
 	ReleaseSysCache(tup);
 }

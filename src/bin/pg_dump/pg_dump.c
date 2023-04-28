@@ -290,7 +290,7 @@ static char *getFormattedOperatorName(const char *oproid);
 static char *convertTSFunction(Archive *fout, Oid funcOid);
 static const char *getFormattedTypeName(Archive *fout, Oid oid, OidOptions opts);
 static void getLOs(Archive *fout);
-static void dumpLO(Archive *fout, const LoInfo *binfo);
+static void dumpLO(Archive *fout, const LoInfo *loinfo);
 static int	dumpLOs(Archive *fout, const void *arg);
 static void dumpPolicy(Archive *fout, const PolicyInfo *polinfo);
 static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo);
@@ -722,6 +722,21 @@ main(int argc, char **argv)
 		plainText = 1;
 
 	/*
+	 * Custom and directory formats are compressed by default with gzip when
+	 * available, not the others.  If gzip is not available, no compression is
+	 * done by default.
+	 */
+	if ((archiveFormat == archCustom || archiveFormat == archDirectory) &&
+		!user_compression_defined)
+	{
+#ifdef HAVE_LIBZ
+		compression_algorithm_str = "gzip";
+#else
+		compression_algorithm_str = "none";
+#endif
+	}
+
+	/*
 	 * Compression options
 	 */
 	if (!parse_compress_algorithm(compression_algorithm_str,
@@ -748,21 +763,6 @@ main(int argc, char **argv)
 	if (compression_spec.options & PG_COMPRESSION_OPTION_WORKERS)
 		pg_log_warning("compression option \"%s\" is not currently supported by pg_dump",
 					   "workers");
-
-	/*
-	 * Custom and directory formats are compressed by default with gzip when
-	 * available, not the others.
-	 */
-	if ((archiveFormat == archCustom || archiveFormat == archDirectory) &&
-		!user_compression_defined)
-	{
-#ifdef HAVE_LIBZ
-		parse_compress_specification(PG_COMPRESSION_GZIP, NULL,
-									 &compression_spec);
-#else
-		/* Nothing to do in the default case */
-#endif
-	}
 
 	/*
 	 * If emitting an archive format, we always want to emit a DATABASE item,
@@ -9765,7 +9765,7 @@ getAdditionalACLs(Archive *fout)
 				{
 					if (dobj->objType == DO_TABLE)
 					{
-						/* For a column initpriv, set the table's ACL flags */
+						/* For a column initprivs, set the table's ACL flags */
 						dobj->components |= DUMP_COMPONENT_ACL;
 						((TableInfo *) dobj)->hascolumnACLs = true;
 					}

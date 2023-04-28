@@ -55,6 +55,7 @@ use File::Spec;
 use File::stat qw(stat);
 use File::Temp ();
 use IPC::Run;
+use POSIX qw(locale_h);
 use PostgreSQL::Test::SimpleTee;
 
 # We need a version of Test::More recent enough to support subtests
@@ -65,6 +66,7 @@ our @EXPORT = qw(
   slurp_dir
   slurp_file
   append_to_file
+  string_replace_file
   check_mode_recursive
   chmod_recursive
   check_pg_config
@@ -102,6 +104,7 @@ BEGIN
 	delete $ENV{LANGUAGE};
 	delete $ENV{LC_ALL};
 	$ENV{LC_MESSAGES} = 'C';
+	setlocale(LC_ALL, "");
 
 	# This list should be kept in sync with pg_regress.c.
 	my @envkeys = qw (
@@ -544,6 +547,32 @@ sub append_to_file
 	  or croak "could not write \"$filename\": $!";
 	print $fh $str;
 	close $fh;
+	return;
+}
+
+=pod
+
+=item string_replace_file(filename, find, replace)
+
+Find and replace string of a given file.
+
+=cut
+
+sub string_replace_file
+{
+	my ($filename, $find, $replace) = @_;
+	open(my $in, '<', $filename);
+	my $content;
+	while(<$in>)
+	{
+		$_ =~ s/$find/$replace/;
+		$content = $content.$_;
+	}
+	close $in;
+	open(my $out, '>', $filename);
+	print $out $content;
+	close($out);
+
 	return;
 }
 

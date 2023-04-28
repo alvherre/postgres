@@ -624,14 +624,24 @@ if not gssapiopt.disabled()
   endif
 
   if not have_gssapi
-  elif cc.has_function('gss_init_sec_context', dependencies: gssapi,
+  elif cc.check_header('gssapi/gssapi_ext.h', dependencies: gssapi, required: false,
+      args: test_c_args, include_directories: postgres_inc)
+    cdata.set('HAVE_GSSAPI_GSSAPI_EXT_H', 1)
+  elif cc.check_header('gssapi_ext.h', args: test_c_args, dependencies: gssapi, required: gssapiopt)
+    cdata.set('HAVE_GSSAPI_EXT_H', 1)
+  else
+    have_gssapi = false
+  endif
+
+  if not have_gssapi
+  elif cc.has_function('gss_store_cred_into', dependencies: gssapi,
       args: test_c_args, include_directories: postgres_inc)
     cdata.set('ENABLE_GSS', 1)
 
     krb_srvtab = 'FILE:/@0@/krb5.keytab)'.format(get_option('sysconfdir'))
     cdata.set_quoted('PG_KRB_SRVTAB', krb_srvtab)
   elif gssapiopt.enabled()
-    error('''could not find function 'gss_init_sec_context' required for GSSAPI''')
+    error('''could not find function 'gss_store_cred_into' required for GSSAPI''')
   else
     have_gssapi = false
   endif
@@ -2953,7 +2963,7 @@ endif
 # generation happens during install, so that's not a real issue.
 nls_mo_targets = []
 if libintl.found() and meson.version().version_compare('>=0.60')
-  # use range() to avoid the flattening of the list that forech() would do
+  # use range() to avoid the flattening of the list that foreach() would do
   foreach off : range(0, nls_targets.length())
     # i18n.gettext() list containing 1) list of built .mo files 2) maintainer
     # -pot target 3) maintainer -pot target

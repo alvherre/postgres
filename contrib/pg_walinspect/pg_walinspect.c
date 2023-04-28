@@ -85,7 +85,7 @@ GetCurrentLSN(void)
 }
 
 /*
- * Intialize WAL reader and identify first valid LSN.
+ * Initialize WAL reader and identify first valid LSN.
  */
 static XLogReaderState *
 InitXLogReaderState(XLogRecPtr lsn)
@@ -401,7 +401,7 @@ GetWALBlockInfo(FunctionCallInfo fcinfo, XLogReaderState *record,
 							 values, nulls);
 	}
 
-#undef PG_GET_WAL_FPI_BLOCK_COLS
+#undef PG_GET_WAL_BLOCK_INFO_COLS
 }
 
 /*

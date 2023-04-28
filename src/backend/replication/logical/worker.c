@@ -658,7 +658,7 @@ handle_streamed_transaction(LogicalRepMsgType action, StringInfo s)
 			return false;
 
 		default:
-			Assert(false);
+			elog(ERROR, "unexpected apply action: %d", (int) apply_action);
 			return false;		/* silence compiler warning */
 	}
 }
@@ -3934,6 +3934,7 @@ maybe_reread_subscription(void)
 		strcmp(newsub->slotname, MySubscription->slotname) != 0 ||
 		newsub->binary != MySubscription->binary ||
 		newsub->stream != MySubscription->stream ||
+		newsub->passwordrequired != MySubscription->passwordrequired ||
 		strcmp(newsub->origin, MySubscription->origin) != 0 ||
 		newsub->owner != MySubscription->owner ||
 		!equal(newsub->publications, MySubscription->publications))

@@ -997,11 +997,11 @@ dumpRoleMembership(PGconn *conn)
 	/*
 	 * We can't dump these GRANT commands in arbitrary order, because a role
 	 * that is named as a grantor must already have ADMIN OPTION on the
-	 * role for which it is granting permissions, except for the boostrap
+	 * role for which it is granting permissions, except for the bootstrap
 	 * superuser, who can always be named as the grantor.
 	 *
 	 * We handle this by considering these grants role by role. For each role,
-	 * we initially consider the only allowable grantor to be the boostrap
+	 * we initially consider the only allowable grantor to be the bootstrap
 	 * superuser. Every time we grant ADMIN OPTION on the role to some user,
 	 * that user also becomes an allowable grantor. We make repeated passes
 	 * over the grants for the role, each time dumping those whose grantors
@@ -1052,6 +1052,7 @@ dumpRoleMembership(PGconn *conn)
 				PQfinish(conn);
 				exit_nicely(1);
 			}
+			prev_remaining = remaining;
 
 			/* Make one pass over the grants for this role. */
 			for (i = start; i < end; ++i)
@@ -1923,7 +1924,7 @@ dumpTimestamp(const char *msg)
 }
 
 /*
- * Helper function for rolenamehash hash table.
+ * Helper function for rolename_hash hash table.
  */
 static uint32
 hash_string_pointer(char *s)

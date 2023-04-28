@@ -740,7 +740,7 @@ ExecGetUpdateNewTuple(ResultRelInfo *relinfo,
  *
  *		Returns RETURNING result if any, otherwise NULL.
  *		*inserted_tuple is the tuple that's effectively inserted;
- *		*inserted_destrel is the relation where it was inserted.
+ *		*insert_destrel is the relation where it was inserted.
  *		These are only set on success.
  *
  *		This may change the currently active tuple conversion map in
@@ -856,7 +856,6 @@ ExecInsert(ModifyTableContext *context,
 								resultRelInfo->ri_PlanSlots,
 								resultRelInfo->ri_NumSlots,
 								estate, canSetTag);
-				resultRelInfo->ri_NumSlots = 0;
 				flushed = true;
 			}
 
@@ -904,7 +903,7 @@ ExecInsert(ModifyTableContext *context,
 			 * If these are the first tuples stored in the buffers, add the
 			 * target rel and the mtstate to the
 			 * es_insert_pending_result_relations and
-			 * es_insert_pending_modifytables lists respectively, execpt in
+			 * es_insert_pending_modifytables lists respectively, except in
 			 * the case where flushing was done above, in which case they
 			 * would already have been added to the lists, so no need to do
 			 * this.
@@ -1261,6 +1260,14 @@ ExecBatchInsert(ModifyTableState *mtstate,
 
 	if (canSetTag && numInserted > 0)
 		estate->es_processed += numInserted;
+
+	/* Clean up all the slots, ready for the next batch */
+	for (i = 0; i < numSlots; i++)
+	{
+		ExecClearTuple(slots[i]);
+		ExecClearTuple(planSlots[i]);
+	}
+	resultRelInfo->ri_NumSlots = 0;
 }
 
 /*
@@ -1284,7 +1291,6 @@ ExecPendingInserts(EState *estate)
 						resultRelInfo->ri_PlanSlots,
 						resultRelInfo->ri_NumSlots,
 						estate, mtstate->canSetTag);
-		resultRelInfo->ri_NumSlots = 0;
 	}
 
 	list_free(estate->es_insert_pending_result_relations);
