@@ -8642,8 +8642,37 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			tbinfo->attlen[j] = atoi(PQgetvalue(res, r, i_attlen));
 			tbinfo->attalign[j] = *(PQgetvalue(res, r, i_attalign));
 			tbinfo->attislocal[j] = (PQgetvalue(res, r, i_attislocal)[0] == 't');
-			tbinfo->notnullconstrs[j] = (PQgetisnull(res, r, i_attnotnull) ? NULL :
-										 pg_strdup(PQgetvalue(res, r, i_attnotnull)));
+
+			/*
+			 * Love/hate relationship with NOT NULL constraint names: we don't
+			 * want to emit their names if they are the default ones, so we
+			 * set the field to the empty string in that case.  This is quite
+			 * a hack, but it beats having to store a boolean flag in
+			 * pg_constraint just for this, or having to compute the knowledge
+			 * at pg_dump time from the server.
+			 */
+			if (PQgetisnull(res, r, i_attnotnull))
+				tbinfo->notnullconstrs[j] = NULL;
+			else
+			{
+				char   *conname = PQgetvalue(res, r, i_attnotnull);
+
+				if (conname[0] == '\0')
+					tbinfo->notnullconstrs[j] = "";
+				else
+				{
+					char *default_name;
+
+					/* XXX match ChooseConstraintName re. truncation? */
+					default_name = psprintf("%s_%s_not_null", tbinfo->dobj.name,
+											tbinfo->attnames[j]);
+					if (strcmp(conname, default_name) == 0)
+						tbinfo->notnullconstrs[j] = "";
+					else
+						tbinfo->notnullconstrs[j] = pstrdup(conname);
+				}
+			}
+
 			tbinfo->localNotNull[j] = (PQgetvalue(res, r, i_localnotnull)[0] == 't');
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, r, i_attoptions));
 			tbinfo->attcollation[j] = atooid(PQgetvalue(res, r, i_attcollation));
