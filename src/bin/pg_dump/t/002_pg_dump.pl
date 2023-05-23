@@ -3213,8 +3213,8 @@ my %tests = (
 						FOR VALUES FROM (\'2006-02-01\') TO (\'2006-03-01\');',
 		regexp => qr/^
 			\QCREATE TABLE dump_test_second_schema.measurement_y2006m2 (\E\n
-			\s+\Qcity_id integer DEFAULT nextval('dump_test.measurement_city_id_seq'::regclass) NOT NULL,\E\n
-			\s+\Qlogdate date NOT NULL,\E\n
+			\s+\Qcity_id integer DEFAULT nextval('dump_test.measurement_city_id_seq'::regclass) CONSTRAINT measurement_city_id_not_null NOT NULL,\E\n
+			\s+\Qlogdate date CONSTRAINT measurement_logdate_not_null NOT NULL,\E\n
 			\s+\Qpeaktemp integer,\E\n
 			\s+\Qunitsales integer DEFAULT 0,\E\n
 			\s+\QCONSTRAINT measurement_peaktemp_check CHECK ((peaktemp >= '-460'::integer)),\E\n
