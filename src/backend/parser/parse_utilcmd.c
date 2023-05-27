@@ -700,12 +700,17 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 				{
 					Constraint *notnull;
 
+					/*
+					 * XXX why do we create our own node, instead of adding the node
+					 * we already have to the list?
+					 * */
 					column->is_not_null = true;
 					saw_nullable = true;
 
 					notnull = makeNode(Constraint);
 					notnull->contype = CONSTR_NOTNULL;
 					notnull->conname = constraint->conname;
+					notnull->is_no_inherit = constraint->is_no_inherit;
 					notnull->deferrable = false;
 					notnull->initdeferred = false;
 					notnull->location = -1;

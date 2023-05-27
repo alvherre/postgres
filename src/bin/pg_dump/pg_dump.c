@@ -8483,12 +8483,12 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	if (fout->remoteVersion >= 160000)
 		appendPQExpBufferStr(q,
 							 "co.conname AS attnotnull,\n"
-							 "false as notnull_is_pk,\n"
+							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
 							 "coalesce(co.conislocal, false) AS local_notnull,\n");
 	else
 		appendPQExpBufferStr(q,
 							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END attnotnull,\n"
-							 "co.conname IS NOT NULL as notnull_is_pk,\n"
+							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
 							 "false AS local_notnull,\n");
 
 	if (fout->remoteVersion >= 140000)
@@ -8541,12 +8541,13 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							 "(a.attrelid = co.conrelid\n"
 							 "   AND co.contype = 'n' AND "
 							 "co.conkey = array[a.attnum])\n");
-	else
-		appendPQExpBufferStr(q,
-							 "LEFT JOIN pg_catalog.pg_constraint co ON "
-							 "(co.conrelid = src.tbloid\n"
-							 "   AND co.contype = 'p' AND "
-							 "co.conkey @> array[a.attnum])\n");
+
+	/* XXX merge these two, if certain that no version test is needed */
+	appendPQExpBufferStr(q,
+						 "LEFT JOIN pg_catalog.pg_constraint copk ON "
+						 "(copk.conrelid = src.tbloid\n"
+						 "   AND copk.contype = 'p' AND "
+						 "copk.conkey @> array[a.attnum])\n");
 	appendPQExpBufferStr(q,
 						 "WHERE a.attnum > 0::pg_catalog.int2\n"
 						 "ORDER BY a.attrelid, a.attnum");
@@ -15843,8 +15844,9 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 						if (tbinfo->notnullconstrs[j][0] == '\0')
 							appendPQExpBufferStr(q, " NOT NULL");
 						else
-							appendPQExpBuffer(q, " CONSTRAINT %s NOT NULL",
-											  fmtId(tbinfo->notnullconstrs[j]));
+							appendPQExpBuffer(q, " CONSTRAINT %s NOT NULL%s",
+											  fmtId(tbinfo->notnullconstrs[j]),
+											  tbinfo->notnull_is_pk[j] ? " NO INHERIT" : "");
 					}
 
 					/* Add collation if not default for the type */
