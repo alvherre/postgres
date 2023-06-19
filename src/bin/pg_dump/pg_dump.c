@@ -16645,16 +16645,6 @@ dumpIndex(Archive *fout, const IndxInfo *indxinfo)
 		 * similar code in dumpConstraint!
 		 */
 
-		/* Drop any NOT NULL constraint that were added to support the PK */
-		for (int i = 0; i < tbinfo->numatts; i++)
-		{
-			if (tbinfo->notnull_is_pk[i])
-			{
-				appendPQExpBuffer(q, "\nALTER TABLE %s DROP CONSTRAINT %s;",
-								  fmtQualifiedDumpable(tbinfo),
-								  tbinfo->notnullconstrs[i]);
-			}
-		}
 
 		/* If the index is clustered, we need to record that. */
 		if (indxinfo->indisclustered)
