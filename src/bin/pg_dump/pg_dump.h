@@ -348,7 +348,7 @@ typedef struct _tableInfo
 	char	  **notnullconstrs;	/* NOT NULL constraint names. If null, there
 								 * isn't one on this column. If empty string,
 								 * unnamed constraint (pre-v17) */
-	bool	   *notnull_is_pk;	/* attnotnull only because the column is PK */
+	bool	   *drop_notnull;	/* drop the NOT NULL constraint later */
 	bool	   *localNotNull;	/* true if NOT NULL has local definition */
 	struct _attrDefInfo **attrdefs; /* DEFAULT expressions */
 	struct _constraintInfo *checkexprs; /* CHECK constraints */

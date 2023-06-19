@@ -8487,7 +8487,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							 "coalesce(co.conislocal, false) AS local_notnull,\n");
 	else
 		appendPQExpBufferStr(q,
-							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END attnotnull,\n"
+							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END AS attnotnull,\n"
 							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
 							 "false AS local_notnull,\n");
 
@@ -8542,7 +8542,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							 "   AND co.contype = 'n' AND "
 							 "co.conkey = array[a.attnum])\n");
 
-	/* XXX merge these two, if certain that no version test is needed */
+	/* XXX merge this with below, if certain that no version test is needed */
 	appendPQExpBufferStr(q,
 						 "LEFT JOIN pg_catalog.pg_constraint copk ON "
 						 "(copk.conrelid = src.tbloid\n"
@@ -8637,13 +8637,17 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		tbinfo->attfdwoptions = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->attmissingval = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnullconstrs = (char **) pg_malloc(numatts * sizeof(char *));
-		tbinfo->notnull_is_pk = (bool *) pg_malloc(numatts * sizeof(bool));
+		tbinfo->drop_notnull = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->localNotNull = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->attrdefs = (AttrDefInfo **) pg_malloc(numatts * sizeof(AttrDefInfo *));
 		hasdefaults = false;
 
 		for (int j = 0; j < numatts; j++, r++)
 		{
+			bool	use_named_notnull = false;
+			bool	use_unnamed_notnull = false;
+			bool	use_throwaway_notnull = false;
+
 			if (j + 1 != atoi(PQgetvalue(res, r, i_attnum)))
 				pg_fatal("invalid column numbering in table \"%s\"",
 						 tbinfo->dobj.name);
@@ -8674,43 +8678,72 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			 * that case, we want to mark it NOT NULL when created, so that
 			 * the table doesn't have to be scanned to check for nulls when
 			 * the PK is created afterwards; this is especially critical
-			 * during pg_ugprade (where the data would not be scanned
+			 * during pg_upgrade (where the data would not be scanned at all
 			 * otherwise.)  If the column is part of the PK and does not have
-			 * other NOT NULL constraint, then we fabricate a constraint name
-			 * that we use to remove the unnecessary constraint after the PK
-			 * has been created.
+			 * any other NOT NULL constraint, then we fabricate a throwaway
+			 * constraint name that we later use to remove it after the PK has
+			 * been created.
 			 */
-			if (PQgetisnull(res, r, i_attnotnull))
-				tbinfo->notnullconstrs[j] = NULL;
-			else if (PQgetisnull(res, r, i_notnull_is_pk) ||
-					 PQgetvalue(res, r, i_notnull_is_pk)[0] == 'f')
-			{
-				char   *conname = PQgetvalue(res, r, i_attnotnull);
+			fprintf(stderr, "rel: %s att: %s attnotnull: %s notnull_is_pk: %s local_notnull: %s\n",
+					tbinfo->dobj.name,
+					tbinfo->attnames[j],
+					PQgetisnull(res, r, i_attnotnull) ? "(null)" :
+					PQgetvalue(res, r, i_attnotnull),
+					PQgetisnull(res, r, i_notnull_is_pk) ? "(null)" :
+					PQgetvalue(res, r, i_notnull_is_pk),
+					PQgetisnull(res, r, i_localnotnull) ? "(null)" :
+					PQgetvalue(res, r, i_localnotnull)
+					);
 
-				if (conname[0] == '\0')
-					tbinfo->notnullconstrs[j] = "";
-				else
+			if (fout->remoteVersion < 160000)	/* XXX update version number */
+			{
+				if (PQgetvalue(res, r, i_notnull_is_pk)[0] == 't')
+					use_throwaway_notnull = true;
+				else if (!PQgetisnull(res, r, i_notnull_is_pk)) /* XXX maybe i_attnotnull instead?? */
+					use_unnamed_notnull = true;
+			}
+			else
+			{
+				if (!PQgetisnull(res, r, i_attnotnull))
 				{
 					char *default_name;
 
-					/* XXX match ChooseConstraintName re. truncation? */
 					default_name = psprintf("%s_%s_not_null", tbinfo->dobj.name,
 											tbinfo->attnames[j]);
-					if (strcmp(conname, default_name) == 0)
-						tbinfo->notnullconstrs[j] = "";
+					if (strcmp(default_name,
+							   PQgetvalue(res, r, i_attnotnull)) == 0)
+						use_unnamed_notnull = true;
 					else
-						tbinfo->notnullconstrs[j] = pstrdup(conname);
+						use_named_notnull = true;
 				}
+				else if (PQgetvalue(res, r, i_notnull_is_pk)[0] == 't')
+					use_throwaway_notnull = true;
 			}
-			else
+
+			if (use_unnamed_notnull)
+			{
+				tbinfo->notnullconstrs[j] = "";
+				tbinfo->drop_notnull[j] = false;
+			}
+			else if (use_named_notnull)
+			{
+				tbinfo->notnullconstrs[j] = pstrdup(PQgetvalue(res, r, i_attnotnull));
+				tbinfo->drop_notnull[j] = false;
+			}
+			else if (use_throwaway_notnull)
 			{
 				static int	notnullcount = 0;
 
 				tbinfo->notnullconstrs[j] = psprintf("pgdump_throwaway_notnull_%d",
 													 notnullcount++);
+				tbinfo->drop_notnull[j] = true;
+			}
+			else
+			{
+				tbinfo->notnullconstrs[j] = NULL;
+				tbinfo->drop_notnull[j] = false;
 			}
 
-			tbinfo->notnull_is_pk[j] = (PQgetvalue(res, r, i_notnull_is_pk)[0] == 't');
 			tbinfo->localNotNull[j] = (PQgetvalue(res, r, i_localnotnull)[0] == 't');
 
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, r, i_attoptions));
@@ -15779,8 +15812,9 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					 * where that won't work.
 					 */
 					print_notnull = (tbinfo->notnullconstrs[j] &&
-									 (tbinfo->localNotNull[j] ||
-									  tbinfo->notnull_is_pk[j] ||
+									 (true ||
+									  /* tbinfo->localNotNull[j] || */
+									  tbinfo->drop_notnull[j] ||
 									  tbinfo->ispartition ||
 									  dopt->binary_upgrade));
 
@@ -15846,7 +15880,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 						else
 							appendPQExpBuffer(q, " CONSTRAINT %s NOT NULL%s",
 											  fmtId(tbinfo->notnullconstrs[j]),
-											  tbinfo->notnull_is_pk[j] ? " NO INHERIT" : "");
+											  tbinfo->drop_notnull[j] ? " NO INHERIT" : "");
 					}
 
 					/* Add collation if not default for the type */
@@ -16947,13 +16981,16 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 		 */
 
 		/* Drop any NOT NULL constraint that were added to support the PK */
-		for (int i = 0; i < tbinfo->numatts; i++)
+		if (coninfo->contype == 'p')
 		{
-			if (tbinfo->notnull_is_pk[i])
+			for (int i = 0; i < tbinfo->numatts; i++)
 			{
-				appendPQExpBuffer(q, "\nALTER TABLE %s DROP CONSTRAINT %s;",
-								  fmtQualifiedDumpable(tbinfo),
-								  tbinfo->notnullconstrs[i]);
+				if (tbinfo->drop_notnull[i])
+				{
+					appendPQExpBuffer(q, "\nALTER TABLE %s DROP CONSTRAINT %s;",
+									  fmtQualifiedDumpable(tbinfo),
+									  tbinfo->notnullconstrs[i]);
+				}
 			}
 		}
 
