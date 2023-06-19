@@ -15692,6 +15692,9 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		char	   *srvname = NULL;
 		char	   *foreign = "";
 
+		PQExpBufferData debugq;
+		initPQExpBuffer(&debugq);
+
 		/*
 		 * Set reltypename, and collect any relkind-specific data that we
 		 * didn't fetch during getTables().
@@ -15811,6 +15814,14 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					 * defined, except if partition, or in binary-upgrade case
 					 * where that won't work.
 					 */
+					if (tbinfo->notnullconstrs[j])
+						appendPQExpBuffer(&debugq,
+										  "-- nm: %s localNotNull: %s ispartition: %s binary_upg: %s\n",
+										  tbinfo->notnullconstrs[j],
+										  tbinfo->localNotNull[j] ? "true" : "false",
+										  tbinfo->ispartition ? "true" : "false",
+										  dopt->binary_upgrade ? "true" : "false");
+
 					print_notnull = (tbinfo->notnullconstrs[j] &&
 									 (true ||
 									  /* tbinfo->localNotNull[j] || */
@@ -16001,6 +16012,10 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		}
 		else
 			appendPQExpBufferStr(q, ";\n");
+
+		/* XXX */
+		appendPQExpBufferStr(q, debugq.data);
+		appendPQExpBufferStr(q, "\n");
 
 		/* Materialized views can depend on extensions */
 		if (tbinfo->relkind == RELKIND_MATVIEW)
