@@ -4788,18 +4788,27 @@ RelationGetIndexList(Relation relation)
 		result = lappend_oid(result, index->indexrelid);
 
 		/*
-		 * Invalid, non-unique, non-immediate or predicate indexes aren't
-		 * interesting for either oid indexes or replication identity indexes,
-		 * so don't check them.
+		 * Non-unique, non-immediate or predicate indexes aren't interesting
+		 * for either oid indexes or replication identity indexes, so don't
+		 * check them.
 		 */
-		if (!index->indisvalid || !index->indisunique ||
+		if (!index->indisunique ||
 			!index->indimmediate ||
 			!heap_attisnull(htup, Anum_pg_index_indpred, NULL))
 			continue;
 
-		/* remember primary key index if any */
-		if (index->indisprimary)
+		/*
+		 * Remember primary key index, if any.  We do this only if the index
+		 * is valid; but if the table is partitioned, then we do it even if
+		 * it's invalid.  XXX does this cause other problems?
+		 */
+		if (index->indisprimary &&
+			(index->indisvalid ||
+			 relation->rd_rel->relkind == RELKIND_PARTITIONED_TABLE))
 			pkeyIndex = index->indexrelid;
+
+		if (!index->indisvalid)
+			continue;
 
 		/* remember explicitly chosen replica index */
 		if (index->indisreplident)
