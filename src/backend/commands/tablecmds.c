@@ -12587,10 +12587,11 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	}
 
 	/*
-	 * For partitioned tables, non-CHECK inherited constraints are dropped via
-	 * the dependency mechanism, so we're done here.
+	 * For partitioned tables, non-CHECK, non-NOT-NULL inherited constraints
+	 * are dropped via the dependency mechanism, so we're done here.
 	 */
 	if (con->contype != CONSTRAINT_CHECK &&
+		con->contype != CONSTRAINT_NOTNULL &&
 		rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 	{
 		table_close(conrel, RowExclusiveLock);
