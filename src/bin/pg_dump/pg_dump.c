@@ -8390,6 +8390,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	int			i_attalign;
 	int			i_attislocal;
 	int			i_attnotnull;
+	int			i_notnull_noinherit;
 	int			i_notnull_is_pk;
 	int			i_localnotnull;
 	int			i_attoptions;
@@ -8483,11 +8484,13 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	if (fout->remoteVersion >= 160000)
 		appendPQExpBufferStr(q,
 							 "co.conname AS attnotnull,\n"
+							 "co.connoinherit AS notnull_noinherit,\n"
 							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
 							 "coalesce(co.conislocal, false) AS local_notnull,\n");
 	else
 		appendPQExpBufferStr(q,
 							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END AS attnotnull,\n"
+							 "false AS notnull_noinherit,\n"
 							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
 							 "false AS local_notnull,\n");
 
@@ -8570,6 +8573,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	i_attalign = PQfnumber(res, "attalign");
 	i_attislocal = PQfnumber(res, "attislocal");
 	i_attnotnull = PQfnumber(res, "attnotnull");
+	i_notnull_noinherit = PQfnumber(res, "notnull_noinherit");
 	i_notnull_is_pk = PQfnumber(res, "notnull_is_pk");
 	i_localnotnull = PQfnumber(res, "local_notnull");
 	i_attoptions = PQfnumber(res, "attoptions");
@@ -8637,6 +8641,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		tbinfo->attfdwoptions = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->attmissingval = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnullconstrs = (char **) pg_malloc(numatts * sizeof(char *));
+		tbinfo->notnull_noinh = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->drop_notnull = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->localNotNull = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->attrdefs = (AttrDefInfo **) pg_malloc(numatts * sizeof(AttrDefInfo *));
@@ -8744,7 +8749,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				tbinfo->drop_notnull[j] = false;
 			}
 
-			tbinfo->localNotNull[j] = (PQgetvalue(res, r, i_localnotnull)[0] == 't');
+			tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
+			tbinfo->localNotNull[j] = PQgetvalue(res, r, i_localnotnull)[0] == 't';
 
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, r, i_attoptions));
 			tbinfo->attcollation[j] = atooid(PQgetvalue(res, r, i_attcollation));
@@ -15889,9 +15895,11 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 						if (tbinfo->notnullconstrs[j][0] == '\0')
 							appendPQExpBufferStr(q, " NOT NULL");
 						else
-							appendPQExpBuffer(q, " CONSTRAINT %s NOT NULL%s",
-											  fmtId(tbinfo->notnullconstrs[j]),
-											  tbinfo->drop_notnull[j] ? " NO INHERIT" : "");
+							appendPQExpBuffer(q, " CONSTRAINT %s NOT NULL",
+											  fmtId(tbinfo->notnullconstrs[j]));
+
+						if (tbinfo->notnull_noinh[j])
+							appendPQExpBufferStr(q, " NO INHERIT");
 					}
 
 					/* Add collation if not default for the type */

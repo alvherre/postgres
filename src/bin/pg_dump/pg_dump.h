@@ -344,10 +344,11 @@ typedef struct _tableInfo
 	char	   *attcompression; /* per-attribute compression method */
 	char	  **attfdwoptions;	/* per-attribute fdw options */
 	char	  **attmissingval;	/* per attribute missing value */
-	/* XXX rethink names of these three */
+	/* XXX rethink names of these four */
 	char	  **notnullconstrs;	/* NOT NULL constraint names. If null, there
 								 * isn't one on this column. If empty string,
 								 * unnamed constraint (pre-v17) */
+	bool	   *notnull_noinh;	/* NOT NULL is NO INHERIT */
 	bool	   *drop_notnull;	/* drop the NOT NULL constraint later */
 	bool	   *localNotNull;	/* true if NOT NULL has local definition */
 	struct _attrDefInfo **attrdefs; /* DEFAULT expressions */
