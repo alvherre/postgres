@@ -8598,6 +8598,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		TableInfo  *tbinfo = NULL;
 		int			numatts;
 		bool		hasdefaults;
+		int			notnullcount;
 
 		/* Count rows for this table */
 		for (numatts = 1; numatts < ntups - r; numatts++)
@@ -8621,6 +8622,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			!tbinfo->interesting)
 			pg_fatal("unexpected column data for table \"%s\"",
 					 tbinfo->dobj.name);
+
+		notnullcount = 0;
 
 		/* Save data for this table */
 		tbinfo->numatts = numatts;
@@ -8737,7 +8740,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			}
 			else if (use_throwaway_notnull)
 			{
-				static int	notnullcount = 0;
 
 				tbinfo->notnullconstrs[j] = psprintf("pgdump_throwaway_notnull_%d",
 													 notnullcount++);
