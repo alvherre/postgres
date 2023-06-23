@@ -349,7 +349,7 @@ typedef struct _tableInfo
 								 * isn't one on this column. If empty string,
 								 * unnamed constraint (pre-v17) */
 	bool	   *notnull_noinh;	/* NOT NULL is NO INHERIT */
-	bool	   *drop_notnull;	/* drop the NOT NULL constraint later */
+	bool	   *notnull_throwaway; /* drop the NOT NULL constraint later */
 	bool	   *localNotNull;	/* true if NOT NULL has local definition */
 	struct _attrDefInfo **attrdefs; /* DEFAULT expressions */
 	struct _constraintInfo *checkexprs; /* CHECK constraints */

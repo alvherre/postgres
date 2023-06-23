@@ -8645,7 +8645,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		tbinfo->attmissingval = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnullconstrs = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnull_noinh = (bool *) pg_malloc(numatts * sizeof(bool));
-		tbinfo->drop_notnull = (bool *) pg_malloc(numatts * sizeof(bool));
+		tbinfo->notnull_throwaway = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->localNotNull = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->attrdefs = (AttrDefInfo **) pg_malloc(numatts * sizeof(AttrDefInfo *));
 		hasdefaults = false;
@@ -8731,24 +8731,24 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			if (use_unnamed_notnull)
 			{
 				tbinfo->notnullconstrs[j] = "";
-				tbinfo->drop_notnull[j] = false;
+				tbinfo->notnull_throwaway[j] = false;
 			}
 			else if (use_named_notnull)
 			{
 				tbinfo->notnullconstrs[j] = pstrdup(PQgetvalue(res, r, i_attnotnull));
-				tbinfo->drop_notnull[j] = false;
+				tbinfo->notnull_throwaway[j] = false;
 			}
 			else if (use_throwaway_notnull)
 			{
 
-				tbinfo->notnullconstrs[j] = psprintf("pgdump_throwaway_notnull_%d",
-													 notnullcount++);
-				tbinfo->drop_notnull[j] = true;
+				tbinfo->notnullconstrs[j] =
+					psprintf("pgdump_throwaway_notnull_%d", notnullcount++);
+				tbinfo->notnull_throwaway[j] = true;
 			}
 			else
 			{
 				tbinfo->notnullconstrs[j] = NULL;
-				tbinfo->drop_notnull[j] = false;
+				tbinfo->notnull_throwaway[j] = false;
 			}
 
 			tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
@@ -17000,7 +17000,7 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 		{
 			for (int i = 0; i < tbinfo->numatts; i++)
 			{
-				if (tbinfo->drop_notnull[i])
+				if (tbinfo->notnull_throwaway[i])
 				{
 					appendPQExpBuffer(q, "\nALTER TABLE %s DROP CONSTRAINT %s;",
 									  fmtQualifiedDumpable(tbinfo),
