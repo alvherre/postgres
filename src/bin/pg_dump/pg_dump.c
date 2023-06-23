@@ -15833,9 +15833,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 										  dopt->binary_upgrade ? "true" : "false");
 
 					print_notnull = (tbinfo->notnullconstrs[j] &&
-									 (true ||
-									  /* tbinfo->localNotNull[j] || */
-									  tbinfo->drop_notnull[j] ||
+									 (tbinfo->localNotNull[j] ||
 									  tbinfo->ispartition ||
 									  dopt->binary_upgrade));
 
