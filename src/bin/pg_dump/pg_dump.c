@@ -8743,7 +8743,9 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 				tbinfo->notnullconstrs[j] =
 					psprintf("pgdump_throwaway_notnull_%d", notnullcount++);
-				tbinfo->notnull_throwaway[j] = true;
+				/* On partitions, the constraint is dropped at the parent */
+				if (!tbinfo->ispartition)
+					tbinfo->notnull_throwaway[j] = true;
 			}
 			else
 			{
