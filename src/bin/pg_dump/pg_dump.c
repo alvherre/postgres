@@ -8486,7 +8486,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							 "co.conname AS attnotnull,\n"
 							 "co.connoinherit AS notnull_noinherit,\n"
 							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
-							 "coalesce(co.conislocal, false) AS local_notnull,\n");
+							 "coalesce(co.conislocal, copk.conname IS NOT NULL, false) AS local_notnull,\n");
 	else
 		appendPQExpBufferStr(q,
 							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END AS attnotnull,\n"
