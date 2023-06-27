@@ -15917,8 +15917,20 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 								RelationGetRelationName(child_rel),
 								NameStr(parent_con->conname))));
 
-			/* If the child constraint is "no inherit" then cannot merge */
-			if (child_con->connoinherit)
+			/*
+			 * If the child constraint is "no inherit" then cannot merge.
+			 *
+			 * This is not desirable for NOT NULL constraints, mostly because
+			 * it breaks our pg_upgrade strategy, but it also makes sense on
+			 * its own: if a child has its own NOT NULL constraint and then
+			 * acquires a parent with the same constraint, then we start to
+			 * enforce that constraint for all the descendants of that child
+			 * too, if any.  XXX since pg_upgrade only needs this for
+			 * inheritance and not partitioning, maybe we should also restrict
+			 * this behavior to that case?
+			 */
+			if (child_con->contype == CONSTRAINT_CHECK &&
+				child_con->connoinherit)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 						 errmsg("constraint \"%s\" conflicts with non-inherited constraint on child table \"%s\"",
@@ -15947,6 +15959,9 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
+			if (child_con->contype == CONSTRAINT_NOTNULL &&
+				child_con->connoinherit)
+				child_con->connoinherit = false;
 
 			/*
 			 * In case of partitions, an inherited constraint must be
