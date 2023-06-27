@@ -8714,15 +8714,21 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			{
 				if (!PQgetisnull(res, r, i_attnotnull))
 				{
-					char *default_name;
-
-					default_name = psprintf("%s_%s_not_null", tbinfo->dobj.name,
-											tbinfo->attnames[j]);
-					if (strcmp(default_name,
-							   PQgetvalue(res, r, i_attnotnull)) == 0)
-						use_unnamed_notnull = true;
+					if (!tbinfo->ispartition &&
+						PQgetvalue(res, r, i_localnotnull)[0] == 'f')
+						use_throwaway_notnull = true;
 					else
-						use_named_notnull = true;
+					{
+						char *default_name;
+
+						default_name = psprintf("%s_%s_not_null", tbinfo->dobj.name,
+												tbinfo->attnames[j]);
+						if (strcmp(default_name,
+								   PQgetvalue(res, r, i_attnotnull)) == 0)
+							use_unnamed_notnull = true;
+						else
+							use_named_notnull = true;
+					}
 				}
 				else if (PQgetvalue(res, r, i_notnull_is_pk)[0] == 't')
 					use_throwaway_notnull = true;
