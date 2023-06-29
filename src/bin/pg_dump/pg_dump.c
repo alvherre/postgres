@@ -8714,9 +8714,14 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			{
 				if (!PQgetisnull(res, r, i_attnotnull))
 				{
-					if (!tbinfo->ispartition &&
+					/*
+					 * In binary upgrade of inheritance child tables, must have
+					 * a constraint name that we can UPDATE later.
+					 */
+					if (dopt->binary_upgrade &&
+						!tbinfo->ispartition &&
 						PQgetvalue(res, r, i_localnotnull)[0] == 'f')
-						use_throwaway_notnull = true;
+						use_named_notnull = true;
 					else
 					{
 						char *default_name;
@@ -8741,7 +8746,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			}
 			else if (use_named_notnull)
 			{
-				tbinfo->notnullconstrs[j] = pstrdup(PQgetvalue(res, r, i_attnotnull));
+				tbinfo->notnullconstrs[j] = pstrdup(PQgetvalue(res, r,
+															   i_attnotnull));
 				tbinfo->notnull_throwaway[j] = false;
 			}
 			else if (use_throwaway_notnull)
@@ -8759,7 +8765,10 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				tbinfo->notnull_throwaway[j] = false;
 			}
 
-			tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
+			/* throwaway constraints must always be NO INHERIT */
+			tbinfo->notnull_noinh[j] = use_throwaway_notnull ||
+				PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
+
 			tbinfo->localNotNull[j] = PQgetvalue(res, r, i_localnotnull)[0] == 't';
 
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, r, i_attoptions));
@@ -15830,7 +15839,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					 * defined, except if partition, or in binary-upgrade case
 					 * where that won't work.
 					 */
-					if (tbinfo->notnullconstrs[j])
+					if (tbinfo->notnullconstrs[j] != NULL)
 						appendPQExpBuffer(&debugq,
 										  "-- nm: %s localNotNull: %s ispartition: %s binary_upg: %s\n",
 										  tbinfo->notnullconstrs[j],
@@ -15838,10 +15847,10 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 										  tbinfo->ispartition ? "true" : "false",
 										  dopt->binary_upgrade ? "true" : "false");
 
-					print_notnull = (tbinfo->notnullconstrs[j] &&
-									 (tbinfo->localNotNull[j] ||
-									  tbinfo->ispartition ||
-									  dopt->binary_upgrade));
+					print_notnull =
+						(tbinfo->notnullconstrs[j] != NULL &&
+						 (tbinfo->localNotNull[j] || tbinfo->ispartition ||
+						  dopt->binary_upgrade));
 
 					/*
 					 * Skip column if fully defined by reloftype, except in
@@ -16125,6 +16134,18 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					appendPQExpBufferStr(q, "\n  AND attrelid = ");
 					appendStringLiteralAH(q, qualrelname, fout);
 					appendPQExpBufferStr(q, "::pg_catalog.regclass;\n");
+
+					if (tbinfo->notnullconstrs[j] != NULL)
+					{
+						appendPQExpBufferStr(q, "UPDATE pg_catalog.pg_constraint\n"
+											 "SET conislocal = false\n"
+											 "WHERE conrelid = ");
+						appendStringLiteralAH(q, qualrelname, fout);
+						appendPQExpBufferStr(q, "::pg_catalog.regclass AND\n"
+											 "conname = ");
+						appendStringLiteralAH(q, tbinfo->notnullconstrs[j], fout);
+						appendPQExpBufferStr(q, ";\n");
+					}
 				}
 			}
 
@@ -16246,8 +16267,8 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			 * we have to mark it separately.
 			 */
 			if (!shouldPrintColumn(dopt, tbinfo, j) &&
-				tbinfo->notnullconstrs[j] && tbinfo->localNotNull[j] /* &&
-				tbinfo->ispartition */ )
+				tbinfo->notnullconstrs[j] != NULL &&
+				(!tbinfo->localNotNull[j] && !tbinfo->ispartition && !dopt->binary_upgrade))
 			{
 				/* pre-v16 NOT NULL constraints don't have names */
 				if (tbinfo->notnullconstrs[j][0] == '\0')
@@ -17001,14 +17022,14 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 		 * similar code in dumpIndex!
 		 */
 
-		/* Drop any NOT NULL constraint that were added to support the PK */
+		/* Drop any NOT NULL constraints that were added to support the PK */
 		if (coninfo->contype == 'p')
 		{
 			for (int i = 0; i < tbinfo->numatts; i++)
 			{
 				if (tbinfo->notnull_throwaway[i])
 				{
-					appendPQExpBuffer(q, "\nALTER TABLE %s DROP CONSTRAINT %s;",
+					appendPQExpBuffer(q, "\nALTER TABLE ONLY %s DROP CONSTRAINT %s;",
 									  fmtQualifiedDumpable(tbinfo),
 									  tbinfo->notnullconstrs[i]);
 				}
