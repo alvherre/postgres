@@ -8705,18 +8705,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			 * when the constraint was defined at the parent level instead of
 			 * locally.
 			 */
-//			if (!PQgetisnull(res, r, i_notnull_name))
-				fprintf(stdout, "-- rel: %s.%s att: %s attnotnull: %s notnull_is_pk: %s notnull_inh: %s\n",
-						tbinfo->dobj.namespace->dobj.name,
-						tbinfo->dobj.name,
-						tbinfo->attnames[j],
-						PQgetisnull(res, r, i_notnull_name) ? "(null)" :
-						PQgetvalue(res, r, i_notnull_name),
-						PQgetisnull(res, r, i_notnull_is_pk) ? "(null)" :
-						PQgetvalue(res, r, i_notnull_is_pk),
-						PQgetisnull(res, r, i_notnull_inh) ? "(null)" :
-						PQgetvalue(res, r, i_notnull_inh)
-					   );
 
 			/*
 			 * We use notnull_inh to suppress unwanted NOT NULL constraints in
@@ -8724,12 +8712,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			 * parent(s).
 			 */
 			tbinfo->notnull_inh[j] = PQgetvalue(res, r, i_notnull_inh)[0] == 't';
-			if (tbinfo->notnull_constrs[j] != NULL)
-				fprintf(stdout, "-- notnull_inh %s.%s.%s: %s\n",
-						tbinfo->dobj.namespace->dobj.name,
-						tbinfo->dobj.name,
-						tbinfo->attnames[j],
-						tbinfo->notnull_inh[j] ? "true" : "false");
 
 			/* XXX update version number */
 			if (fout->remoteVersion < 160000)	
@@ -15893,18 +15875,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					 * defined, except if partition, or in binary-upgrade case
 					 * where that won't work.
 					 */
-					if (tbinfo->notnull_constrs[j] != NULL)
-						appendPQExpBuffer(&debugq,
-										  "-- %d nm: \"%s.%s\" col \"%s\" constr: \"%s\" notnull_inh: %s ispartition: %s binary_upg: %s\n",
-										  0, /* fout->remoteVersion, */
-										  tbinfo->dobj.namespace->dobj.name,
-										  tbinfo->dobj.name,
-										  tbinfo->attnames[j],
-										  tbinfo->notnull_constrs[j],
-										  tbinfo->notnull_inh[j] ? "true" : "false",
-										  tbinfo->ispartition ? "true" : "false",
-										  dopt->binary_upgrade ? "true" : "false");
-
 					print_notnull =
 						(tbinfo->notnull_constrs[j] != NULL &&
 						 (!tbinfo->notnull_inh[j] || tbinfo->ispartition ||
@@ -16332,18 +16302,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 				tbinfo->notnull_constrs[j] != NULL &&
 				(!tbinfo->notnull_inh[j] && !tbinfo->ispartition && !dopt->binary_upgrade))
 			{
-				if (tbinfo->notnull_constrs[j] != NULL)
-					appendPQExpBuffer(q,
-									  "-- %d nm2: \"%s.%s\" col \"%s\" constr: \"%s\" notnull_inh: %s ispartition: %s binary_upg: %s\n",
-									  0, /* fout->remoteVersion,*/
-									  tbinfo->dobj.namespace->dobj.name,
-									  tbinfo->dobj.name,
-									  tbinfo->attnames[j],
-									  tbinfo->notnull_constrs[j],
-									  tbinfo->notnull_inh[j] ? "true" : "false",
-									  tbinfo->ispartition ? "true" : "false",
-									  dopt->binary_upgrade ? "true" : "false");
-
 				/* pre-v16 NOT NULL constraints don't have names */
 				if (tbinfo->notnull_constrs[j][0] == '\0')
 					appendPQExpBuffer(q,
