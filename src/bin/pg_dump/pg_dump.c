@@ -8524,25 +8524,21 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 	/*
 	 * In versions 16 and up, we need pg_constraint for explicit NOT NULL
-	 * entries; in earlier versions, we need it to see which rows have
-	 * attnotnull due to PRIMARY KEYs instead.  XXX actually, in 16 and up
-	 * we also need to know which columns are in the primary key.
+	 * entries.  Also, we need to know if the NOT NULL for each column is
+	 * backing a primary key.
 	 */
-	/* FIXME -- update version number to 17 */
-	if (fout->remoteVersion >= 160000)
+	if (fout->remoteVersion >= 170000)
 		appendPQExpBufferStr(q,
 							 " LEFT JOIN pg_catalog.pg_constraint co ON "
 							 "(a.attrelid = co.conrelid\n"
 							 "   AND co.contype = 'n' AND "
 							 "co.conkey = array[a.attnum])\n");
 
-	/* XXX merge this with below, if certain that no version test is needed */
 	appendPQExpBufferStr(q,
 						 "LEFT JOIN pg_catalog.pg_constraint copk ON "
 						 "(copk.conrelid = src.tbloid\n"
 						 "   AND copk.contype = 'p' AND "
-						 "copk.conkey @> array[a.attnum])\n");
-	appendPQExpBufferStr(q,
+						 "copk.conkey @> array[a.attnum])\n"
 						 "WHERE a.attnum > 0::pg_catalog.int2\n"
 						 "ORDER BY a.attrelid, a.attnum");
 
@@ -8698,8 +8694,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			 */
 			tbinfo->notnull_inh[j] = PQgetvalue(res, r, i_notnull_inh)[0] == 't';
 
-			/* XXX update version number */
-			if (fout->remoteVersion < 160000)	
+			if (fout->remoteVersion < 170000)
 			{
 				if (!PQgetisnull(res, r, i_notnull_name) &&
 					dopt->binary_upgrade &&
