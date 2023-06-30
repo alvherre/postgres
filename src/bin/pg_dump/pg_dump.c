@@ -8469,10 +8469,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 * avoid the table having to be scanned for NULLs after the data is loaded
 	 * when the PK is created, later in the dump; for this case we add
 	 * throwaway constraints that are dropped once the PK is created.
-	 *
-	 * FIXME -- update version number to 17
 	 */
-	if (fout->remoteVersion >= 160000)
+	if (fout->remoteVersion >= 170000)
 		appendPQExpBufferStr(q,
 							 "co.conname AS notnull_name,\n"
 							 "co.connoinherit AS notnull_noinherit,\n"

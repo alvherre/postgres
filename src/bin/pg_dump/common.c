@@ -575,16 +575,9 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				}
 			}
 
-			/* FIXME update version number */
-			/* In versions < 16, remember if we found inherited NOT NULL */
-			if (fout->remoteVersion < 160000)
-			{
-				fprintf(stderr, "setting notnull_inh %s for %s.%s\n",
-						foundNotNull ? "true" : "false",
-						tbinfo->dobj.name,
-						tbinfo->attnames[j]);
+			/* In versions < 17, remember if we found inherited NOT NULL */
+			if (fout->remoteVersion < 170000)
 				tbinfo->notnull_inh[j] = foundNotNull;
-			}
 
 			/*
 			 * Manufacture a DEFAULT NULL clause if necessary.  This breaks
