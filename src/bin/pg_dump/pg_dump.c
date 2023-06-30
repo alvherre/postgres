@@ -15629,10 +15629,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		char	   *srvname = NULL;
 		char	   *foreign = "";
 
-		PQExpBufferData debugq;
-
-		initPQExpBuffer(&debugq);
-
 		/*
 		 * Set reltypename, and collect any relkind-specific data that we
 		 * didn't fetch during getTables().
@@ -15943,10 +15939,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		else
 			appendPQExpBufferStr(q, ";\n");
 
-		/* XXX */
-		appendPQExpBufferStr(q, debugq.data);
-		appendPQExpBufferStr(q, "\n");
-
 		/* Materialized views can depend on extensions */
 		if (tbinfo->relkind == RELKIND_MATVIEW)
 			append_depends_on_extension(fout, q, &tbinfo->dobj,
@@ -16043,8 +16035,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					if (tbinfo->notnull_constrs[j] != NULL &&
 						!tbinfo->notnull_throwaway[j] &&
 						tbinfo->notnull_inh[j] &&
-						!tbinfo->ispartition
-						)
+						!tbinfo->ispartition)
 					{
 						appendPQExpBufferStr(q, "UPDATE pg_catalog.pg_constraint\n"
 											 "SET conislocal = false\n"
@@ -16605,7 +16596,6 @@ dumpIndex(Archive *fout, const IndxInfo *indxinfo)
 		 * only have ALTER TABLE syntax for.  Keep this in sync with the
 		 * similar code in dumpConstraint!
 		 */
-
 
 		/* If the index is clustered, we need to record that. */
 		if (indxinfo->indisclustered)
