@@ -7735,6 +7735,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	Constraint *constraint;
 	CookedConstraint *ccon;
 	List	   *cooked;
+	bool		is_no_inherit = false;
 	List	   *ready = NIL;
 
 	/*
@@ -7828,7 +7829,9 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	table_close(constr_rel, RowExclusiveLock);
 
 	/*
-	 * If we're asked not to recurse, and children exist, raise an error.
+	 * If we're asked not to recurse, and children exist, raise an error for
+	 * partitioned tables.  For inheritance, we act as if NO INHERIT had been
+	 * specified.
 	 */
 	if (!recurse &&
 		find_inheritance_children(RelationGetRelid(rel),
@@ -7840,10 +7843,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 					errmsg("cannot add constraint to only the partitioned table when partitions exist"),
 					errhint("Do not specify the ONLY keyword."));
 		else
-			ereport(ERROR,
-					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("cannot add constraint only to table with inheritance children"),
-					errhint("Do not specify the ONLY keyword."));
+			is_no_inherit = true;
 	}
 
 	/*
@@ -7865,6 +7865,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	constraint->initdeferred = false;
 	constraint->location = -1;
 	constraint->colname = colName;
+	constraint->is_no_inherit = is_no_inherit;
 	constraint->skip_validation = false;
 	constraint->initially_valid = true;
 

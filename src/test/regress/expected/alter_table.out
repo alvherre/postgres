@@ -1195,8 +1195,7 @@ alter table parent alter a drop not null;
 insert into parent values (NULL);
 insert into child (a, b) values (NULL, 'foo');
 alter table only parent alter a set not null;
-ERROR:  cannot add constraint only to table with inheritance children
-HINT:  Do not specify the ONLY keyword.
+ERROR:  column "a" of relation "parent" contains null values
 alter table child alter a set not null;
 ERROR:  column "a" of relation "child" contains null values
 drop table child;
