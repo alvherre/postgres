@@ -2862,11 +2862,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * processed.
 	 *
 	 * We don't use foreach() here because we have two nested loops over the
-	 * cooked constraint list, with possible element deletions in the inner one.
-	 * If we used foreach_delete_current() it could only fix up the state of one
-	 * of the loops, so it seems cleaner to use looping over list indexes for
-	 * both loops.  Note that any deletion will happen beyond where the outer
-	 * loop is, so its index never needs adjustment.
+	 * cooked constraint list, with possible element deletions in the inner
+	 * one. If we used foreach_delete_current() it could only fix up the state
+	 * of one of the loops, so it seems cleaner to use looping over list
+	 * indexes for both loops.  Note that any deletion will happen beyond
+	 * where the outer loop is, so its index never needs adjustment.
 	 */
 	list_sort(old_notnulls, list_cookedconstr_attnum_cmp);
 	for (int outerpos = 0; outerpos < list_length(old_notnulls); outerpos++)

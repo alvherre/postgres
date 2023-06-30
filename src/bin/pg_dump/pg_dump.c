@@ -8465,10 +8465,10 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 * We also track whether the constraint was defined directly in this table
 	 * or via an ancestor, for binary upgrade.  Lastly, we need to know if the
 	 * PK for the table involves each column; for columns that are there we
-	 * need a NOT NULL marking even if there's no explicit constraint, to avoid
-	 * the table having to be scanned for NULLs after the data is loaded when
-	 * the PK is created, later in the dump; for this case we add throwaway
-	 * constraints that are dropped once the PK is created.
+	 * need a NOT NULL marking even if there's no explicit constraint, to
+	 * avoid the table having to be scanned for NULLs after the data is loaded
+	 * when the PK is created, later in the dump; for this case we add
+	 * throwaway constraints that are dropped once the PK is created.
 	 *
 	 * FIXME -- update version number to 17
 	 */
@@ -8639,9 +8639,9 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 		for (int j = 0; j < numatts; j++, r++)
 		{
-			bool	use_named_notnull = false;
-			bool	use_unnamed_notnull = false;
-			bool	use_throwaway_notnull = false;
+			bool		use_named_notnull = false;
+			bool		use_unnamed_notnull = false;
+			bool		use_throwaway_notnull = false;
 
 			if (j + 1 != atoi(PQgetvalue(res, r, i_attnum)))
 				pg_fatal("invalid column numbering in table \"%s\"",
@@ -8664,8 +8664,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			 * First, if the user has specified a constraint name that's not
 			 * the system-assigned default name, then we need to preserve
 			 * that. But if they haven't, then we don't want to use the
-			 * verbose syntax in the dump output. (Also, in versions prior
-			 * to 17, there was no constraint name at all.)
+			 * verbose syntax in the dump output. (Also, in versions prior to
+			 * 17, there was no constraint name at all.)
 			 *
 			 * (XXX Comparing the name this way to a supposed default name is
 			 * a bit of a hack, but it beats having to store a boolean flag in
@@ -8717,8 +8717,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				if (!PQgetisnull(res, r, i_notnull_name))
 				{
 					/*
-					 * In binary upgrade of inheritance child tables, must have
-					 * a constraint name that we can UPDATE later.
+					 * In binary upgrade of inheritance child tables, must
+					 * have a constraint name that we can UPDATE later.
 					 */
 					if (dopt->binary_upgrade &&
 						!tbinfo->ispartition &&
@@ -8731,7 +8731,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 					}
 					else
 					{
-						char *default_name;
+						char	   *default_name;
 
 						/* XXX should match ChooseConstraintName better */
 						default_name = psprintf("%s_%s_not_null", tbinfo->dobj.name,
@@ -15630,6 +15630,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		char	   *foreign = "";
 
 		PQExpBufferData debugq;
+
 		initPQExpBuffer(&debugq);
 
 		/*

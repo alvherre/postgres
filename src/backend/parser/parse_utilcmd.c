@@ -701,9 +701,9 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 					Constraint *notnull;
 
 					/*
-					 * XXX why do we create our own node, instead of adding the node
-					 * we already have to the list?
-					 * */
+					 * XXX why do we create our own node, instead of adding
+					 * the node we already have to the list?
+					 */
 					column->is_not_null = true;
 					saw_nullable = true;
 
@@ -1217,10 +1217,10 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	 * expandTableLikeClause is certain to open the same table.
 	 */
 	if ((table_like_clause->options &
-		(CREATE_TABLE_LIKE_DEFAULTS |
-		 CREATE_TABLE_LIKE_GENERATED |
-		 CREATE_TABLE_LIKE_CONSTRAINTS |
-		 CREATE_TABLE_LIKE_INDEXES)) ||
+		 (CREATE_TABLE_LIKE_DEFAULTS |
+		  CREATE_TABLE_LIKE_GENERATED |
+		  CREATE_TABLE_LIKE_CONSTRAINTS |
+		  CREATE_TABLE_LIKE_INDEXES)) ||
 		process_notnull_constraints)
 	{
 		table_like_clause->relationOid = RelationGetRelid(relation);

@@ -7590,10 +7590,10 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 	 */
 	if (rel->rd_rel->relispartition)
 	{
-		Oid         parentId = get_partition_parent(RelationGetRelid(rel), false);
-		Relation    parent = table_open(parentId, AccessShareLock);
-		TupleDesc   tupDesc = RelationGetDescr(parent);
-		AttrNumber  parent_attnum;
+		Oid			parentId = get_partition_parent(RelationGetRelid(rel), false);
+		Relation	parent = table_open(parentId, AccessShareLock);
+		TupleDesc	tupDesc = RelationGetDescr(parent);
+		AttrNumber	parent_attnum;
 
 		parent_attnum = get_attnum(parentId, colName);
 		if (TupleDescAttr(tupDesc, parent_attnum - 1)->attnotnull)
@@ -7675,8 +7675,8 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 		table_close(attr_rel, RowExclusiveLock);
 
 		/*
-		 * And set up for existing values to be checked, unless another constraint
-		 * already proves this.
+		 * And set up for existing values to be checked, unless another
+		 * constraint already proves this.
 		 */
 		if (wqueue && !NotNullImpliedByRelConstraints(rel, attForm))
 		{
@@ -9380,8 +9380,8 @@ ATAddCheckConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			constr->conname = ccon->name;
 
 		/*
-		 * If adding a NOT NULL constraint, set the pg_attribute flag and
-		 * tell phase 3 to verify existing rows, if needed.
+		 * If adding a NOT NULL constraint, set the pg_attribute flag and tell
+		 * phase 3 to verify existing rows, if needed.
 		 */
 		if (constr->contype == CONSTR_NOTNULL)
 			set_attnotnull(wqueue, rel, ccon->attnum,
@@ -12389,7 +12389,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	bool		dropping_pk = false;
 	char	   *constrName;
 	List	   *unconstrained_cols = NIL;
-	char	   *colname;	/* to match NOT NULL constraints when recursing */
+	char	   *colname;		/* to match NOT NULL constraints when
+								 * recursing */
 	List	   *ready = NIL;
 
 	if (readyRels == NULL)
@@ -12626,7 +12627,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		colname = NameStr(TupleDescAttr(RelationGetDescr(rel),
 										linitial_int(unconstrained_cols) - 1)->attname);
 	else
-		colname = NULL;		/* keep compiler quiet */
+		colname = NULL;			/* keep compiler quiet */
 
 	foreach(child, children)
 	{
@@ -12639,7 +12640,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		ScanKeyData skey[3];
 
 		if (list_member_oid(*readyRels, childrelid))
-			continue;		/* child already processed */
+			continue;			/* child already processed */
 
 		/* find_inheritance_children already got lock */
 		childrel = table_open(childrelid, NoLock);
@@ -12651,8 +12652,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		 */
 		if (con->contype == CONSTRAINT_NOTNULL)
 		{
-			bool	found = false;
-			AttrNumber child_colnum;
+			bool		found = false;
+			AttrNumber	child_colnum;
 			HeapTuple	child_tup;
 
 			child_colnum = get_attnum(RelationGetRelid(childrel), colname);
@@ -12674,9 +12675,9 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 					continue;
 
 				found = true;
-				break;	/* found it */
+				break;			/* found it */
 			}
-			if (!found)	/* shouldn't happen? */
+			if (!found)			/* shouldn't happen? */
 				elog(ERROR, "failed to find NOT NULL constraint for column \"%s\" in table \"%s\"",
 					 colname, RelationGetRelationName(childrel));
 
@@ -12718,7 +12719,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			childcon->contype != CONSTRAINT_NOTNULL)
 			elog(ERROR, "inherited constraint is not a CHECK or NOT NULL constraint");
 
-		if (childcon->coninhcount <= 0)	/* shouldn't happen */
+		if (childcon->coninhcount <= 0) /* shouldn't happen */
 			elog(ERROR, "relation %u has non-inherited constraint \"%s\"",
 				 childrelid, constrName);
 
