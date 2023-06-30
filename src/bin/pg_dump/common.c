@@ -556,7 +556,8 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				{
 					AttrDefInfo *parentDef = parent->attrdefs[inhAttrInd];
 
-					foundNotNull |= (parent->notnullconstrs[inhAttrInd] != NULL);
+					foundNotNull |= (parent->notnull_constrs[inhAttrInd] != NULL &&
+									 !parent->notnull_noinh[inhAttrInd]);
 					foundDefault |= (parentDef != NULL &&
 									 strcmp(parentDef->adef_expr, "NULL") != 0 &&
 									 !parent->attgenerated[inhAttrInd]);
@@ -574,9 +575,16 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				}
 			}
 
+			/* FIXME update version number */
 			/* In versions < 16, remember if we found inherited NOT NULL */
 			if (fout->remoteVersion < 160000)
-				tbinfo->localNotNull[j] = !foundNotNull;
+			{
+				fprintf(stderr, "setting notnull_inh %s for %s.%s\n",
+						foundNotNull ? "true" : "false",
+						tbinfo->dobj.name,
+						tbinfo->attnames[j]);
+				tbinfo->notnull_inh[j] = foundNotNull;
+			}
 
 			/*
 			 * Manufacture a DEFAULT NULL clause if necessary.  This breaks
