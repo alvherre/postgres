@@ -3515,6 +3515,10 @@ OverrideSearchPathMatchesCurrent(OverrideSearchPath *path)
 /*
  * PushOverrideSearchPath - temporarily override the search path
  *
+ * Do not use this function; almost any usage introduces a security
+ * vulnerability.  It exists for the benefit of legacy code running in
+ * non-security-sensitive environments.
+ *
  * We allow nested overrides, hence the push/pop terminology.  The GUC
  * search_path variable is ignored while an override is active.
  *
@@ -3838,7 +3842,7 @@ recomputeNamespacePath(void)
 				if (OidIsValid(namespaceId) &&
 					!list_member_oid(oidlist, namespaceId) &&
 					object_aclcheck(NamespaceRelationId, namespaceId, roleid,
-										  ACL_USAGE) == ACLCHECK_OK &&
+									ACL_USAGE) == ACLCHECK_OK &&
 					InvokeNamespaceSearchHook(namespaceId, false))
 					oidlist = lappend_oid(oidlist, namespaceId);
 			}
@@ -3866,7 +3870,7 @@ recomputeNamespacePath(void)
 			if (OidIsValid(namespaceId) &&
 				!list_member_oid(oidlist, namespaceId) &&
 				object_aclcheck(NamespaceRelationId, namespaceId, roleid,
-									  ACL_USAGE) == ACLCHECK_OK &&
+								ACL_USAGE) == ACLCHECK_OK &&
 				InvokeNamespaceSearchHook(namespaceId, false))
 				oidlist = lappend_oid(oidlist, namespaceId);
 		}
@@ -4002,7 +4006,7 @@ InitTempTableNamespace(void)
 	 * temp table creation request is made by someone with appropriate rights.
 	 */
 	if (object_aclcheck(DatabaseRelationId, MyDatabaseId, GetUserId(),
-							 ACL_CREATE_TEMP) != ACLCHECK_OK)
+						ACL_CREATE_TEMP) != ACLCHECK_OK)
 		ereport(ERROR,
 				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 				 errmsg("permission denied to create temporary tables in database \"%s\"",

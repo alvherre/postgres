@@ -125,9 +125,6 @@ typedef struct PlannerGlobal
 	/* "flat" list of AppendRelInfos */
 	List	   *appendRelations;
 
-	/* List of PartitionPruneInfo contained in the plan */
-	List	   *partPruneInfos;
-
 	/* OIDs of relations the plan depends on */
 	List	   *relationOids;
 
@@ -547,9 +544,6 @@ struct PlannerInfo
 
 	/* Does this query modify any partition key columns? */
 	bool		partColsUpdated;
-
-	/* PartitionPruneInfos added in this query's plan. */
-	List	   *partPruneInfos;
 };
 
 
@@ -2436,6 +2430,15 @@ typedef struct LimitPath
  * conditions.  Possibly we should rename it to reflect that meaning?  But
  * see also the comments for RINFO_IS_PUSHED_DOWN, below.)
  *
+ * There is also an incompatible_relids field, which is a set of outer-join
+ * relids above which we cannot evaluate the clause (because they might null
+ * Vars it uses that should not be nulled yet).  In principle this could be
+ * filled in any RestrictInfo as the set of OJ relids that appear above the
+ * clause and null Vars that it uses.  In practice we only bother to populate
+ * it for "clone" clauses, as it's currently only needed to prevent multiple
+ * clones of the same clause from being accepted for evaluation at the same
+ * join level.
+ *
  * There is also an outer_relids field, which is NULL except for outer join
  * clauses; for those, it is the set of relids on the outer side of the
  * clause's outer join.  (These are rels that the clause cannot be applied to
@@ -2542,6 +2545,9 @@ typedef struct RestrictInfo
 
 	/* The set of relids required to evaluate the clause: */
 	Relids		required_relids;
+
+	/* Relids above which we cannot evaluate the clause (see comment above) */
+	Relids		incompatible_relids;
 
 	/* If an outer-join clause, the outer-side relations, else NULL: */
 	Relids		outer_relids;
@@ -2789,11 +2795,15 @@ typedef struct PlaceHolderVar
  * 3, when this join is in the RHS of the upper join (so, this is the lower
  * join in the second form of the identity).
  *
- * commute_below is filled with the relids of syntactically-lower outer joins
- * that have been found to commute with this one per outer join identity 3.
- * (We need not record which side they are on, since that can be determined
- * by seeing whether the lower join's relid appears in syn_lefthand or
- * syn_righthand.)
+ * commute_below_l is filled with the relids of syntactically-lower outer
+ * joins that have been found to commute with this one per outer join identity
+ * 3 and are in the LHS of this join (so, this is the upper join in the first
+ * form of the identity).
+ *
+ * commute_below_r is filled with the relids of syntactically-lower outer
+ * joins that have been found to commute with this one per outer join identity
+ * 3 and are in the RHS of this join (so, this is the upper join in the second
+ * form of the identity).
  *
  * lhs_strict is true if the special join's condition cannot succeed when the
  * LHS variables are all NULL (this means that an outer join can commute with
@@ -2835,7 +2845,8 @@ struct SpecialJoinInfo
 	Index		ojrelid;		/* outer join's RT index; 0 if none */
 	Relids		commute_above_l;	/* commuting OJs above this one, if LHS */
 	Relids		commute_above_r;	/* commuting OJs above this one, if RHS */
-	Relids		commute_below;	/* commuting OJs below this one */
+	Relids		commute_below_l;	/* commuting OJs in this one's LHS */
+	Relids		commute_below_r;	/* commuting OJs in this one's RHS */
 	bool		lhs_strict;		/* joinclause is strict for some LHS rel */
 	/* Remaining fields are set only for JOIN_SEMI jointype: */
 	bool		semi_can_btree; /* true if semi_operators are all btree */

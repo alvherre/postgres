@@ -692,7 +692,6 @@ fmgr_security_definer(PG_FUNCTION_ARGS)
 	if (fcache->proconfig)
 	{
 		ProcessGUCArray(fcache->proconfig,
-						NULL,
 						(superuser() ? PGC_SUSET : PGC_USERSET),
 						PGC_S_SESSION,
 						GUC_ACTION_SAVE);
@@ -2151,7 +2150,7 @@ CheckFunctionValidatorAccess(Oid validatorOid, Oid functionOid)
 
 	/* first validate that we have permissions to use the language */
 	aclresult = object_aclcheck(LanguageRelationId, procStruct->prolang, GetUserId(),
-									 ACL_USAGE);
+								ACL_USAGE);
 	if (aclresult != ACLCHECK_OK)
 		aclcheck_error(aclresult, OBJECT_LANGUAGE,
 					   NameStr(langStruct->lanname));

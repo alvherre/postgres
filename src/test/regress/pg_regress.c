@@ -85,14 +85,14 @@ typedef enum TAPtype
 	TEST_STATUS,
 	PLAN,
 	NONE
-}			TAPtype;
+} TAPtype;
 
 /* options settable from command line */
 _stringlist *dblist = NULL;
 bool		debug = false;
 char	   *inputdir = ".";
 char	   *outputdir = ".";
-char       *expecteddir = ".";
+char	   *expecteddir = ".";
 char	   *bindir = PGBINDIR;
 char	   *launcher = NULL;
 static _stringlist *loadextension = NULL;
@@ -798,6 +798,7 @@ initialize_environment(void)
 		unsetenv("PGCONNECT_TIMEOUT");
 		unsetenv("PGDATA");
 		unsetenv("PGDATABASE");
+		unsetenv("PGGSSDELEGATION");
 		unsetenv("PGGSSENCMODE");
 		unsetenv("PGGSSLIB");
 		/* PGHOSTADDR, see below */
@@ -1891,14 +1892,14 @@ run_single_test(const char *test, test_start_function startfunc,
 
 	if (exit_status != 0)
 	{
-		test_status_failed(test, false, INSTR_TIME_GET_MILLISEC(stoptime));
+		test_status_failed(test, INSTR_TIME_GET_MILLISEC(stoptime), false);
 		log_child_failure(exit_status);
 	}
 	else
 	{
 		if (differ)
 		{
-			test_status_failed(test, false, INSTR_TIME_GET_MILLISEC(stoptime));
+			test_status_failed(test, INSTR_TIME_GET_MILLISEC(stoptime), false);
 		}
 		else
 		{
@@ -1971,10 +1972,10 @@ create_database(const char *dbname)
 	 */
 	if (encoding)
 		psql_add_command(buf, "CREATE DATABASE \"%s\" TEMPLATE=template0 ENCODING='%s'%s", dbname, encoding,
-						 (nolocale) ? " LC_COLLATE='C' LC_CTYPE='C'" : "");
+						 (nolocale) ? " LOCALE='C'" : "");
 	else
 		psql_add_command(buf, "CREATE DATABASE \"%s\" TEMPLATE=template0%s", dbname,
-						 (nolocale) ? " LC_COLLATE='C' LC_CTYPE='C'" : "");
+						 (nolocale) ? " LOCALE='C'" : "");
 	psql_add_command(buf,
 					 "ALTER DATABASE \"%s\" SET lc_messages TO 'C';"
 					 "ALTER DATABASE \"%s\" SET lc_monetary TO 'C';"

@@ -1223,7 +1223,7 @@ heap_set_tidrange(TableScanDesc sscan, ItemPointer mintid,
 	 * Calculate the first block and the number of blocks we must scan. We
 	 * could be more aggressive here and perform some more validation to try
 	 * and further narrow the scope of blocks to scan by checking if the
-	 * lowerItem has an offset above MaxOffsetNumber.  In this case, we could
+	 * lowestItem has an offset above MaxOffsetNumber.  In this case, we could
 	 * advance startBlk by one.  Likewise, if highestItem has an offset of 0
 	 * we could scan one fewer blocks.  However, such an optimization does not
 	 * seem worth troubling over, currently.
@@ -2491,7 +2491,7 @@ static inline bool
 xmax_infomask_changed(uint16 new_infomask, uint16 old_infomask)
 {
 	const uint16 interesting =
-	HEAP_XMAX_IS_MULTI | HEAP_XMAX_LOCK_ONLY | HEAP_LOCK_MASK;
+		HEAP_XMAX_IS_MULTI | HEAP_XMAX_LOCK_ONLY | HEAP_LOCK_MASK;
 
 	if ((new_infomask & interesting) != (old_infomask & interesting))
 		return true;

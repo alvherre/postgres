@@ -135,7 +135,7 @@ static const char *const BuiltinTrancheNames[] = {
 	/* LWTRANCHE_XACT_BUFFER: */
 	"XactBuffer",
 	/* LWTRANCHE_COMMITTS_BUFFER: */
-	"CommitTSBuffer",
+	"CommitTsBuffer",
 	/* LWTRANCHE_SUBTRANS_BUFFER: */
 	"SubtransBuffer",
 	/* LWTRANCHE_MULTIXACTOFFSET_BUFFER: */
@@ -1118,9 +1118,9 @@ LWLockDequeueSelf(LWLock *lock)
 	LWLockWaitListLock(lock);
 
 	/*
-	 * Remove ourselves from the waitlist, unless we've already been
-	 * removed. The removal happens with the wait list lock held, so there's
-	 * no race in this check.
+	 * Remove ourselves from the waitlist, unless we've already been removed.
+	 * The removal happens with the wait list lock held, so there's no race in
+	 * this check.
 	 */
 	on_waitlist = MyProc->lwWaiting == LW_WS_WAITING;
 	if (on_waitlist)

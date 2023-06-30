@@ -44,14 +44,14 @@ static Walfile *dir_open_for_write(WalWriteMethod *wwmethod,
 								   const char *pathname,
 								   const char *temp_suffix,
 								   size_t pad_to_size);
-static int dir_close(Walfile *f, WalCloseMethod method);
+static int	dir_close(Walfile *f, WalCloseMethod method);
 static bool dir_existsfile(WalWriteMethod *wwmethod, const char *pathname);
 static ssize_t dir_get_file_size(WalWriteMethod *wwmethod,
 								 const char *pathname);
 static char *dir_get_file_name(WalWriteMethod *wwmethod,
 							   const char *pathname, const char *temp_suffix);
 static ssize_t dir_write(Walfile *f, const void *buf, size_t count);
-static int dir_sync(Walfile *f);
+static int	dir_sync(Walfile *f);
 static bool dir_finish(WalWriteMethod *wwmethod);
 static void dir_free(WalWriteMethod *wwmethod);
 
@@ -72,7 +72,7 @@ const WalWriteMethodOps WalDirectoryMethodOps = {
  */
 typedef struct DirectoryMethodData
 {
-	WalWriteMethod	base;
+	WalWriteMethod base;
 	char	   *basedir;
 } DirectoryMethodData;
 
@@ -660,14 +660,14 @@ static Walfile *tar_open_for_write(WalWriteMethod *wwmethod,
 								   const char *pathname,
 								   const char *temp_suffix,
 								   size_t pad_to_size);
-static int tar_close(Walfile *f, WalCloseMethod method);
+static int	tar_close(Walfile *f, WalCloseMethod method);
 static bool tar_existsfile(WalWriteMethod *wwmethod, const char *pathname);
 static ssize_t tar_get_file_size(WalWriteMethod *wwmethod,
 								 const char *pathname);
 static char *tar_get_file_name(WalWriteMethod *wwmethod,
 							   const char *pathname, const char *temp_suffix);
 static ssize_t tar_write(Walfile *f, const void *buf, size_t count);
-static int tar_sync(Walfile *f);
+static int	tar_sync(Walfile *f);
 static bool tar_finish(WalWriteMethod *wwmethod);
 static void tar_free(WalWriteMethod *wwmethod);
 
@@ -693,7 +693,7 @@ typedef struct TarMethodFile
 
 typedef struct TarMethodData
 {
-	WalWriteMethod	base;
+	WalWriteMethod base;
 	char	   *tarfilename;
 	int			fd;
 	TarMethodFile *currentfile;
@@ -718,7 +718,7 @@ tar_write_compressed_data(TarMethodData *tar_data, void *buf, size_t count,
 		r = deflate(tar_data->zp, flush ? Z_FINISH : Z_NO_FLUSH);
 		if (r == Z_STREAM_ERROR)
 		{
-			tar_data->base.lasterrstring = "could not compress data";
+			tar_data->base.lasterrstring = _("could not compress data");
 			return false;
 		}
 
@@ -747,7 +747,7 @@ tar_write_compressed_data(TarMethodData *tar_data, void *buf, size_t count,
 		/* Reset the stream for writing */
 		if (deflateReset(tar_data->zp) != Z_OK)
 		{
-			tar_data->base.lasterrstring = "could not reset compression stream";
+			tar_data->base.lasterrstring = _("could not reset compression stream");
 			return false;
 		}
 	}
@@ -873,7 +873,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 				pg_free(tar_data->zp);
 				tar_data->zp = NULL;
 				wwmethod->lasterrstring =
-					"could not initialize compression library";
+					_("could not initialize compression library");
 				return NULL;
 			}
 		}
@@ -885,7 +885,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 	if (tar_data->currentfile != NULL)
 	{
 		wwmethod->lasterrstring =
-			"implementation error: tar files can't have more than one open file";
+			_("implementation error: tar files can't have more than one open file");
 		return NULL;
 	}
 
@@ -900,7 +900,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 		pg_free(tar_data->currentfile);
 		pg_free(tmppath);
 		tar_data->currentfile = NULL;
-		wwmethod->lasterrstring = "could not create tar header";
+		wwmethod->lasterrstring = _("could not create tar header");
 		return NULL;
 	}
 
@@ -917,7 +917,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 		if (deflateParams(tar_data->zp, 0, Z_DEFAULT_STRATEGY) != Z_OK)
 		{
 			wwmethod->lasterrstring =
-				"could not change compression parameters";
+				_("could not change compression parameters");
 			return NULL;
 		}
 	}
@@ -958,7 +958,7 @@ tar_open_for_write(WalWriteMethod *wwmethod, const char *pathname,
 		if (deflateParams(tar_data->zp, wwmethod->compression_level,
 						  Z_DEFAULT_STRATEGY) != Z_OK)
 		{
-			wwmethod->lasterrstring = "could not change compression parameters";
+			wwmethod->lasterrstring = _("could not change compression parameters");
 			return NULL;
 		}
 	}
@@ -1049,7 +1049,7 @@ tar_close(Walfile *f, WalCloseMethod method)
 	{
 		if (f->wwmethod->compression_algorithm != PG_COMPRESSION_NONE)
 		{
-			f->wwmethod->lasterrstring = "unlink not supported with compression";
+			f->wwmethod->lasterrstring = _("unlink not supported with compression");
 			return -1;
 		}
 
@@ -1163,7 +1163,7 @@ tar_close(Walfile *f, WalCloseMethod method)
 		/* Turn off compression */
 		if (deflateParams(tar_data->zp, 0, Z_DEFAULT_STRATEGY) != Z_OK)
 		{
-			f->wwmethod->lasterrstring = "could not change compression parameters";
+			f->wwmethod->lasterrstring = _("could not change compression parameters");
 			return -1;
 		}
 
@@ -1176,7 +1176,7 @@ tar_close(Walfile *f, WalCloseMethod method)
 		if (deflateParams(tar_data->zp, f->wwmethod->compression_level,
 						  Z_DEFAULT_STRATEGY) != Z_OK)
 		{
-			f->wwmethod->lasterrstring = "could not change compression parameters";
+			f->wwmethod->lasterrstring = _("could not change compression parameters");
 			return -1;
 		}
 	}
@@ -1261,7 +1261,7 @@ tar_finish(WalWriteMethod *wwmethod)
 
 			if (r == Z_STREAM_ERROR)
 			{
-				wwmethod->lasterrstring = "could not compress data";
+				wwmethod->lasterrstring = _("could not compress data");
 				return false;
 			}
 			if (tar_data->zp->avail_out < ZLIB_OUT_SIZE)
@@ -1285,7 +1285,7 @@ tar_finish(WalWriteMethod *wwmethod)
 
 		if (deflateEnd(tar_data->zp) != Z_OK)
 		{
-			wwmethod->lasterrstring = "could not close compression stream";
+			wwmethod->lasterrstring = _("could not close compression stream");
 			return false;
 		}
 	}
@@ -1353,7 +1353,7 @@ CreateWalTarMethod(const char *tarbase,
 {
 	TarMethodData *wwmethod;
 	const char *suffix = (compression_algorithm == PG_COMPRESSION_GZIP) ?
-	".tar.gz" : ".tar";
+		".tar.gz" : ".tar";
 
 	wwmethod = pg_malloc0(sizeof(TarMethodData));
 	*((const WalWriteMethodOps **) &wwmethod->base.ops) =

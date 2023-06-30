@@ -277,7 +277,7 @@ slashUsage(unsigned short int pager)
 	HELP0("  \\do[S+] [OPPTRN [TYPEPTRN [TYPEPTRN]]]\n"
 		  "                         list operators\n");
 	HELP0("  \\dO[S+] [PATTERN]      list collations\n");
-	HELP0("  \\dp     [PATTERN]      list table, view, and sequence access privileges\n");
+	HELP0("  \\dp[S]  [PATTERN]      list table, view, and sequence access privileges\n");
 	HELP0("  \\dP[itn+] [PATTERN]    list [only index/table] partitioned relations [n=nested]\n");
 	HELP0("  \\drds [ROLEPTRN [DBPTRN]] list per-database role settings\n");
 	HELP0("  \\dRp[+] [PATTERN]      list replication publications\n");
@@ -293,7 +293,7 @@ slashUsage(unsigned short int pager)
 	HELP0("  \\l[+]   [PATTERN]      list databases\n");
 	HELP0("  \\sf[+]  FUNCNAME       show a function's definition\n");
 	HELP0("  \\sv[+]  VIEWNAME       show a view's definition\n");
-	HELP0("  \\z      [PATTERN]      same as \\dp\n");
+	HELP0("  \\z[S]   [PATTERN]      same as \\dp\n");
 	HELP0("\n");
 
 	HELP0("Large Objects\n");
@@ -410,7 +410,7 @@ helpVariables(unsigned short int pager)
 	HELP0("  ENCODING\n"
 		  "    current client character set encoding\n");
 	HELP0("  ERROR\n"
-		  "    true if last query failed, else false\n");
+		  "    \"true\" if last query failed, else \"false\"\n");
 	HELP0("  FETCH_COUNT\n"
 		  "    the number of result rows to fetch and display at a time (0 = unlimited)\n");
 	HELP0("  HIDE_TABLEAM\n"
@@ -452,7 +452,7 @@ helpVariables(unsigned short int pager)
 		  "  SERVER_VERSION_NUM\n"
 		  "    server's version (in short string or numeric format)\n");
 	HELP0("  SHELL_ERROR\n"
-		  "    true if the last shell command failed, false if it succeeded\n");
+		  "    \"true\" if the last shell command failed, \"false\" if it succeeded\n");
 	HELP0("  SHELL_EXIT_CODE\n"
 		  "    exit status of the last shell command\n");
 	HELP0("  SHOW_ALL_RESULTS\n"

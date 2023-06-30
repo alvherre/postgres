@@ -28,25 +28,25 @@ sub ParseHeader
 	# There are a few types which are given one name in the C source, but a
 	# different name at the SQL level.  These are enumerated here.
 	my %RENAME_ATTTYPE = (
-		'int16'         => 'int2',
-		'int32'         => 'int4',
-		'int64'         => 'int8',
-		'Oid'           => 'oid',
-		'NameData'      => 'name',
+		'int16' => 'int2',
+		'int32' => 'int4',
+		'int64' => 'int8',
+		'Oid' => 'oid',
+		'NameData' => 'name',
 		'TransactionId' => 'xid',
-		'XLogRecPtr'    => 'pg_lsn');
+		'XLogRecPtr' => 'pg_lsn');
 
 	my %catalog;
 	my $declaring_attributes = 0;
-	my $is_varlen            = 0;
-	my $is_client_code       = 0;
+	my $is_varlen = 0;
+	my $is_client_code = 0;
 
-	$catalog{columns}      = [];
-	$catalog{toasting}     = [];
-	$catalog{indexing}     = [];
-	$catalog{other_oids}   = [];
+	$catalog{columns} = [];
+	$catalog{toasting} = [];
+	$catalog{indexing} = [];
+	$catalog{other_oids} = [];
 	$catalog{foreign_keys} = [];
-	$catalog{client_code}  = [];
+	$catalog{client_code} = [];
 
 	open(my $ifh, '<', $input_file) || die "$input_file: $!";
 
@@ -91,79 +91,94 @@ sub ParseHeader
 		# Push the data into the appropriate data structure.
 		# Caution: when adding new recognized OID-defining macros,
 		# also update src/include/catalog/renumber_oids.pl.
-		if (/^DECLARE_TOAST\(\s*(\w+),\s*(\d+),\s*(\d+)\)/)
-		{
-			push @{ $catalog{toasting} },
-			  { parent_table => $1, toast_oid => $2, toast_index_oid => $3 };
-		}
-		elsif (
-			/^DECLARE_TOAST_WITH_MACRO\(\s*(\w+),\s*(\d+),\s*(\d+),\s*(\w+),\s*(\w+)\)/
+		if (/^DECLARE_TOAST\(\s*
+			 (?<parent_table>\w+),\s*
+			 (?<toast_oid>\d+),\s*
+			 (?<toast_index_oid>\d+)\s*
+			 \)/x
 		  )
 		{
-			push @{ $catalog{toasting} },
-			  {
-				parent_table          => $1,
-				toast_oid             => $2,
-				toast_index_oid       => $3,
-				toast_oid_macro       => $4,
-				toast_index_oid_macro => $5
-			  };
+			push @{ $catalog{toasting} }, {%+};
 		}
 		elsif (
-			/^DECLARE_(UNIQUE_)?INDEX(_PKEY)?\(\s*(\w+),\s*(\d+),\s*(\w+),\s*(.+)\)/
+			/^DECLARE_TOAST_WITH_MACRO\(\s*
+			 (?<parent_table>\w+),\s*
+			 (?<toast_oid>\d+),\s*
+			 (?<toast_index_oid>\d+),\s*
+			 (?<toast_oid_macro>\w+),\s*
+			 (?<toast_index_oid_macro>\w+)\s*
+			 \)/x
+		  )
+		{
+			push @{ $catalog{toasting} }, {%+};
+		}
+		elsif (
+			/^DECLARE_(UNIQUE_)?INDEX(_PKEY)?\(\s*
+			 (?<index_name>\w+),\s*
+			 (?<index_oid>\d+),\s*
+			 (?<index_oid_macro>\w+),\s*
+			 (?<index_decl>.+)\s*
+			 \)/x
 		  )
 		{
 			push @{ $catalog{indexing} },
 			  {
 				is_unique => $1 ? 1 : 0,
-				is_pkey   => $2 ? 1 : 0,
-				index_name      => $3,
-				index_oid       => $4,
-				index_oid_macro => $5,
-				index_decl      => $6
-			  };
-		}
-		elsif (/^DECLARE_OID_DEFINING_MACRO\(\s*(\w+),\s*(\d+)\)/)
-		{
-			push @{ $catalog{other_oids} },
-			  {
-				other_name => $1,
-				other_oid  => $2
+				is_pkey => $2 ? 1 : 0,
+				%+,
 			  };
 		}
 		elsif (
-			/^DECLARE_(ARRAY_)?FOREIGN_KEY(_OPT)?\(\s*\(([^)]+)\),\s*(\w+),\s*\(([^)]+)\)\)/
+			/^DECLARE_OID_DEFINING_MACRO\(\s*
+			 (?<other_name>\w+),\s*
+			 (?<other_oid>\d+)\s*
+			 \)/x
+		  )
+		{
+			push @{ $catalog{other_oids} }, {%+};
+		}
+		elsif (
+			/^DECLARE_(ARRAY_)?FOREIGN_KEY(_OPT)?\(\s*
+			 \((?<fk_cols>[^)]+)\),\s*
+			 (?<pk_table>\w+),\s*
+			 \((?<pk_cols>[^)]+)\)\s*
+			 \)/x
 		  )
 		{
 			push @{ $catalog{foreign_keys} },
 			  {
 				is_array => $1 ? 1 : 0,
-				is_opt   => $2 ? 1 : 0,
-				fk_cols  => $3,
-				pk_table => $4,
-				pk_cols  => $5
+				is_opt => $2 ? 1 : 0,
+				%+,
 			  };
 		}
-		elsif (/^CATALOG\((\w+),(\d+),(\w+)\)/)
+		elsif (
+			/^CATALOG\(\s*
+			 (?<catname>\w+),\s*
+			 (?<relation_oid>\d+),\s*
+			 (?<relation_oid_macro>\w+)\s*
+			 \)/x
+		  )
 		{
-			$catalog{catname}            = $1;
-			$catalog{relation_oid}       = $2;
-			$catalog{relation_oid_macro} = $3;
+			@catalog{ keys %+ } = values %+;
 
 			$catalog{bootstrap} = /BKI_BOOTSTRAP/ ? ' bootstrap' : '';
 			$catalog{shared_relation} =
 			  /BKI_SHARED_RELATION/ ? ' shared_relation' : '';
-			if (/BKI_ROWTYPE_OID\((\d+),(\w+)\)/)
+			if (/BKI_ROWTYPE_OID\(\s*
+				 (?<rowtype_oid>\d+),\s*
+				 (?<rowtype_oid_macro>\w+)\s*
+				 \)/x
+			  )
 			{
-				$catalog{rowtype_oid}        = $1;
-				$catalog{rowtype_oid_clause} = " rowtype_oid $1";
-				$catalog{rowtype_oid_macro}  = $2;
+				@catalog{ keys %+ } = values %+;
+				$catalog{rowtype_oid_clause} = " rowtype_oid $+{rowtype_oid}";
 			}
 			else
 			{
-				$catalog{rowtype_oid}        = '';
+				$catalog{rowtype_oid} = '';
 				$catalog{rowtype_oid_clause} = '';
-				$catalog{rowtype_oid_macro}  = '';
+				$catalog{rowtype_oid_macro} = '';
 			}
 			$catalog{schema_macro} = /BKI_SCHEMA_MACRO/ ? 1 : 0;
 			$declaring_attributes = 1;
@@ -209,8 +224,8 @@ sub ParseHeader
 					$atttype = '_' . $atttype;
 				}
 
-				$column{type}      = $atttype;
-				$column{name}      = $attname;
+				$column{type} = $atttype;
+				$column{name} = $attname;
 				$column{is_varlen} = 1 if $is_varlen;
 
 				foreach my $attopt (@attopts)
@@ -243,14 +258,14 @@ sub ParseHeader
 						# BKI_LOOKUP implicitly makes an FK reference
 						push @{ $catalog{foreign_keys} },
 						  {
-							is_array =>
-							  ($atttype eq 'oidvector' || $atttype eq '_oid')
+							is_array => (
+								$atttype eq 'oidvector' || $atttype eq '_oid')
 							? 1
 							: 0,
-							is_opt   => $column{lookup_opt},
-							fk_cols  => $attname,
+							is_opt => $column{lookup_opt},
+							fk_cols => $attname,
 							pk_table => $column{lookup},
-							pk_cols  => 'oid'
+							pk_cols => 'oid'
 						  };
 					}
 					else
@@ -285,7 +300,7 @@ sub ParseData
 	$input_file =~ /(\w+)\.dat$/
 	  or die "Input file $input_file needs to be a .dat file.\n";
 	my $catname = $1;
-	my $data    = [];
+	my $data = [];
 
 	if ($preserve_formatting)
 	{
@@ -433,7 +448,7 @@ sub AddDefaultValues
 sub GenerateArrayTypes
 {
 	my $pgtype_schema = shift;
-	my $types         = shift;
+	my $types = shift;
 	my @array_types;
 
 	foreach my $elem_type (@$types)
@@ -444,9 +459,9 @@ sub GenerateArrayTypes
 		my %array_type;
 
 		# Set up metadata fields for array type.
-		$array_type{oid}           = $elem_type->{array_type_oid};
+		$array_type{oid} = $elem_type->{array_type_oid};
 		$array_type{autogenerated} = 1;
-		$array_type{line_number}   = $elem_type->{line_number};
+		$array_type{line_number} = $elem_type->{line_number};
 
 		# Set up column values derived from the element type.
 		$array_type{typname} = '_' . $elem_type->{typname};
@@ -499,8 +514,8 @@ sub GenerateArrayTypes
 sub RenameTempFile
 {
 	my $final_name = shift;
-	my $extension  = shift;
-	my $temp_name  = $final_name . $extension;
+	my $extension = shift;
+	my $temp_name = $final_name . $extension;
 
 	if (-f $final_name
 		&& compare($temp_name, $final_name) == 0)

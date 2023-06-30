@@ -213,8 +213,8 @@ pg_GSS_write(PGconn *conn, const void *ptr, size_t len)
 		if (output.length > PQ_GSS_SEND_BUFFER_SIZE - sizeof(uint32))
 		{
 			libpq_append_conn_error(conn, "client tried to send oversize GSSAPI packet (%zu > %zu)",
-							  (size_t) output.length,
-							  PQ_GSS_SEND_BUFFER_SIZE - sizeof(uint32));
+									(size_t) output.length,
+									PQ_GSS_SEND_BUFFER_SIZE - sizeof(uint32));
 			errno = EIO;		/* for lack of a better idea */
 			goto cleanup;
 		}
@@ -349,8 +349,8 @@ pg_GSS_read(PGconn *conn, void *ptr, size_t len)
 		if (input.length > PQ_GSS_RECV_BUFFER_SIZE - sizeof(uint32))
 		{
 			libpq_append_conn_error(conn, "oversize GSSAPI packet sent by the server (%zu > %zu)",
-							  (size_t) input.length,
-							  PQ_GSS_RECV_BUFFER_SIZE - sizeof(uint32));
+									(size_t) input.length,
+									PQ_GSS_RECV_BUFFER_SIZE - sizeof(uint32));
 			errno = EIO;		/* for lack of a better idea */
 			return -1;
 		}
@@ -591,8 +591,8 @@ pqsecure_open_gss(PGconn *conn)
 		if (input.length > PQ_GSS_RECV_BUFFER_SIZE - sizeof(uint32))
 		{
 			libpq_append_conn_error(conn, "oversize GSSAPI packet sent by the server (%zu > %zu)",
-							  (size_t) input.length,
-							  PQ_GSS_RECV_BUFFER_SIZE - sizeof(uint32));
+									(size_t) input.length,
+									PQ_GSS_RECV_BUFFER_SIZE - sizeof(uint32));
 			return PGRES_POLLING_FAILED;
 		}
 
@@ -622,18 +622,18 @@ pqsecure_open_gss(PGconn *conn)
 	if (ret != STATUS_OK)
 		return PGRES_POLLING_FAILED;
 
-	if (conn->gssdeleg && pg_strcasecmp(conn->gssdeleg, "enable") == 0)
+	if (conn->gssdelegation && conn->gssdelegation[0] == '1')
 	{
 		/* Acquire credentials if possible */
 		if (conn->gcred == GSS_C_NO_CREDENTIAL)
 			(void) pg_GSS_have_cred_cache(&conn->gcred);
 
 		/*
-		 * We have credentials and gssdeleg is enabled, so request credential
-		 * delegation.  This may or may not actually result in credentials
-		 * being delegated- it depends on if the forwardable flag has been set
-		 * in the credential and if the server is configured to accept
-		 * delegated credentials.
+		 * We have credentials and gssdelegation is enabled, so request
+		 * credential delegation.  This may or may not actually result in
+		 * credentials being delegated- it depends on if the forwardable flag
+		 * has been set in the credential and if the server is configured to
+		 * accept delegated credentials.
 		 */
 		if (conn->gcred != GSS_C_NO_CREDENTIAL)
 			gss_flags |= GSS_C_DELEG_FLAG;

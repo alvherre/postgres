@@ -358,7 +358,7 @@ typedef struct TableAmRoutine
 	 * allowed by the AM.
 	 *
 	 * Implementations can assume that scan_set_tidrange is always called
-	 * before can_getnextslot_tidrange or after scan_rescan and before any
+	 * before scan_getnextslot_tidrange or after scan_rescan and before any
 	 * further calls to scan_getnextslot_tidrange.
 	 */
 	void		(*scan_set_tidrange) (TableScanDesc scan,
@@ -902,7 +902,7 @@ table_beginscan(Relation rel, Snapshot snapshot,
 				int nkeys, struct ScanKeyData *key)
 {
 	uint32		flags = SO_TYPE_SEQSCAN |
-	SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_ALLOW_PAGEMODE;
+		SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_ALLOW_PAGEMODE;
 
 	return rel->rd_tableam->scan_begin(rel, snapshot, nkeys, key, NULL, flags);
 }

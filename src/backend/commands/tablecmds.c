@@ -817,7 +817,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		AclResult	aclresult;
 
 		aclresult = object_aclcheck(TableSpaceRelationId, tablespaceId, GetUserId(),
-										   ACL_CREATE);
+									ACL_CREATE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_TABLESPACE,
 						   get_tablespace_name(tablespaceId));
@@ -1954,7 +1954,7 @@ ExecuteTruncateGuts(List *explicit_rels,
 	resultRelInfo = resultRelInfos;
 	foreach(cell, rels)
 	{
-		UserContext	ucxt;
+		UserContext ucxt;
 
 		if (run_as_table_owner)
 			SwitchToUntrustedUser(resultRelInfo->ri_RelationDesc->rd_rel->relowner,
@@ -2166,7 +2166,7 @@ ExecuteTruncateGuts(List *explicit_rels,
 	resultRelInfo = resultRelInfos;
 	foreach(cell, rels)
 	{
-		UserContext	ucxt;
+		UserContext ucxt;
 
 		if (run_as_table_owner)
 			SwitchToUntrustedUser(resultRelInfo->ri_RelationDesc->rd_rel->relowner,
@@ -2682,7 +2682,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				if (CompressionMethodIsValid(attribute->attcompression))
 				{
 					const char *compression =
-					GetCompressionMethodName(attribute->attcompression);
+						GetCompressionMethodName(attribute->attcompression);
 
 					if (def->compression == NULL)
 						def->compression = pstrdup(compression);
@@ -3104,7 +3104,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				 * generated column, we'll take its generation expression in
 				 * preference to the parent's.  We must check that the child
 				 * column doesn't specify a default value or identity, which
-				 * matches the rules for a single column in parse_util.c.
+				 * matches the rules for a single column in parse_utilcmd.c.
 				 *
 				 * Conversely, if the parent column is not generated, the
 				 * child column can't be either.  (We used to allow that, but
@@ -8360,7 +8360,7 @@ ATPrepDropExpression(Relation rel, AlterTableCmd *cmd, bool recurse, bool recurs
 	 * is a bit complicated.  GENERATED clauses must be attached to the column
 	 * definition and cannot be added later like DEFAULT, so if a child table
 	 * has a generation expression that the parent does not have, the child
-	 * column will necessarily be an attlocal column.  So to implement ONLY
+	 * column will necessarily be an attislocal column.  So to implement ONLY
 	 * here, we'd need extra code to update attislocal of the direct child
 	 * tables, somewhat similar to how DROP COLUMN does it, so that the
 	 * resulting state can be properly dumped and restored.
@@ -11282,7 +11282,7 @@ ATExecAlterConstraint(Relation rel, AlterTableCmd *cmd, bool recurse,
 	}
 
 	/*
-	 * ATExecConstrRecurse already invalidated relcache for the relations
+	 * ATExecAlterConstrRecurse already invalidated relcache for the relations
 	 * having the constraint itself; here we also invalidate for relations
 	 * that have any triggers that are part of the constraint.
 	 */
@@ -14529,7 +14529,7 @@ ATExecChangeOwner(Oid relationOid, Oid newOwnerId, bool recursing, LOCKMODE lock
 
 				/* New owner must have CREATE privilege on namespace */
 				aclresult = object_aclcheck(NamespaceRelationId, namespaceOid, newOwnerId,
-												  ACL_CREATE);
+											ACL_CREATE);
 				if (aclresult != ACLCHECK_OK)
 					aclcheck_error(aclresult, OBJECT_SCHEMA,
 								   get_namespace_name(namespaceOid));
@@ -14959,7 +14959,7 @@ ATExecSetRelOptions(Relation rel, List *defList, AlterTableType operation,
 		if (check_option)
 		{
 			const char *view_updatable_error =
-			view_query_is_auto_updatable(view_query, true);
+				view_query_is_auto_updatable(view_query, true);
 
 			if (view_updatable_error)
 				ereport(ERROR,
@@ -15238,7 +15238,7 @@ AlterTableMoveAll(AlterTableMoveAllStmt *stmt)
 		AclResult	aclresult;
 
 		aclresult = object_aclcheck(TableSpaceRelationId, new_tablespaceoid, GetUserId(),
-										   ACL_CREATE);
+									ACL_CREATE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_TABLESPACE,
 						   get_tablespace_name(new_tablespaceoid));
@@ -17626,6 +17626,7 @@ RangeVarCallbackMaintainsTable(const RangeVar *relation,
 							   Oid relId, Oid oldRelId, void *arg)
 {
 	char		relkind;
+	AclResult	aclresult;
 
 	/* Nothing to do if the relation was not found. */
 	if (!OidIsValid(relId))
@@ -17646,36 +17647,9 @@ RangeVarCallbackMaintainsTable(const RangeVar *relation,
 				 errmsg("\"%s\" is not a table or materialized view", relation->relname)));
 
 	/* Check permissions */
-	if (pg_class_aclcheck(relId, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK &&
-		!has_partition_ancestor_privs(relId, GetUserId(), ACL_MAINTAIN))
-		aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_TABLE,
-					   relation->relname);
-}
-
-/*
- * If relid is a partition, returns whether userid has any of the privileges
- * specified in acl on any of its ancestors.  Otherwise, returns false.
- */
-bool
-has_partition_ancestor_privs(Oid relid, Oid userid, AclMode acl)
-{
-	List	   *ancestors;
-	ListCell   *lc;
-
-	if (!get_rel_relispartition(relid))
-		return false;
-
-	ancestors = get_partition_ancestors(relid);
-	foreach(lc, ancestors)
-	{
-		Oid			ancestor = lfirst_oid(lc);
-
-		if (OidIsValid(ancestor) &&
-			pg_class_aclcheck(ancestor, userid, acl) == ACLCHECK_OK)
-			return true;
-	}
-
-	return false;
+	aclresult = pg_class_aclcheck(relId, GetUserId(), ACL_MAINTAIN);
+	if (aclresult != ACLCHECK_OK)
+		aclcheck_error(aclresult, OBJECT_TABLE, relation->relname);
 }
 
 /*
@@ -17774,7 +17748,7 @@ RangeVarCallbackForAlterRelation(const RangeVar *rv, Oid relid, Oid oldrelid,
 	if (IsA(stmt, RenameStmt))
 	{
 		aclresult = object_aclcheck(NamespaceRelationId, classform->relnamespace,
-										  GetUserId(), ACL_CREATE);
+									GetUserId(), ACL_CREATE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_SCHEMA,
 						   get_namespace_name(classform->relnamespace));
@@ -18768,8 +18742,8 @@ AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel)
 
 		/*
 		 * Scan the list of existing indexes in the partition-to-be, and mark
-		 * the first matching, unattached one we find, if any, as partition of
-		 * the parent index.  If we find one, we're done.
+		 * the first matching, valid, unattached one we find, if any, as
+		 * partition of the parent index.  If we find one, we're done.
 		 */
 		for (int i = 0; i < list_length(attachRelIdxs); i++)
 		{
@@ -18778,6 +18752,10 @@ AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel)
 
 			/* does this index have a parent?  if so, can't use it */
 			if (attachrelIdxRels[i]->rd_rel->relispartition)
+				continue;
+
+			/* If this index is invalid, can't use it */
+			if (!attachrelIdxRels[i]->rd_index->indisvalid)
 				continue;
 
 			if (CompareIndexInfo(attachInfos[i], info,

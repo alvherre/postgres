@@ -748,7 +748,7 @@ DefineIndex(Oid relationId,
 		AclResult	aclresult;
 
 		aclresult = object_aclcheck(NamespaceRelationId, namespaceId, root_save_userid,
-										  ACL_CREATE);
+									ACL_CREATE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_SCHEMA,
 						   get_namespace_name(namespaceId));
@@ -780,7 +780,7 @@ DefineIndex(Oid relationId,
 		AclResult	aclresult;
 
 		aclresult = object_aclcheck(TableSpaceRelationId, tablespaceId, root_save_userid,
-										   ACL_CREATE);
+									ACL_CREATE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_TABLESPACE,
 						   get_tablespace_name(tablespaceId));
@@ -1416,6 +1416,7 @@ DefineIndex(Oid relationId,
 					IndexStmt  *childStmt = copyObject(stmt);
 					bool		found_whole_row;
 					ListCell   *lc;
+					ObjectAddress childAddr;
 
 					/*
 					 * We can't use the same index name for the child index,
@@ -1469,15 +1470,25 @@ DefineIndex(Oid relationId,
 					Assert(GetUserId() == child_save_userid);
 					SetUserIdAndSecContext(root_save_userid,
 										   root_save_sec_context);
-					DefineIndex(childRelid, childStmt,
-								InvalidOid, /* no predefined OID */
-								indexRelationId,	/* this is our child */
-								createdConstraintId,
-								-1,
-								is_alter_table, check_rights, check_not_in_use,
-								skip_build, quiet);
+					childAddr =
+						DefineIndex(childRelid, childStmt,
+									InvalidOid, /* no predefined OID */
+									indexRelationId,	/* this is our child */
+									createdConstraintId,
+									-1,
+									is_alter_table, check_rights,
+									check_not_in_use,
+									skip_build, quiet);
 					SetUserIdAndSecContext(child_save_userid,
 										   child_save_sec_context);
+
+					/*
+					 * Check if the index just created is valid or not, as it
+					 * could be possible that it has been switched as invalid
+					 * when recursing across multiple partition levels.
+					 */
+					if (!get_index_isvalid(childAddr.objectId))
+						invalidate_parent = true;
 				}
 
 				free_attrmap(attmap);
@@ -1507,6 +1518,12 @@ DefineIndex(Oid relationId,
 				ReleaseSysCache(tup);
 				table_close(pg_index, RowExclusiveLock);
 				heap_freetuple(newtup);
+
+				/*
+				 * CCI here to make this update visible, in case this recurses
+				 * across multiple partition levels.
+				 */
+				CommandCounterIncrement();
 			}
 		}
 
@@ -2708,7 +2725,7 @@ ExecReindex(ParseState *pstate, ReindexStmt *stmt, bool isTopLevel)
 			AclResult	aclresult;
 
 			aclresult = object_aclcheck(TableSpaceRelationId, params.tablespaceOid,
-											   GetUserId(), ACL_CREATE);
+										GetUserId(), ACL_CREATE);
 			if (aclresult != ACLCHECK_OK)
 				aclcheck_error(aclresult, OBJECT_TABLESPACE,
 							   get_tablespace_name(params.tablespaceOid));
@@ -2853,11 +2870,14 @@ RangeVarCallbackForReindexIndex(const RangeVar *relation,
 
 	/* Check permissions */
 	table_oid = IndexGetRelation(relId, true);
-	if (OidIsValid(table_oid) &&
-		pg_class_aclcheck(table_oid, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK &&
-		!has_partition_ancestor_privs(table_oid, GetUserId(), ACL_MAINTAIN))
-		aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_INDEX,
-					   relation->relname);
+	if (OidIsValid(table_oid))
+	{
+		AclResult	aclresult;
+
+		aclresult = pg_class_aclcheck(table_oid, GetUserId(), ACL_MAINTAIN);
+		if (aclresult != ACLCHECK_OK)
+			aclcheck_error(aclresult, OBJECT_INDEX, relation->relname);
+	}
 
 	/* Lock heap before index to avoid deadlock. */
 	if (relId != oldRelId)
@@ -3064,17 +3084,12 @@ ReindexMultipleTables(const char *objectName, ReindexObjectType objectKind,
 			continue;
 
 		/*
-		 * The table can be reindexed if the user has been granted MAINTAIN on
-		 * the table or one of its partition ancestors or the user is a
-		 * superuser, the table owner, or the database/schema owner (but in the
-		 * latter case, only if it's not a shared relation).  pg_class_aclcheck
-		 * includes the superuser case, and depending on objectKind we already
-		 * know that the user has permission to run REINDEX on this database or
-		 * schema per the permission checks at the beginning of this routine.
+		 * We already checked privileges on the database or schema, but we
+		 * further restrict reindexing shared catalogs to roles with the
+		 * MAINTAIN privilege on the relation.
 		 */
 		if (classtuple->relisshared &&
-			pg_class_aclcheck(relid, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK &&
-			!has_partition_ancestor_privs(relid, GetUserId(), ACL_MAINTAIN))
+			pg_class_aclcheck(relid, GetUserId(), ACL_MAINTAIN) != ACLCHECK_OK)
 			continue;
 
 		/*
@@ -3312,7 +3327,7 @@ ReindexMultipleInternal(List *relids, ReindexParams *params)
 			AclResult	aclresult;
 
 			aclresult = object_aclcheck(TableSpaceRelationId, params->tablespaceOid,
-											   GetUserId(), ACL_CREATE);
+										GetUserId(), ACL_CREATE);
 			if (aclresult != ACLCHECK_OK)
 				aclcheck_error(aclresult, OBJECT_TABLESPACE,
 							   get_tablespace_name(params->tablespaceOid));

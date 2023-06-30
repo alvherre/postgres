@@ -97,7 +97,6 @@ extern char *default_tablespace;
 extern char *temp_tablespaces;
 extern bool ignore_checksum_failure;
 extern bool ignore_invalid_pages;
-extern bool synchronize_seqscans;
 
 #ifdef TRACE_SYNCSCAN
 extern bool trace_syncscan;
@@ -530,8 +529,6 @@ char	   *HbaFileName;
 char	   *IdentFileName;
 char	   *external_pid_file;
 
-char	   *pgstat_temp_directory;
-
 char	   *application_name;
 
 int			tcp_keepalives_idle;
@@ -563,8 +560,6 @@ static char *syslog_ident_str;
 static double phony_random_seed;
 static char *client_encoding_string;
 static char *datestyle_string;
-static char *locale_collate;
-static char *locale_ctype;
 static char *server_encoding_string;
 static char *server_version_string;
 static int	server_version_num;
@@ -1728,11 +1723,11 @@ struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
-		{"gss_accept_deleg", PGC_SIGHUP, CONN_AUTH_AUTH,
+		{"gss_accept_delegation", PGC_SIGHUP, CONN_AUTH_AUTH,
 			gettext_noop("Sets whether GSSAPI delegation should be accepted from the client."),
 			NULL
 		},
-		&pg_gss_accept_deleg,
+		&pg_gss_accept_delegation,
 		false,
 		NULL, NULL, NULL
 	},
@@ -2780,7 +2775,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_XBLOCKS
 		},
 		&WalWriterFlushAfter,
-		(1024 * 1024) / XLOG_BLCKSZ, 0, INT_MAX,
+		DEFAULT_WAL_WRITER_FLUSH_AFTER, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4050,30 +4045,6 @@ struct config_string ConfigureNamesString[] =
 		NULL, NULL, NULL
 	},
 
-	/* See main.c about why defaults for LC_foo are not all alike */
-
-	{
-		{"lc_collate", PGC_INTERNAL, PRESET_OPTIONS,
-			gettext_noop("Shows the collation order locale."),
-			NULL,
-			GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
-		},
-		&locale_collate,
-		"C",
-		NULL, NULL, NULL
-	},
-
-	{
-		{"lc_ctype", PGC_INTERNAL, PRESET_OPTIONS,
-			gettext_noop("Shows the character classification and case conversion locale."),
-			NULL,
-			GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
-		},
-		&locale_ctype,
-		"C",
-		NULL, NULL, NULL
-	},
-
 	{
 		{"lc_messages", PGC_SUSET, CLIENT_CONN_LOCALE,
 			gettext_noop("Sets the language in which messages are displayed."),
@@ -4568,7 +4539,7 @@ struct config_string ConfigureNamesString[] =
 	},
 
 	{
-		{"io_direct", PGC_POSTMASTER, DEVELOPER_OPTIONS,
+		{"debug_io_direct", PGC_POSTMASTER, DEVELOPER_OPTIONS,
 			gettext_noop("Use direct I/O for file access."),
 			NULL,
 			GUC_LIST_INPUT | GUC_NOT_IN_SAMPLE
@@ -4685,11 +4656,11 @@ struct config_enum ConfigureNamesEnum[] =
 
 	{
 		{"icu_validation_level", PGC_USERSET, CLIENT_CONN_LOCALE,
-		 gettext_noop("Log level for reporting invalid ICU locale strings."),
-		 NULL
+			gettext_noop("Log level for reporting invalid ICU locale strings."),
+			NULL
 		},
 		&icu_validation_level,
-		ERROR, icu_validation_level_options,
+		WARNING, icu_validation_level_options,
 		NULL, NULL, NULL
 	},
 
@@ -4821,7 +4792,7 @@ struct config_enum ConfigureNamesEnum[] =
 		},
 		&pgstat_fetch_consistency,
 		PGSTAT_FETCH_CONSISTENCY_CACHE, stats_fetch_consistency,
-		NULL, NULL, NULL
+		NULL, assign_stats_fetch_consistency, NULL
 	},
 
 	{

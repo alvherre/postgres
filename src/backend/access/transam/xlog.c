@@ -5460,8 +5460,8 @@ StartupXLOG(void)
 	missingContrecPtr = endOfRecoveryInfo->missingContrecPtr;
 
 	/*
-	 * Reset ps status display, so as no information related to recovery
-	 * shows up.
+	 * Reset ps status display, so as no information related to recovery shows
+	 * up.
 	 */
 	set_ps_display("");
 
@@ -5596,9 +5596,9 @@ StartupXLOG(void)
 	if (!XLogRecPtrIsInvalid(missingContrecPtr))
 	{
 		/*
-		 * We should only have a missingContrecPtr if we're not switching to
-		 * a new timeline. When a timeline switch occurs, WAL is copied from
-		 * the old timeline to the new only up to the end of the last complete
+		 * We should only have a missingContrecPtr if we're not switching to a
+		 * new timeline. When a timeline switch occurs, WAL is copied from the
+		 * old timeline to the new only up to the end of the last complete
 		 * record, so there can't be an incomplete WAL record that we need to
 		 * disregard.
 		 */
@@ -5689,7 +5689,11 @@ StartupXLOG(void)
 	TrimCLOG();
 	TrimMultiXact();
 
-	/* Reload shared-memory state for prepared transactions */
+	/*
+	 * Reload shared-memory state for prepared transactions.  This needs to
+	 * happen before renaming the last partial segment of the old timeline as
+	 * it may be possible that we have to recovery some transactions from it.
+	 */
 	RecoverPreparedTransactions();
 
 	/* Shut down xlogreader */
@@ -8494,7 +8498,7 @@ do_pg_backup_start(const char *backupidstr, bool fast, List **tablespaces,
 				 */
 				if (rllen > datadirpathlen &&
 					strncmp(linkpath, DataDir, datadirpathlen) == 0 &&
-						IS_DIR_SEP(linkpath[datadirpathlen]))
+					IS_DIR_SEP(linkpath[datadirpathlen]))
 					relpath = pstrdup(linkpath + datadirpathlen + 1);
 
 				/*

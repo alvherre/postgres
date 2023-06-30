@@ -2693,7 +2693,7 @@ load_hba(void)
 	if (!ok)
 	{
 		/*
-		 * File contained one or more errors, so bail out.  MemoryContextDelete
+		 * File contained one or more errors, so bail out. MemoryContextDelete
 		 * is enough to clean up everything, including regexes.
 		 */
 		MemoryContextDelete(hbacxt);
@@ -3056,7 +3056,7 @@ load_ident(void)
 	if (!ok)
 	{
 		/*
-		 * File contained one or more errors, so bail out.  MemoryContextDelete
+		 * File contained one or more errors, so bail out. MemoryContextDelete
 		 * is enough to clean up everything, including regexes.
 		 */
 		MemoryContextDelete(ident_context);

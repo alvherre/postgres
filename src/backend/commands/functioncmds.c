@@ -151,7 +151,7 @@ compute_return_type(TypeName *returnType, Oid languageOid,
 		namespaceId = QualifiedNameGetCreationNamespace(returnType->names,
 														&typname);
 		aclresult = object_aclcheck(NamespaceRelationId, namespaceId, GetUserId(),
-										  ACL_CREATE);
+									ACL_CREATE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_SCHEMA,
 						   get_namespace_name(namespaceId));
@@ -662,9 +662,9 @@ update_proconfig_value(ArrayType *a, List *set_items)
 			char	   *valuestr = ExtractSetVariableArgs(sstmt);
 
 			if (valuestr)
-				a = GUCArrayAdd(a, NULL, sstmt->name, valuestr, sstmt->user_set);
+				a = GUCArrayAdd(a, sstmt->name, valuestr);
 			else				/* RESET */
-				a = GUCArrayDelete(a, NULL, sstmt->name);
+				a = GUCArrayDelete(a, sstmt->name);
 		}
 	}
 
@@ -2117,7 +2117,7 @@ ExecuteDoStmt(ParseState *pstate, DoStmt *stmt, bool atomic)
 		AclResult	aclresult;
 
 		aclresult = object_aclcheck(LanguageRelationId, codeblock->langOid, GetUserId(),
-										 ACL_USAGE);
+									ACL_USAGE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_LANGUAGE,
 						   NameStr(languageStruct->lanname));

@@ -455,6 +455,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 		&&CASE_EEOP_DISTINCT,
 		&&CASE_EEOP_NOT_DISTINCT,
 		&&CASE_EEOP_NULLIF,
+		&&CASE_EEOP_SQLVALUEFUNCTION,
 		&&CASE_EEOP_CURRENTOFEXPR,
 		&&CASE_EEOP_NEXTVALUEEXPR,
 		&&CASE_EEOP_ARRAYEXPR,
@@ -1305,6 +1306,17 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			EEO_NEXT();
 		}
 
+		EEO_CASE(EEOP_SQLVALUEFUNCTION)
+		{
+			/*
+			 * Doesn't seem worthwhile to have an inline implementation
+			 * efficiency-wise.
+			 */
+			ExecEvalSQLValueFunction(state, op);
+
+			EEO_NEXT();
+		}
+
 		EEO_CASE(EEOP_CURRENTOFEXPR)
 		{
 			/* error invocation uses space, and shouldn't ever occur */
@@ -1647,7 +1659,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 		{
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerGroup pergroup_allaggs =
-			aggstate->all_pergroups[op->d.agg_plain_pergroup_nullcheck.setoff];
+				aggstate->all_pergroups[op->d.agg_plain_pergroup_nullcheck.setoff];
 
 			if (pergroup_allaggs == NULL)
 				EEO_JUMP(op->d.agg_plain_pergroup_nullcheck.jumpnull);
@@ -1672,7 +1684,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
 			AggStatePerGroup pergroup =
-			&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
+				&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
 
 			Assert(pertrans->transtypeByVal);
 
@@ -1700,7 +1712,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
 			AggStatePerGroup pergroup =
-			&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
+				&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
 
 			Assert(pertrans->transtypeByVal);
 
@@ -1718,7 +1730,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
 			AggStatePerGroup pergroup =
-			&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
+				&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
 
 			Assert(pertrans->transtypeByVal);
 
@@ -1735,7 +1747,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
 			AggStatePerGroup pergroup =
-			&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
+				&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
 
 			Assert(!pertrans->transtypeByVal);
 
@@ -1756,7 +1768,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
 			AggStatePerGroup pergroup =
-			&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
+				&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
 
 			Assert(!pertrans->transtypeByVal);
 
@@ -1773,7 +1785,7 @@ ExecInterpExpr(ExprState *state, ExprContext *econtext, bool *isnull)
 			AggState   *aggstate = castNode(AggState, state->parent);
 			AggStatePerTrans pertrans = op->d.agg_trans.pertrans;
 			AggStatePerGroup pergroup =
-			&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
+				&aggstate->all_pergroups[op->d.agg_trans.setoff][op->d.agg_trans.transno];
 
 			Assert(!pertrans->transtypeByVal);
 
@@ -2003,7 +2015,8 @@ CheckOpSlotCompatibility(ExprEvalStep *op, TupleTableSlot *slot)
  * changed: if not NULL, *changed is set to true on any update
  *
  * The returned TupleDesc is not guaranteed pinned; caller must pin it
- * to use it across any operation that might incur cache invalidation.
+ * to use it across any operation that might incur cache invalidation,
+ * including for example detoasting of input tuples.
  * (The TupleDesc is always refcounted, so just use IncrTupleDescRefCount.)
  *
  * NOTE: because composite types can change contents, we must be prepared
@@ -2495,6 +2508,67 @@ ExecEvalParamExtern(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 	ereport(ERROR,
 			(errcode(ERRCODE_UNDEFINED_OBJECT),
 			 errmsg("no value found for parameter %d", paramId)));
+}
+
+/*
+ * Evaluate a SQLValueFunction expression.
+ */
+void
+ExecEvalSQLValueFunction(ExprState *state, ExprEvalStep *op)
+{
+	LOCAL_FCINFO(fcinfo, 0);
+	SQLValueFunction *svf = op->d.sqlvaluefunction.svf;
+
+	*op->resnull = false;
+
+	/*
+	 * Note: current_schema() can return NULL.  current_user() etc currently
+	 * cannot, but might as well code those cases the same way for safety.
+	 */
+	switch (svf->op)
+	{
+		case SVFOP_CURRENT_DATE:
+			*op->resvalue = DateADTGetDatum(GetSQLCurrentDate());
+			break;
+		case SVFOP_CURRENT_TIME:
+		case SVFOP_CURRENT_TIME_N:
+			*op->resvalue = TimeTzADTPGetDatum(GetSQLCurrentTime(svf->typmod));
+			break;
+		case SVFOP_CURRENT_TIMESTAMP:
+		case SVFOP_CURRENT_TIMESTAMP_N:
+			*op->resvalue = TimestampTzGetDatum(GetSQLCurrentTimestamp(svf->typmod));
+			break;
+		case SVFOP_LOCALTIME:
+		case SVFOP_LOCALTIME_N:
+			*op->resvalue = TimeADTGetDatum(GetSQLLocalTime(svf->typmod));
+			break;
+		case SVFOP_LOCALTIMESTAMP:
+		case SVFOP_LOCALTIMESTAMP_N:
+			*op->resvalue = TimestampGetDatum(GetSQLLocalTimestamp(svf->typmod));
+			break;
+		case SVFOP_CURRENT_ROLE:
+		case SVFOP_CURRENT_USER:
+		case SVFOP_USER:
+			InitFunctionCallInfoData(*fcinfo, NULL, 0, InvalidOid, NULL, NULL);
+			*op->resvalue = current_user(fcinfo);
+			*op->resnull = fcinfo->isnull;
+			break;
+		case SVFOP_SESSION_USER:
+			InitFunctionCallInfoData(*fcinfo, NULL, 0, InvalidOid, NULL, NULL);
+			*op->resvalue = session_user(fcinfo);
+			*op->resnull = fcinfo->isnull;
+			break;
+		case SVFOP_CURRENT_CATALOG:
+			InitFunctionCallInfoData(*fcinfo, NULL, 0, InvalidOid, NULL, NULL);
+			*op->resvalue = current_database(fcinfo);
+			*op->resnull = fcinfo->isnull;
+			break;
+		case SVFOP_CURRENT_SCHEMA:
+			InitFunctionCallInfoData(*fcinfo, NULL, 0, InvalidOid, NULL, NULL);
+			*op->resvalue = current_schema(fcinfo);
+			*op->resnull = fcinfo->isnull;
+			break;
+	}
 }
 
 /*
@@ -3101,17 +3175,6 @@ ExecEvalFieldSelect(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 void
 ExecEvalFieldStoreDeForm(ExprState *state, ExprEvalStep *op, ExprContext *econtext)
 {
-	TupleDesc	tupDesc;
-
-	/* Lookup tupdesc if first time through or if type changes */
-	tupDesc = get_cached_rowtype(op->d.fieldstore.fstore->resulttype, -1,
-								 op->d.fieldstore.rowcache, NULL);
-
-	/* Check that current tupdesc doesn't have more fields than we allocated */
-	if (unlikely(tupDesc->natts > op->d.fieldstore.ncolumns))
-		elog(ERROR, "too many columns in composite type %u",
-			 op->d.fieldstore.fstore->resulttype);
-
 	if (*op->resnull)
 	{
 		/* Convert null input tuple into an all-nulls row */
@@ -3127,12 +3190,27 @@ ExecEvalFieldStoreDeForm(ExprState *state, ExprEvalStep *op, ExprContext *econte
 		Datum		tupDatum = *op->resvalue;
 		HeapTupleHeader tuphdr;
 		HeapTupleData tmptup;
+		TupleDesc	tupDesc;
 
 		tuphdr = DatumGetHeapTupleHeader(tupDatum);
 		tmptup.t_len = HeapTupleHeaderGetDatumLength(tuphdr);
 		ItemPointerSetInvalid(&(tmptup.t_self));
 		tmptup.t_tableOid = InvalidOid;
 		tmptup.t_data = tuphdr;
+
+		/*
+		 * Lookup tupdesc if first time through or if type changes.  Because
+		 * we don't pin the tupdesc, we must not do this lookup until after
+		 * doing DatumGetHeapTupleHeader: that could do database access while
+		 * detoasting the datum.
+		 */
+		tupDesc = get_cached_rowtype(op->d.fieldstore.fstore->resulttype, -1,
+									 op->d.fieldstore.rowcache, NULL);
+
+		/* Check that current tupdesc doesn't have more fields than allocated */
+		if (unlikely(tupDesc->natts > op->d.fieldstore.ncolumns))
+			elog(ERROR, "too many columns in composite type %u",
+				 op->d.fieldstore.fstore->resulttype);
 
 		heap_deform_tuple(&tmptup, tupDesc,
 						  op->d.fieldstore.values,

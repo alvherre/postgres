@@ -949,7 +949,7 @@ static void
 dumpRoleMembership(PGconn *conn)
 {
 	PQExpBuffer buf = createPQExpBuffer();
-	PQExpBuffer	optbuf = createPQExpBuffer();
+	PQExpBuffer optbuf = createPQExpBuffer();
 	PGresult   *res;
 	int			start = 0,
 				end,
@@ -996,8 +996,8 @@ dumpRoleMembership(PGconn *conn)
 
 	/*
 	 * We can't dump these GRANT commands in arbitrary order, because a role
-	 * that is named as a grantor must already have ADMIN OPTION on the
-	 * role for which it is granting permissions, except for the bootstrap
+	 * that is named as a grantor must already have ADMIN OPTION on the role
+	 * for which it is granting permissions, except for the bootstrap
 	 * superuser, who can always be named as the grantor.
 	 *
 	 * We handle this by considering these grants role by role. For each role,
@@ -1005,8 +1005,8 @@ dumpRoleMembership(PGconn *conn)
 	 * superuser. Every time we grant ADMIN OPTION on the role to some user,
 	 * that user also becomes an allowable grantor. We make repeated passes
 	 * over the grants for the role, each time dumping those whose grantors
-	 * are allowable and which we haven't done yet. Eventually this should
-	 * let us dump all the grants.
+	 * are allowable and which we haven't done yet. Eventually this should let
+	 * us dump all the grants.
 	 */
 	total = PQntuples(res);
 	while (start < total)
@@ -1021,7 +1021,7 @@ dumpRoleMembership(PGconn *conn)
 		/* All memberships for a single role should be adjacent. */
 		for (end = start; end < total; ++end)
 		{
-			char   *otherrole;
+			char	   *otherrole;
 
 			otherrole = PQgetvalue(res, end, 0);
 			if (strcmp(role, otherrole) != 0)
@@ -1105,7 +1105,7 @@ dumpRoleMembership(PGconn *conn)
 					appendPQExpBufferStr(optbuf, "ADMIN OPTION");
 				if (dump_grant_options)
 				{
-					char   *inherit_option;
+					char	   *inherit_option;
 
 					if (optbuf->data[0] != '\0')
 						appendPQExpBufferStr(optbuf, ", ");
@@ -1385,10 +1385,7 @@ dumpUserConfig(PGconn *conn, const char *username)
 	PQExpBuffer buf = createPQExpBuffer();
 	PGresult   *res;
 
-	printfPQExpBuffer(buf, "SELECT unnest(setconfig)");
-	if (server_version >= 160000)
-		appendPQExpBufferStr(buf, ", unnest(setuser)");
-	appendPQExpBuffer(buf, " FROM pg_db_role_setting "
+	printfPQExpBuffer(buf, "SELECT unnest(setconfig) FROM pg_db_role_setting "
 					  "WHERE setdatabase = 0 AND setrole = "
 					  "(SELECT oid FROM %s WHERE rolname = ",
 					  role_catalog);
@@ -1402,13 +1399,8 @@ dumpUserConfig(PGconn *conn, const char *username)
 
 	for (int i = 0; i < PQntuples(res); i++)
 	{
-		char	*userset = NULL;
-
-		if (server_version >= 160000)
-			userset = PQgetvalue(res, i, 1);
-
 		resetPQExpBuffer(buf);
-		makeAlterConfigCommand(conn, PQgetvalue(res, i, 0), userset,
+		makeAlterConfigCommand(conn, PQgetvalue(res, i, 0),
 							   "ROLE", username, NULL, NULL,
 							   buf);
 		fprintf(OPF, "%s", buf->data);

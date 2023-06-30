@@ -14,7 +14,7 @@ my ($blocksize, $walfile_name);
 # Function to extract the LSN from the given block structure
 sub get_block_lsn
 {
-	my $path      = shift;
+	my $path = shift;
 	my $blocksize = shift;
 	my $block;
 
@@ -64,29 +64,31 @@ my $relation = $node->safe_psql(
         datname = current_database()}
 );
 
-my $walfile    = $node->data_dir . '/pg_wal/' . $walfile_name;
+my $walfile = $node->data_dir . '/pg_wal/' . $walfile_name;
 my $tmp_folder = PostgreSQL::Test::Utils::tempdir;
 
 ok(-f $walfile, "Got a WAL file");
 
 $node->command_ok(
 	[
-		'pg_waldump',      '--quiet',
+		'pg_waldump', '--quiet',
 		'--save-fullpage', "$tmp_folder/raw",
-		'--relation',      $relation,
+		'--relation', $relation,
 		$walfile
-	]);
+	],
+	'pg_waldump with --save-fullpage runs');
 
 # This regexp will match filenames formatted as:
-# XXXXXXXX-XXXXXXXX.DBOID.TLOID.NODEOID.dd_fork with the components being:
-# - WAL LSN in hex format,
-# - Tablespace OID (0 for global)
+# TLI-LSNh-LSNl.TBLSPCOID.DBOID.NODEOID.dd_fork with the components being:
+# - Timeline ID in hex format.
+# - WAL LSN in hex format, as two 8-character numbers.
+# - Tablespace OID (0 for global).
 # - Database OID.
 # - Relfilenode.
 # - Block number.
 # - Fork this block came from (vm, init, fsm, or main).
 my $file_re =
-  qr/^([0-9A-F]{8})-([0-9A-F]{8})[.][0-9]+[.][0-9]+[.][0-9]+[.][0-9]+(?:_vm|_init|_fsm|_main)?$/;
+  qr/^[0-9A-F]{8}-([0-9A-F]{8})-([0-9A-F]{8})[.][0-9]+[.][0-9]+[.][0-9]+[.][0-9]+(?:_vm|_init|_fsm|_main)?$/;
 
 my $file_count = 0;
 

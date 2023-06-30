@@ -3004,7 +3004,7 @@ hashagg_batch_new(LogicalTape *input_tape, int setno,
 }
 
 /*
- * read_spilled_tuple
+ * hashagg_batch_read
  * 		read the next tuple from a batch's tape.  Return NULL if no more.
  */
 static MinimalTuple
@@ -3022,8 +3022,8 @@ hashagg_batch_read(HashAggBatch *batch, uint32 *hashp)
 	if (nread != sizeof(uint32))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("unexpected EOF for tape %p: requested %zu bytes, read %zu bytes",
-						tape, sizeof(uint32), nread)));
+				 errmsg_internal("unexpected EOF for tape %p: requested %zu bytes, read %zu bytes",
+								 tape, sizeof(uint32), nread)));
 	if (hashp != NULL)
 		*hashp = hash;
 
@@ -3031,8 +3031,8 @@ hashagg_batch_read(HashAggBatch *batch, uint32 *hashp)
 	if (nread != sizeof(uint32))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("unexpected EOF for tape %p: requested %zu bytes, read %zu bytes",
-						tape, sizeof(uint32), nread)));
+				 errmsg_internal("unexpected EOF for tape %p: requested %zu bytes, read %zu bytes",
+								 tape, sizeof(uint32), nread)));
 
 	tuple = (MinimalTuple) palloc(t_len);
 	tuple->t_len = t_len;
@@ -3043,8 +3043,8 @@ hashagg_batch_read(HashAggBatch *batch, uint32 *hashp)
 	if (nread != t_len - sizeof(uint32))
 		ereport(ERROR,
 				(errcode_for_file_access(),
-				 errmsg("unexpected EOF for tape %p: requested %zu bytes, read %zu bytes",
-						tape, t_len - sizeof(uint32), nread)));
+				 errmsg_internal("unexpected EOF for tape %p: requested %zu bytes, read %zu bytes",
+								 tape, t_len - sizeof(uint32), nread)));
 
 	return tuple;
 }
@@ -3690,7 +3690,7 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 
 		/* Check permission to call aggregate function */
 		aclresult = object_aclcheck(ProcedureRelationId, aggref->aggfnoid, GetUserId(),
-									 ACL_EXECUTE);
+									ACL_EXECUTE);
 		if (aclresult != ACLCHECK_OK)
 			aclcheck_error(aclresult, OBJECT_AGGREGATE,
 						   get_func_name(aggref->aggfnoid));
@@ -3757,7 +3757,7 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 			if (OidIsValid(finalfn_oid))
 			{
 				aclresult = object_aclcheck(ProcedureRelationId, finalfn_oid, aggOwner,
-											 ACL_EXECUTE);
+											ACL_EXECUTE);
 				if (aclresult != ACLCHECK_OK)
 					aclcheck_error(aclresult, OBJECT_FUNCTION,
 								   get_func_name(finalfn_oid));
@@ -3766,7 +3766,7 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 			if (OidIsValid(serialfn_oid))
 			{
 				aclresult = object_aclcheck(ProcedureRelationId, serialfn_oid, aggOwner,
-											 ACL_EXECUTE);
+											ACL_EXECUTE);
 				if (aclresult != ACLCHECK_OK)
 					aclcheck_error(aclresult, OBJECT_FUNCTION,
 								   get_func_name(serialfn_oid));
@@ -3775,7 +3775,7 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 			if (OidIsValid(deserialfn_oid))
 			{
 				aclresult = object_aclcheck(ProcedureRelationId, deserialfn_oid, aggOwner,
-											 ACL_EXECUTE);
+											ACL_EXECUTE);
 				if (aclresult != ACLCHECK_OK)
 					aclcheck_error(aclresult, OBJECT_FUNCTION,
 								   get_func_name(deserialfn_oid));

@@ -358,30 +358,32 @@ CREATE SCHEMA test_schema;
 
 -- We need to do this this way to cope with varying names for encodings:
 SET client_min_messages TO WARNING;
+SET icu_validation_level = disabled;
 
 do $$
 BEGIN
   EXECUTE 'CREATE COLLATION test0 (provider = icu, locale = ' ||
-          quote_literal(current_setting('lc_collate')) || ');';
+          quote_literal((SELECT CASE WHEN datlocprovider='i' THEN daticulocale ELSE datcollate END FROM pg_database WHERE datname = current_database())) || ');';
 END
 $$;
 CREATE COLLATION test0 FROM "C"; -- fail, duplicate name
 do $$
 BEGIN
   EXECUTE 'CREATE COLLATION test1 (provider = icu, locale = ' ||
-          quote_literal(current_setting('lc_collate')) || ');';
+          quote_literal((SELECT CASE WHEN datlocprovider='i' THEN daticulocale ELSE datcollate END FROM pg_database WHERE datname = current_database())) || ');';
 END
 $$;
 
+RESET icu_validation_level;
 RESET client_min_messages;
 
 CREATE COLLATION test3 (provider = icu, lc_collate = 'en_US.utf8'); -- fail, needs "locale"
+SET icu_validation_level = ERROR;
 CREATE COLLATION testx (provider = icu, locale = 'nonsense-nowhere'); -- fails
 CREATE COLLATION testx (provider = icu, locale = '@colStrength=primary;nonsense=yes'); -- fails
-SET icu_validation_level = WARNING;
+RESET icu_validation_level;
 CREATE COLLATION testx (provider = icu, locale = '@colStrength=primary;nonsense=yes'); DROP COLLATION testx;
 CREATE COLLATION testx (provider = icu, locale = 'nonsense-nowhere'); DROP COLLATION testx;
-RESET icu_validation_level;
 
 CREATE COLLATION test4 FROM nonsense;
 CREATE COLLATION test5 FROM test0;

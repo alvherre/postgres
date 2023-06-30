@@ -4511,7 +4511,7 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	/* header line width in expanded mode */
 	else if (strcmp(param, "xheader_width") == 0)
 	{
-		if (! value)
+		if (!value)
 			;
 		else if (pg_strcasecmp(value, "full") == 0)
 			popt->topt.expanded_header_width_type = PRINT_XHEADER_FULL;
@@ -4521,13 +4521,16 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 			popt->topt.expanded_header_width_type = PRINT_XHEADER_PAGE;
 		else
 		{
-			popt->topt.expanded_header_width_type = PRINT_XHEADER_EXACT_WIDTH;
-			popt->topt.expanded_header_exact_width = atoi(value);
-			if (popt->topt.expanded_header_exact_width == 0)
+			int			intval = atoi(value);
+
+			if (intval == 0)
 			{
-				pg_log_error("\\pset: allowed xheader_width values are full (default), column, page, or a number specifying the exact width.");
+				pg_log_error("\\pset: allowed xheader_width values are \"%s\" (default), \"%s\", \"%s\", or a number specifying the exact width", "full", "column", "page");
 				return false;
 			}
+
+			popt->topt.expanded_header_width_type = PRINT_XHEADER_EXACT_WIDTH;
+			popt->topt.expanded_header_exact_width = intval;
 		}
 	}
 
@@ -4660,8 +4663,9 @@ do_pset(const char *param, const char *value, printQueryOpt *popt, bool quiet)
 	/* set minimum lines for pager use */
 	else if (strcmp(param, "pager_min_lines") == 0)
 	{
-		if (value)
-			popt->topt.pager_min_lines = atoi(value);
+		if (value &&
+			!ParseVariableNum(value, "pager_min_lines", &popt->topt.pager_min_lines))
+			return false;
 	}
 
 	/* disable "(x rows)" footer */
@@ -4727,11 +4731,11 @@ printPsetInfo(const char *param, printQueryOpt *popt)
 	else if (strcmp(param, "xheader_width") == 0)
 	{
 		if (popt->topt.expanded_header_width_type == PRINT_XHEADER_FULL)
-			printf(_("Expanded header width is 'full'.\n"));
+			printf(_("Expanded header width is \"%s\".\n"), "full");
 		else if (popt->topt.expanded_header_width_type == PRINT_XHEADER_COLUMN)
-			printf(_("Expanded header width is 'column'.\n"));
+			printf(_("Expanded header width is \"%s\".\n"), "column");
 		else if (popt->topt.expanded_header_width_type == PRINT_XHEADER_PAGE)
-			printf(_("Expanded header width is 'page'.\n"));
+			printf(_("Expanded header width is \"%s\".\n"), "page");
 		else if (popt->topt.expanded_header_width_type == PRINT_XHEADER_EXACT_WIDTH)
 			printf(_("Expanded header width is %d.\n"), popt->topt.expanded_header_exact_width);
 	}
@@ -5059,15 +5063,16 @@ pset_value_string(const char *param, printQueryOpt *popt)
 	else if (strcmp(param, "xheader_width") == 0)
 	{
 		if (popt->topt.expanded_header_width_type == PRINT_XHEADER_FULL)
-			return(pstrdup("full"));
+			return pstrdup("full");
 		else if (popt->topt.expanded_header_width_type == PRINT_XHEADER_COLUMN)
-			return(pstrdup("column"));
+			return pstrdup("column");
 		else if (popt->topt.expanded_header_width_type == PRINT_XHEADER_PAGE)
-			return(pstrdup("page"));
+			return pstrdup("page");
 		else
 		{
 			/* must be PRINT_XHEADER_EXACT_WIDTH */
-			char wbuff[32];
+			char		wbuff[32];
+
 			snprintf(wbuff, sizeof(wbuff), "%d",
 					 popt->topt.expanded_header_exact_width);
 			return pstrdup(wbuff);
@@ -5197,14 +5202,20 @@ do_watch(PQExpBuffer query_buf, double sleep, int iter)
 
 	/*
 	 * For \watch, we ignore the size of the result and always use the pager
-	 * if PSQL_WATCH_PAGER is set.  We also ignore the regular PSQL_PAGER or
-	 * PAGER environment variables, because traditional pagers probably won't
-	 * be very useful for showing a stream of results.
+	 * as long as we're talking to a terminal and "\pset pager" is enabled.
+	 * However, we'll only use the pager identified by PSQL_WATCH_PAGER.  We
+	 * ignore the regular PSQL_PAGER or PAGER environment variables, because
+	 * traditional pagers probably won't be very useful for showing a stream
+	 * of results.
 	 */
 #ifndef WIN32
 	pagerprog = getenv("PSQL_WATCH_PAGER");
+	/* if variable is empty or all-white-space, don't use pager */
+	if (pagerprog && strspn(pagerprog, " \t\r\n") == strlen(pagerprog))
+		pagerprog = NULL;
 #endif
-	if (pagerprog && myopt.topt.pager)
+	if (pagerprog && myopt.topt.pager &&
+		isatty(fileno(stdin)) && isatty(fileno(stdout)))
 	{
 		fflush(NULL);
 		disable_sigpipe_trap();

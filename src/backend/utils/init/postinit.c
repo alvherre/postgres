@@ -282,17 +282,17 @@ PerformAuthentication(Port *port)
 
 			if (princ)
 				appendStringInfo(&logmsg,
-								 _(" GSS (authenticated=%s, encrypted=%s, deleg_credentials=%s, principal=%s)"),
+								 _(" GSS (authenticated=%s, encrypted=%s, delegated_credentials=%s, principal=%s)"),
 								 be_gssapi_get_auth(port) ? _("yes") : _("no"),
 								 be_gssapi_get_enc(port) ? _("yes") : _("no"),
-								 be_gssapi_get_deleg(port) ? _("yes") : _("no"),
+								 be_gssapi_get_delegation(port) ? _("yes") : _("no"),
 								 princ);
 			else
 				appendStringInfo(&logmsg,
-								 _(" GSS (authenticated=%s, encrypted=%s, deleg_credentials=%s)"),
+								 _(" GSS (authenticated=%s, encrypted=%s, delegated_credentials=%s)"),
 								 be_gssapi_get_auth(port) ? _("yes") : _("no"),
 								 be_gssapi_get_enc(port) ? _("yes") : _("no"),
-								 be_gssapi_get_deleg(port) ? _("yes") : _("no"));
+								 be_gssapi_get_delegation(port) ? _("yes") : _("no"));
 		}
 #endif
 
@@ -362,7 +362,7 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 		 */
 		if (!am_superuser &&
 			object_aclcheck(DatabaseRelationId, MyDatabaseId, GetUserId(),
-								 ACL_CONNECT) != ACLCHECK_OK)
+							ACL_CONNECT) != ACLCHECK_OK)
 			ereport(FATAL,
 					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 					 errmsg("permission denied for database \"%s\"", name),
@@ -482,10 +482,6 @@ CheckMyDatabase(const char *name, bool am_superuser, bool override_allow_connect
 							 "or build PostgreSQL with the right library version.",
 							 quote_identifier(name))));
 	}
-
-	/* Make the locale settings visible as GUC variables, too */
-	SetConfigOption("lc_collate", collate, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
-	SetConfigOption("lc_ctype", ctype, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 
 	ReleaseSysCache(tup);
 }
@@ -933,10 +929,10 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	}
 
 	/*
-	 * The last few connection slots are reserved for superusers and roles with
-	 * privileges of pg_use_reserved_connections.  Replication connections are
-	 * drawn from slots reserved with max_wal_senders and are not limited by
-	 * max_connections, superuser_reserved_connections, or
+	 * The last few connection slots are reserved for superusers and roles
+	 * with privileges of pg_use_reserved_connections.  Replication
+	 * connections are drawn from slots reserved with max_wal_senders and are
+	 * not limited by max_connections, superuser_reserved_connections, or
 	 * reserved_connections.
 	 *
 	 * Note: At this point, the new backend has already claimed a proc struct,
@@ -950,7 +946,7 @@ InitPostgres(const char *in_dbname, Oid dboid,
 		if (nfree < SuperuserReservedConnections)
 			ereport(FATAL,
 					(errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-					 errmsg("remaining connection slots are reserved for roles with %s",
+					 errmsg("remaining connection slots are reserved for roles with the %s attribute",
 							"SUPERUSER")));
 
 		if (!has_privs_of_role(GetUserId(), ROLE_PG_USE_RESERVED_CONNECTIONS))

@@ -197,9 +197,12 @@ process_equivalence(PlannerInfo *root,
 				make_restrictinfo(root,
 								  (Expr *) ntest,
 								  restrictinfo->is_pushed_down,
+								  restrictinfo->has_clone,
+								  restrictinfo->is_clone,
 								  restrictinfo->pseudoconstant,
 								  restrictinfo->security_level,
 								  NULL,
+								  restrictinfo->incompatible_relids,
 								  restrictinfo->outer_relids);
 		}
 		return false;
@@ -1366,19 +1369,20 @@ generate_base_implied_equalities_broken(PlannerInfo *root,
  * commutative duplicates, i.e. if the algorithm selects "a.x = b.y" but
  * we already have "b.y = a.x", we return the existing clause.
  *
- * If we are considering an outer join, ojrelid is the associated OJ relid,
- * otherwise it's zero.
+ * If we are considering an outer join, sjinfo is the associated OJ info,
+ * otherwise it can be NULL.
  *
  * join_relids should always equal bms_union(outer_relids, inner_rel->relids)
- * plus ojrelid if that's not zero.  We could simplify this function's API by
- * computing it internally, but most callers have the value at hand anyway.
+ * plus whatever add_outer_joins_to_relids() would add.  We could simplify
+ * this function's API by computing it internally, but most callers have the
+ * value at hand anyway.
  */
 List *
 generate_join_implied_equalities(PlannerInfo *root,
 								 Relids join_relids,
 								 Relids outer_relids,
 								 RelOptInfo *inner_rel,
-								 Index ojrelid)
+								 SpecialJoinInfo *sjinfo)
 {
 	List	   *result = NIL;
 	Relids		inner_relids = inner_rel->relids;
@@ -1396,8 +1400,10 @@ generate_join_implied_equalities(PlannerInfo *root,
 		nominal_inner_relids = inner_rel->top_parent_relids;
 		/* ECs will be marked with the parent's relid, not the child's */
 		nominal_join_relids = bms_union(outer_relids, nominal_inner_relids);
-		if (ojrelid != 0)
-			nominal_join_relids = bms_add_member(nominal_join_relids, ojrelid);
+		nominal_join_relids = add_outer_joins_to_relids(root,
+														nominal_join_relids,
+														sjinfo,
+														NULL);
 	}
 	else
 	{
@@ -1418,7 +1424,7 @@ generate_join_implied_equalities(PlannerInfo *root,
 	 * At inner joins, we can be smarter: only consider eclasses mentioning
 	 * both input rels.
 	 */
-	if (ojrelid != 0)
+	if (sjinfo && sjinfo->ojrelid != 0)
 		matching_ecs = get_eclass_indexes_for_relids(root, nominal_join_relids);
 	else
 		matching_ecs = get_common_eclass_indexes(root, nominal_inner_relids,
@@ -1467,7 +1473,7 @@ generate_join_implied_equalities(PlannerInfo *root,
  * generate_join_implied_equalities_for_ecs
  *	  As above, but consider only the listed ECs.
  *
- * For the sole current caller, we can assume ojrelid == 0, that is we are
+ * For the sole current caller, we can assume sjinfo == NULL, that is we are
  * not interested in outer-join filter clauses.  This might need to change
  * in future.
  */
@@ -1969,7 +1975,8 @@ create_join_clause(PlannerInfo *root,
  * clause into the regular processing, because otherwise the join will be
  * seen as a clauseless join and avoided during join order searching.
  * We handle this by generating a constant-TRUE clause that is marked with
- * required_relids that make it a join between the correct relations.
+ * the same required_relids etc as the removed outer-join clause, thus
+ * making it a join clause between the correct relations.
  */
 void
 reconsider_outer_join_clauses(PlannerInfo *root)
@@ -1998,10 +2005,13 @@ reconsider_outer_join_clauses(PlannerInfo *root)
 				/* throw back a dummy replacement clause (see notes above) */
 				rinfo = make_restrictinfo(root,
 										  (Expr *) makeBoolConst(true, false),
-										  true, /* is_pushed_down */
+										  rinfo->is_pushed_down,
+										  rinfo->has_clone,
+										  rinfo->is_clone,
 										  false,	/* pseudoconstant */
 										  0,	/* security_level */
 										  rinfo->required_relids,
+										  rinfo->incompatible_relids,
 										  rinfo->outer_relids);
 				distribute_restrictinfo_to_rels(root, rinfo);
 			}
@@ -2023,10 +2033,13 @@ reconsider_outer_join_clauses(PlannerInfo *root)
 				/* throw back a dummy replacement clause (see notes above) */
 				rinfo = make_restrictinfo(root,
 										  (Expr *) makeBoolConst(true, false),
-										  true, /* is_pushed_down */
+										  rinfo->is_pushed_down,
+										  rinfo->has_clone,
+										  rinfo->is_clone,
 										  false,	/* pseudoconstant */
 										  0,	/* security_level */
 										  rinfo->required_relids,
+										  rinfo->incompatible_relids,
 										  rinfo->outer_relids);
 				distribute_restrictinfo_to_rels(root, rinfo);
 			}
@@ -2048,10 +2061,13 @@ reconsider_outer_join_clauses(PlannerInfo *root)
 				/* throw back a dummy replacement clause (see notes above) */
 				rinfo = make_restrictinfo(root,
 										  (Expr *) makeBoolConst(true, false),
-										  true, /* is_pushed_down */
+										  rinfo->is_pushed_down,
+										  rinfo->has_clone,
+										  rinfo->is_clone,
 										  false,	/* pseudoconstant */
 										  0,	/* security_level */
 										  rinfo->required_relids,
+										  rinfo->incompatible_relids,
 										  rinfo->outer_relids);
 				distribute_restrictinfo_to_rels(root, rinfo);
 			}

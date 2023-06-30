@@ -331,6 +331,9 @@ static TransactionId stream_xid = InvalidTransactionId;
  */
 static uint32 parallel_stream_nchanges = 0;
 
+/* Are we initializing a apply worker? */
+bool		InitializingApplyWorker = false;
+
 /*
  * We enable skipping all data modification changes (INSERT, UPDATE, etc.) for
  * the subscription if the remote transaction's finish LSN matches the subskiplsn.
@@ -2396,7 +2399,7 @@ apply_handle_insert(StringInfo s)
 	LogicalRepRelMapEntry *rel;
 	LogicalRepTupleData newtup;
 	LogicalRepRelId relid;
-	UserContext		ucxt;
+	UserContext ucxt;
 	ApplyExecutionData *edata;
 	EState	   *estate;
 	TupleTableSlot *remoteslot;
@@ -2544,7 +2547,7 @@ apply_handle_update(StringInfo s)
 {
 	LogicalRepRelMapEntry *rel;
 	LogicalRepRelId relid;
-	UserContext		ucxt;
+	UserContext ucxt;
 	ApplyExecutionData *edata;
 	EState	   *estate;
 	LogicalRepTupleData oldtup;
@@ -2671,7 +2674,7 @@ apply_handle_update_internal(ApplyExecutionData *edata,
 	bool		found;
 	MemoryContext oldctx;
 
-	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
+	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1, NIL);
 	ExecOpenIndices(relinfo, false);
 
 	found = FindReplTupleInLocalRel(estate, localrel,
@@ -2729,7 +2732,7 @@ apply_handle_delete(StringInfo s)
 	LogicalRepRelMapEntry *rel;
 	LogicalRepTupleData oldtup;
 	LogicalRepRelId relid;
-	UserContext		ucxt;
+	UserContext ucxt;
 	ApplyExecutionData *edata;
 	EState	   *estate;
 	TupleTableSlot *remoteslot;
@@ -2824,7 +2827,7 @@ apply_handle_delete_internal(ApplyExecutionData *edata,
 	TupleTableSlot *localslot;
 	bool		found;
 
-	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
+	EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1, NIL);
 	ExecOpenIndices(relinfo, false);
 
 	found = FindReplTupleInLocalRel(estate, localrel, remoterel, localindexoid,
@@ -3051,7 +3054,7 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 					 */
 					EPQState	epqstate;
 
-					EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1);
+					EvalPlanQualInit(&epqstate, estate, NULL, NIL, -1, NIL);
 					ExecOpenIndices(partrelinfo, false);
 
 					EvalPlanQualSetSlot(&epqstate, remoteslot_part);
@@ -3076,8 +3079,8 @@ apply_handle_tuple_routing(ApplyExecutionData *edata,
 					if (map)
 					{
 						TupleConversionMap *PartitionToRootMap =
-						convert_tuples_by_name(RelationGetDescr(partrel),
-											   RelationGetDescr(parentrel));
+							convert_tuples_by_name(RelationGetDescr(partrel),
+												   RelationGetDescr(parentrel));
 
 						remoteslot =
 							execute_attr_map_slot(PartitionToRootMap->attrMap,
@@ -3411,7 +3414,7 @@ get_flush_position(XLogRecPtr *write, XLogRecPtr *flush,
 	dlist_foreach_modify(iter, &lsn_mapping)
 	{
 		FlushPosition *pos =
-		dlist_container(FlushPosition, node, iter.cur);
+			dlist_container(FlushPosition, node, iter.cur);
 
 		*write = pos->remote_end;
 
@@ -3558,6 +3561,12 @@ LogicalRepApplyLoop(XLogRecPtr last_received)
 				{
 					int			c;
 					StringInfoData s;
+
+					if (ConfigReloadPending)
+					{
+						ConfigReloadPending = false;
+						ProcessConfigFile(PGC_SIGHUP);
+					}
 
 					/* Reset timeout. */
 					last_recv_timestamp = GetCurrentTimestamp();
@@ -4526,6 +4535,8 @@ ApplyWorkerMain(Datum main_arg)
 	WalRcvStreamOptions options;
 	int			server_version;
 
+	InitializingApplyWorker = true;
+
 	/* Attach to slot */
 	logicalrep_worker_attach(worker_slot);
 
@@ -4547,6 +4558,8 @@ ApplyWorkerMain(Datum main_arg)
 	load_file("libpqwalreceiver", false);
 
 	InitializeApplyWorker();
+
+	InitializingApplyWorker = false;
 
 	/* Connect to the origin and start the replication. */
 	elog(DEBUG1, "connecting to publisher using connection string \"%s\"",
@@ -4695,11 +4708,11 @@ ApplyWorkerMain(Datum main_arg)
 
 		ereport(DEBUG1,
 				(errmsg_internal("logical replication apply worker for subscription \"%s\" two_phase is %s",
-						MySubscription->name,
-						MySubscription->twophasestate == LOGICALREP_TWOPHASE_STATE_DISABLED ? "DISABLED" :
-						MySubscription->twophasestate == LOGICALREP_TWOPHASE_STATE_PENDING ? "PENDING" :
-						MySubscription->twophasestate == LOGICALREP_TWOPHASE_STATE_ENABLED ? "ENABLED" :
-						"?")));
+								 MySubscription->name,
+								 MySubscription->twophasestate == LOGICALREP_TWOPHASE_STATE_DISABLED ? "DISABLED" :
+								 MySubscription->twophasestate == LOGICALREP_TWOPHASE_STATE_PENDING ? "PENDING" :
+								 MySubscription->twophasestate == LOGICALREP_TWOPHASE_STATE_ENABLED ? "ENABLED" :
+								 "?")));
 	}
 	else
 	{
@@ -5073,10 +5086,10 @@ get_transaction_apply_action(TransactionId xid, ParallelApplyWorkerInfo **winfo)
 	}
 
 	/*
-	 * If we are processing this transaction using a parallel apply worker then
-	 * either we send the changes to the parallel worker or if the worker is busy
-	 * then serialize the changes to the file which will later be processed by
-	 * the parallel worker.
+	 * If we are processing this transaction using a parallel apply worker
+	 * then either we send the changes to the parallel worker or if the worker
+	 * is busy then serialize the changes to the file which will later be
+	 * processed by the parallel worker.
 	 */
 	*winfo = pa_find_worker(xid);
 
@@ -5090,9 +5103,10 @@ get_transaction_apply_action(TransactionId xid, ParallelApplyWorkerInfo **winfo)
 	}
 
 	/*
-	 * If there is no parallel worker involved to process this transaction then
-	 * we either directly apply the change or serialize it to a file which will
-	 * later be applied when the transaction finish message is processed.
+	 * If there is no parallel worker involved to process this transaction
+	 * then we either directly apply the change or serialize it to a file
+	 * which will later be applied when the transaction finish message is
+	 * processed.
 	 */
 	else if (in_streamed_transaction)
 	{

@@ -87,8 +87,8 @@
 char *
 supports_compression(const pg_compress_specification compression_spec)
 {
-	const pg_compress_algorithm	algorithm = compression_spec.algorithm;
-	bool						supported = false;
+	const pg_compress_algorithm algorithm = compression_spec.algorithm;
+	bool		supported = false;
 
 	if (algorithm == PG_COMPRESSION_NONE)
 		supported = true;
@@ -106,7 +106,7 @@ supports_compression(const pg_compress_specification compression_spec)
 #endif
 
 	if (!supported)
-		return psprintf("this build does not support compression with %s",
+		return psprintf(_("this build does not support compression with %s"),
 						get_compress_algorithm_name(algorithm));
 
 	return NULL;

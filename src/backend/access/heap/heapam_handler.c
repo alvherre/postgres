@@ -334,8 +334,8 @@ heapam_tuple_update(Relation relation, ItemPointer otid, TupleTableSlot *slot,
 	 * Note: heap_update returns the tid (location) of the new tuple in the
 	 * t_self field.
 	 *
-	 * If the update is not HOT, we must update all indexes. If the update
-	 * is HOT, it could be that we updated summarized columns, so we either
+	 * If the update is not HOT, we must update all indexes. If the update is
+	 * HOT, it could be that we updated summarized columns, so we either
 	 * update only summarized indexes, or none at all.
 	 */
 	if (result != TM_Ok)
@@ -731,14 +731,9 @@ heapam_relation_copy_for_cluster(Relation OldHeap, Relation NewHeap,
 								 *multi_cutoff);
 
 
-	/*
-	 * Set up sorting if wanted. NewHeap is being passed to
-	 * tuplesort_begin_cluster(), it could have been OldHeap too. It does not
-	 * really matter, as the goal is to have a heap relation being passed to
-	 * _bt_log_reuse_page() (which should not be called from this code path).
-	 */
+	/* Set up sorting if wanted */
 	if (use_sort)
-		tuplesort = tuplesort_begin_cluster(oldTupDesc, OldIndex, NewHeap,
+		tuplesort = tuplesort_begin_cluster(oldTupDesc, OldIndex,
 											maintenance_work_mem,
 											NULL, TUPLESORT_NONE);
 	else
@@ -816,7 +811,7 @@ heapam_relation_copy_for_cluster(Relation OldHeap, Relation NewHeap,
 				 * If the last pages of the scan were empty, we would go to
 				 * the next phase while heap_blks_scanned != heap_blks_total.
 				 * Instead, to ensure that heap_blks_scanned is equivalent to
-				 * total_heap_blks after the table scan phase, this parameter
+				 * heap_blks_total after the table scan phase, this parameter
 				 * is manually updated to the correct value when the table
 				 * scan finishes.
 				 */
