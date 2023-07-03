@@ -1117,7 +1117,8 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 		 * Create a new column, which is marked as NOT inherited.
 		 *
 		 * For constraints, ONLY the NOT NULL constraint is inherited by the
-		 * new column definition per SQL99.
+		 * new column definition per SQL99; however we cannot do that
+		 * correctly here, so we leave it for expandTableLikeClause to handle.
 		 */
 		def = makeNode(ColumnDef);
 		def->colname = pstrdup(attributeName);
@@ -1125,7 +1126,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 											attribute->atttypmod);
 		def->inhcount = 0;
 		def->is_local = true;
-		def->is_not_null = attribute->attnotnull;
+		def->is_not_null = false;
 		if (attribute->attnotnull)
 			process_notnull_constraints = true;
 		def->is_from_type = false;
@@ -1293,6 +1294,7 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 	TupleConstr *constr;
 	AttrMap    *attmap;
 	char	   *comment;
+	bool		at_pushed = false;
 	ListCell   *lc;
 
 	/*
@@ -1501,6 +1503,8 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 		atcmd->objtype = OBJECT_TABLE;
 		atcmd->missing_ok = false;
 		result = lcons(atcmd, result);
+
+		at_pushed = true;
 	}
 
 	/*
@@ -1527,6 +1531,40 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 												 parent_index,
 												 attmap,
 												 NULL);
+
+			/*
+			 * The PK columns might not yet non-nullable, so make sure they
+			 * become so.
+			 */
+			if (index_stmt->primary)
+			{
+				foreach(lc, index_stmt->indexParams)
+				{
+					IndexElem *col = lfirst_node(IndexElem, lc);
+					AlterTableCmd *notnullcmd = makeNode(AlterTableCmd);
+
+					notnullcmd->subtype = AT_SetAttNotNull;
+					notnullcmd->name = pstrdup(col->name);
+					/* Luckily we can still add more AT-subcmds here */
+					atsubcmds = lappend(atsubcmds, notnullcmd);
+				}
+
+				/*
+				 * If we had already put the AlterTableStmt into the
+				 * output list, we don't need to do so again; otherwise
+				 * do it.
+				 */
+				if (!at_pushed)
+				{
+					AlterTableStmt *atcmd = makeNode(AlterTableStmt);
+
+					atcmd->relation = copyObject(heapRel);
+					atcmd->cmds = atsubcmds;
+					atcmd->objtype = OBJECT_TABLE;
+					atcmd->missing_ok = false;
+					result = lcons(atcmd, result);
+				}
+			}
 
 			/* Copy comment on index, if requested */
 			if (table_like_clause->options & CREATE_TABLE_LIKE_COMMENTS)
