@@ -1229,6 +1229,48 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	}
 
 	/*
+	 * However, if INCLUDING INDEXES is not given and a primary key exists,
+	 * then we can add the necessary NOT NULL constraints for the columns
+	 * therein.
+	 */
+	if ((table_like_clause->options & CREATE_TABLE_LIKE_INDEXES) == 0)
+	{
+		Bitmapset  *pkcols;
+		int			x = -1;
+
+
+		pkcols = RelationGetIndexAttrBitmap(relation,
+											INDEX_ATTR_BITMAP_PRIMARY_KEY);
+
+		/*
+		 * When INCLUDING CONSTRAINTS is not specified, and the table has a
+		 * primary key, we need to add NOT NULL constraints to cover all the
+		 * columns in the PK.  This is for backwards compatibility.
+		 */
+		while ((x = bms_next_member(pkcols, x)) >= 0)
+		{
+			Constraint *notnull;
+			Form_pg_attribute attForm;
+
+			attForm = TupleDescAttr(tupleDesc,
+									x + FirstLowInvalidHeapAttributeNumber - 1);
+
+			notnull = makeNode(Constraint);
+			notnull->contype = CONSTR_NOTNULL;
+			notnull->conname = NULL;
+			notnull->is_no_inherit = false;
+			notnull->deferrable = false;
+			notnull->initdeferred = false;
+			notnull->location = -1;
+			notnull->colname = pstrdup(NameStr(attForm->attname));
+			notnull->skip_validation = false;
+			notnull->initially_valid = true;
+
+			cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
+		}
+	}
+
+	/*
 	 * We may copy extended statistics if requested, since the representation
 	 * of CreateStatsStmt doesn't depend on column numbers.
 	 */
@@ -1540,7 +1582,7 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 			{
 				foreach(lc, index_stmt->indexParams)
 				{
-					IndexElem *col = lfirst_node(IndexElem, lc);
+					IndexElem  *col = lfirst_node(IndexElem, lc);
 					AlterTableCmd *notnullcmd = makeNode(AlterTableCmd);
 
 					notnullcmd->subtype = AT_SetAttNotNull;
@@ -1550,9 +1592,8 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 				}
 
 				/*
-				 * If we had already put the AlterTableStmt into the
-				 * output list, we don't need to do so again; otherwise
-				 * do it.
+				 * If we had already put the AlterTableStmt into the output
+				 * list, we don't need to do so again; otherwise do it.
 				 */
 				if (!at_pushed)
 				{
