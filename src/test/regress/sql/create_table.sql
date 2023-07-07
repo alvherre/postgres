@@ -536,7 +536,7 @@ SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'par
 
 -- Once check_b is added to the parent, it should be made non-local for part_b
 ALTER TABLE parted ADD CONSTRAINT check_b CHECK (b >= 0);
-SELECT conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'part_b'::regclass ORDER BY coninhcount DESC, conname;
+SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'part_b'::regclass ORDER BY coninhcount DESC, conname;
 
 -- Neither check_a nor check_b are droppable from part_b
 ALTER TABLE part_b DROP CONSTRAINT check_a;

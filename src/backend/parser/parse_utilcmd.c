@@ -80,10 +80,10 @@ typedef struct
 	bool		isforeign;		/* true if CREATE/ALTER FOREIGN TABLE */
 	bool		isalter;		/* true if altering existing table */
 	List	   *columns;		/* ColumnDef items */
-	List	   *ckconstraints;	/* CHECK and NOT NULL constraints */
+	List	   *ckconstraints;	/* CHECK constraints */
+	List	   *nnconstraints;	/* NOT NULL constraints */
 	List	   *fkconstraints;	/* FOREIGN KEY constraints */
 	List	   *ixconstraints;	/* index-creating constraints */
-	List	   *nnconstraints;	/* NOT NULL constraints */
 	List	   *likeclauses;	/* LIKE clauses that need post-processing */
 	List	   *extstats;		/* cloned extended statistics */
 	List	   *blist;			/* "before list" of things to do before
@@ -241,9 +241,9 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 	cxt.isalter = false;
 	cxt.columns = NIL;
 	cxt.ckconstraints = NIL;
+	cxt.nnconstraints = NIL;
 	cxt.fkconstraints = NIL;
 	cxt.ixconstraints = NIL;
-	cxt.nnconstraints = NIL;
 	cxt.likeclauses = NIL;
 	cxt.extstats = NIL;
 	cxt.blist = NIL;
@@ -669,10 +669,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 			case CONSTR_NOTNULL:
 
 				/*
-				 * For NOT NULL declarations, we need to mark the column as
-				 * not nullable, and set things up to have a CHECK constraint
-				 * created.  Also, duplicate NOT NULL declarations are not
-				 * allowed.
+				 * Disallow duplicate and redundant [NOT] NULL markings
 				 */
 				if (saw_nullable)
 				{
@@ -694,31 +691,16 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 
 				/*
 				 * If this is the first time we see this column being marked
-				 * not null, keep track to later add a NOT NULL constraint.
+				 * not null, add the constraint entry; and get rid of any
+				 * previous markings to mark the column NOT NULL.
 				 */
 				if (!column->is_not_null)
 				{
-					Constraint *notnull;
-
-					/*
-					 * XXX why do we create our own node, instead of adding
-					 * the node we already have to the list?
-					 */
 					column->is_not_null = true;
 					saw_nullable = true;
 
-					notnull = makeNode(Constraint);
-					notnull->contype = CONSTR_NOTNULL;
-					notnull->conname = constraint->conname;
-					notnull->is_no_inherit = constraint->is_no_inherit;
-					notnull->deferrable = false;
-					notnull->initdeferred = false;
-					notnull->location = -1;
-					notnull->colname = column->colname;
-					notnull->skip_validation = false;
-					notnull->initially_valid = true;
-
-					cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
+					constraint->colname = column->colname;
+					cxt->nnconstraints = lappend(cxt->nnconstraints, constraint);
 
 					/* Don't need this anymore, if we had it */
 					need_notnull = false;
@@ -809,11 +791,6 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 
 			case CONSTR_CHECK:
 				cxt->ckconstraints = lappend(cxt->ckconstraints, constraint);
-
-				/*
-				 * XXX If the user says CHECK (IS NOT NULL), should we turn
-				 * that into a regular NOT NULL constraint?
-				 */
 				break;
 
 			case CONSTR_PRIMARY:
@@ -3766,7 +3743,7 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 	}
 	cxt.alist = NIL;
 
-	/* Append any CHECK or FK constraints to the commands list */
+	/* Append any CHECK, NOT NULL or FK constraints to the commands list */
 	foreach(l, cxt.ckconstraints)
 	{
 		newcmd = makeNode(AlterTableCmd);
@@ -3774,14 +3751,14 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 		newcmd->def = (Node *) lfirst_node(Constraint, l);
 		newcmds = lappend(newcmds, newcmd);
 	}
-	foreach(l, cxt.fkconstraints)
+	foreach(l, cxt.nnconstraints)
 	{
 		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;
 		newcmd->def = (Node *) lfirst_node(Constraint, l);
 		newcmds = lappend(newcmds, newcmd);
 	}
-	foreach(l, cxt.nnconstraints)
+	foreach(l, cxt.fkconstraints)
 	{
 		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;

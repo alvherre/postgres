@@ -3846,6 +3846,8 @@ ColConstraintElem:
 					n->contype = CONSTR_NOTNULL;
 					n->location = @1;
 					n->is_no_inherit = $3;
+					n->skip_validation = false;
+					n->initially_valid = true;
 					$$ = (Node *) n;
 				}
 			| NULL_P
@@ -4089,10 +4091,11 @@ ConstraintElem:
 					n->contype = CONSTR_NOTNULL;
 					n->location = @1;
 					n->colname = $3;
+					/* no NOT VALID support yet */
 					processCASbits($4, @4, "NOT NULL",
 								   NULL, NULL, NULL,
 								   &n->is_no_inherit, yyscanner);
-					n->initially_valid = !n->skip_validation;
+					n->initially_valid = true;
 					$$ = (Node *) n;
 				}
 			| UNIQUE opt_unique_null_treatment '(' columnList ')' opt_c_include opt_definition OptConsTableSpace

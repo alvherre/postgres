@@ -639,7 +639,7 @@ extractNotNullColumn(HeapTuple constrTup)
 	Datum		adatum;
 	ArrayType  *arr;
 
-	/* only tuples for CHECK constraints should be given */
+	/* only tuples for NOT NULL constraints should be given */
 	Assert(((Form_pg_constraint) GETSTRUCT(constrTup))->contype == CONSTRAINT_NOTNULL);
 
 	adatum = SysCacheGetAttrNotNull(CONSTROID, constrTup,

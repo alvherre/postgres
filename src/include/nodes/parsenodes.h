@@ -2462,11 +2462,10 @@ typedef struct VariableShowStmt
  *		Create Table Statement
  *
  * NOTE: in the raw gram.y output, ColumnDef and Constraint nodes are
- * intermixed in tableElts, and constraints and notnullcols are NIL.  After
- * parse analysis, tableElts contains just ColumnDefs, notnullcols has been
- * filled with not-nullable column names from various sources, and constraints
- * contains just Constraint nodes (in fact, only CONSTR_CHECK nodes, in the
- * present implementation).
+ * intermixed in tableElts, and constraints and nnconstraints are NIL.  After
+ * parse analysis, tableElts contains just ColumnDefs, nnconstraints contains
+ * Constraint nodes of CONSTR_NOTNULL type from various sources, and
+ * constraints contains just CONSTR_CHECK Constraint nodes.
  * ----------------------
  */
 
