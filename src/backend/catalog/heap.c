@@ -2414,11 +2414,6 @@ AddRelationNewConstraints(Relation rel,
 		{
 			char	   *ccname;
 
-			/*
-			 * XXX Should we detect the case with CHECK (foo IS NOT NULL) and
-			 * handle it as a NOT NULL constraint?
-			 */
-
 			if (cdef->raw_expr != NULL)
 			{
 				Assert(cdef->cooked_expr == NULL);

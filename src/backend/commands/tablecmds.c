@@ -203,7 +203,7 @@ typedef struct AlteredTableInfo
 typedef struct NewConstraint
 {
 	char	   *name;			/* Constraint name, or NULL if none */
-	ConstrType	contype;		/* CHECK, FOREIGN */
+	ConstrType	contype;		/* CHECK or FOREIGN */
 	Oid			refrelid;		/* PK rel, if FOREIGN */
 	Oid			refindid;		/* OID of PK's index, if FOREIGN */
 	Oid			conid;			/* OID of pg_constraint entry, if FOREIGN */
@@ -351,7 +351,7 @@ static void RangeVarCallbackForTruncate(const RangeVar *relation,
 										Oid relId, Oid oldRelId, void *arg);
 static List *MergeAttributes(List *schema, List *supers, char relpersistence,
 							 bool is_partition, List **supconstr,
-							 List **additional_notnulls);
+							 List **supnotnulls);
 static bool MergeCheckConstraint(List *constraints, char *name, Node *expr);
 static void MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel);
 static void MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel);
@@ -2321,7 +2321,7 @@ storage_name(char c)
  * Output arguments:
  * 'supconstr' receives a list of constraints belonging to the parents,
  *		updated as necessary to be valid for the child.
- * 'nnconstraints' receives a list of CookedConstraints that corresponds to
+ * 'supnotnulls' receives a list of CookedConstraints that corresponds to
  *		constraints coming from inheritance parents.
  *
  * Return value:
@@ -2497,7 +2497,6 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		ListCell   *lc2;
 		Bitmapset  *pkattrs;
 		Bitmapset  *nncols = NULL;
-
 
 		/* caller already got lock */
 		relation = table_open(parent, NoLock);
@@ -3171,7 +3170,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 	/*
 	 * Now that we have the column definition list for a partition, we can
 	 * check whether the columns referenced in the column constraint specs
-	 * actually exist.
+	 * actually exist.  Also, merge column defaults.
 	 */
 	if (is_partition)
 	{
@@ -3188,7 +3187,6 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				if (strcmp(coldef->colname, restdef->colname) == 0)
 				{
 					found = true;
-					coldef->is_not_null |= restdef->is_not_null;
 
 					/*
 					 * Check for conflicts related to generated columns.
