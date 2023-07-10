@@ -434,14 +434,14 @@ static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
 static void add_column_collation_dependency(Oid relid, int32 attnum, Oid collid);
 static ObjectAddress ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 									   LOCKMODE lockmode);
-static void set_attnotnull(List **wqueue, Relation rel,
+static bool set_attnotnull(List **wqueue, Relation rel,
 						   AttrNumber attnum, bool recurse, LOCKMODE lockmode);
 static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  char *constrname, char *colName,
 									  bool recurse, bool recursing,
 									  List **readyRels, LOCKMODE lockmode);
-static void ATExecSetAttNotNull(List **wqueue, Relation rel,
-								const char *colName, LOCKMODE lockmode);
+static ObjectAddress ATExecSetAttNotNull(List **wqueue, Relation rel,
+										 const char *colName, LOCKMODE lockmode);
 static void ATExecCheckNotNull(AlteredTableInfo *tab, Relation rel,
 							   const char *colName, LOCKMODE lockmode);
 static bool NotNullImpliedByRelConstraints(Relation rel, Form_pg_attribute attr);
@@ -5262,7 +5262,7 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab,
 									   cmd->recurse, false, NULL, lockmode);
 			break;
 		case AT_SetAttNotNull:	/* set pg_attribute.attnotnull */
-			ATExecSetAttNotNull(wqueue, rel, cmd->name, lockmode);
+			address = ATExecSetAttNotNull(wqueue, rel, cmd->name, lockmode);
 			break;
 		case AT_CheckNotNull:	/* check column is already marked NOT NULL */
 			ATExecCheckNotNull(tab, rel, cmd->name, lockmode);
@@ -7646,15 +7646,16 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
  * When called to alter an existing table, 'wqueue' must be given so that we can
  * queue a check that existing tuples pass the constraint.  When called from
  * table creation, 'wqueue' should be passed as NULL.
+ *
+ * Returns true if the flag was set in any table, otherwise false.
  */
-static void
+static bool
 set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 			   LOCKMODE lockmode)
 {
 	HeapTuple	tuple;
 	Form_pg_attribute attForm;
-	List	   *children;
-	ListCell   *lc;
+	bool		retval = false;
 
 	tuple = SearchSysCacheCopyAttNum(RelationGetRelid(rel), attnum);
 	if (!HeapTupleIsValid(tuple))
@@ -7683,30 +7684,36 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 			tab = ATGetQueueEntry(wqueue, rel);
 			tab->verify_new_notnull = true;
 		}
+
+		retval = true;
 	}
 
-	/* if no recursion is desired, we're done */
-	if (!recurse)
-		return;
-
-	children = find_inheritance_children(RelationGetRelid(rel), lockmode);
-	foreach(lc, children)
+	if (recurse)
 	{
-		Oid			childrelid = lfirst_oid(lc);
-		Relation	childrel;
-		AttrNumber	childattno;
+		List	   *children;
+		ListCell   *lc;
 
-		/* find_inheritance_children already got lock */
-		childrel = table_open(childrelid, NoLock);
-		CheckTableNotInUse(childrel, "ALTER TABLE");
+		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
+		foreach(lc, children)
+		{
+			Oid			childrelid = lfirst_oid(lc);
+			Relation	childrel;
+			AttrNumber	childattno;
 
-		childattno = get_attnum(RelationGetRelid(childrel),
-								get_attname(RelationGetRelid(rel), attnum,
-											false));
-		set_attnotnull(wqueue, childrel, childattno,
-					   recurse, lockmode);
-		table_close(childrel, NoLock);
+			/* find_inheritance_children already got lock */
+			childrel = table_open(childrelid, NoLock);
+			CheckTableNotInUse(childrel, "ALTER TABLE");
+
+			childattno = get_attnum(RelationGetRelid(childrel),
+									get_attname(RelationGetRelid(rel), attnum,
+												false));
+			retval |= set_attnotnull(wqueue, childrel, childattno,
+									 recurse, lockmode);
+			table_close(childrel, NoLock);
+		}
 	}
+
+	return retval;
 }
 
 /*
@@ -7916,11 +7923,12 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
  * This doesn't exist in the grammar; it's used when creating a
  * primary key and the column is not already marked attnotnull.
  */
-static void
+static ObjectAddress
 ATExecSetAttNotNull(List **wqueue, Relation rel,
 					const char *colName, LOCKMODE lockmode)
 {
 	AttrNumber	attnum;
+	ObjectAddress address = InvalidObjectAddress;
 
 	attnum = get_attnum(RelationGetRelid(rel), colName);
 	if (attnum == InvalidAttrNumber)	/* XXX should not happen .. elog? */
@@ -7929,7 +7937,15 @@ ATExecSetAttNotNull(List **wqueue, Relation rel,
 				errmsg("column \"%s\" of relation \"%s\" does not exist",
 					   colName, RelationGetRelationName(rel)));
 
-	set_attnotnull(wqueue, rel, attnum, false, lockmode);
+	/*
+	 * Make the change, if necessary, and only if so report the column as
+	 * changed
+	 */
+	if (set_attnotnull(wqueue, rel, attnum, false, lockmode))
+		ObjectAddressSubSet(address, RelationRelationId,
+							RelationGetRelid(rel), attnum);
+
+	return address;
 }
 
 /*

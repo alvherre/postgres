@@ -90,7 +90,7 @@ CREATE TABLE employees OF employee_type (
 );
 NOTICE:  DDL test: type simple, tag CREATE TABLE
 NOTICE:  DDL test: type alter table, tag ALTER TABLE
-NOTICE:    subcommand: type SET ATTNOTNULL desc <NULL>
+NOTICE:    subcommand: type SET ATTNOTNULL desc column name of table employees
 NOTICE:  DDL test: type simple, tag CREATE INDEX
 -- Inheritance
 CREATE TABLE person (
@@ -146,7 +146,7 @@ CREATE TABLE like_fkey_table (
 );
 NOTICE:  DDL test: type simple, tag CREATE TABLE
 NOTICE:  DDL test: type alter table, tag ALTER TABLE
-NOTICE:    subcommand: type SET ATTNOTNULL desc <NULL>
+NOTICE:    subcommand: type SET ATTNOTNULL desc column id of table like_fkey_table
 NOTICE:    subcommand: type ALTER COLUMN SET DEFAULT (precooked) desc column id of table like_fkey_table
 NOTICE:    subcommand: type ADD CONSTRAINT (and recurse) desc constraint fkey_table_big_id_not_null on table like_fkey_table
 NOTICE:    subcommand: type ADD CONSTRAINT (and recurse) desc constraint fkey_table_check_col_1_not_null on table like_fkey_table
