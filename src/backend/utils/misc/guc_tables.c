@@ -365,6 +365,13 @@ static const struct config_enum_entry huge_pages_options[] = {
 	{NULL, 0, false}
 };
 
+static const struct config_enum_entry huge_pages_status_options[] = {
+	{"off", HUGE_PAGES_OFF, false},
+	{"on", HUGE_PAGES_ON, false},
+	{"unknown", HUGE_PAGES_UNKNOWN, false},
+	{NULL, 0, false}
+};
+
 static const struct config_enum_entry recovery_prefetch_options[] = {
 	{"off", RECOVERY_PREFETCH_OFF, false},
 	{"on", RECOVERY_PREFETCH_ON, false},
@@ -550,6 +557,7 @@ int			ssl_renegotiation_limit;
  */
 int			huge_pages = HUGE_PAGES_TRY;
 int			huge_page_size;
+int			huge_pages_status = HUGE_PAGES_UNKNOWN;
 
 /*
  * These variables are all dummies that don't do anything, except in some
@@ -994,10 +1002,10 @@ struct config_bool ConfigureNamesBool[] =
 	},
 	{
 		{"enable_presorted_aggregate", PGC_USERSET, QUERY_TUNING_METHOD,
-			gettext_noop("Enables the planner's ability to produce plans which "
+			gettext_noop("Enables the planner's ability to produce plans that "
 						 "provide presorted input for ORDER BY / DISTINCT aggregate "
 						 "functions."),
-			gettext_noop("Allows the query planner to build plans which provide "
+			gettext_noop("Allows the query planner to build plans that provide "
 						 "presorted input for aggregate functions with an ORDER BY / "
 						 "DISTINCT clause.  When disabled, implicit sorts are always "
 						 "performed during execution."),
@@ -2035,7 +2043,7 @@ struct config_int ConfigureNamesInt[] =
 						 "column-specific target set via ALTER TABLE SET STATISTICS.")
 		},
 		&default_statistics_target,
-		100, 1, 10000,
+		100, 1, MAX_STATISTICS_TARGET,
 		NULL, NULL, NULL
 	},
 	{
@@ -4877,6 +4885,17 @@ struct config_enum ConfigureNamesEnum[] =
 	},
 
 	{
+		{"huge_pages_status", PGC_INTERNAL, PRESET_OPTIONS,
+			gettext_noop("Indicates the status of huge pages."),
+			NULL,
+			GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE
+		},
+		&huge_pages_status,
+		HUGE_PAGES_UNKNOWN, huge_pages_status_options,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"recovery_prefetch", PGC_SIGHUP, WAL_RECOVERY,
 			gettext_noop("Prefetch referenced blocks during recovery."),
 			gettext_noop("Look ahead in the WAL to find references to uncached data.")
@@ -4890,8 +4909,8 @@ struct config_enum ConfigureNamesEnum[] =
 		{"debug_parallel_query", PGC_USERSET, DEVELOPER_OPTIONS,
 			gettext_noop("Forces the planner's use parallel query nodes."),
 			gettext_noop("This can be useful for testing the parallel query infrastructure "
-						 "by forcing the planner to generate plans which contains nodes "
-						 "which perform tuple communication between workers and the main process."),
+						 "by forcing the planner to generate plans that contain nodes "
+						 "that perform tuple communication between workers and the main process."),
 			GUC_NOT_IN_SAMPLE | GUC_EXPLAIN
 		},
 		&debug_parallel_query,

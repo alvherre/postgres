@@ -94,8 +94,7 @@ typedef uint64 AclMode;			/* a bitmask of privilege bits */
 #define ACL_CONNECT		(1<<11) /* for databases */
 #define ACL_SET			(1<<12) /* for configuration parameters */
 #define ACL_ALTER_SYSTEM (1<<13)	/* for configuration parameters */
-#define ACL_MAINTAIN		(1<<14) /* for relations */
-#define N_ACL_RIGHTS	15		/* 1 plus the last 1<<x */
+#define N_ACL_RIGHTS	14		/* 1 plus the last 1<<x */
 #define ACL_NO_RIGHTS	0
 /* Currently, SELECT ... FOR [KEY] UPDATE/SHARE requires UPDATE privileges */
 #define ACL_SELECT_FOR_UPDATE	ACL_UPDATE
@@ -1473,6 +1472,8 @@ typedef struct GroupingSet
  * if the clause originally came from WINDOW, and is NULL if it originally
  * was an OVER clause (but note that we collapse out duplicate OVERs).
  * partitionClause and orderClause are lists of SortGroupClause structs.
+ * partitionClause is sanitized by the query planner to remove any columns or
+ * expressions belonging to redundant PathKeys.
  * If we have RANGE with offset PRECEDING/FOLLOWING, the semantics of that are
  * specified by startInRangeFunc/inRangeColl/inRangeAsc/inRangeNullsFirst
  * for the start offset, or endInRangeFunc/inRange* for the end offset.

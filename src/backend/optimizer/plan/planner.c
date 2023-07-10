@@ -330,11 +330,13 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	 * functions are present in the query tree.
 	 *
 	 * (Note that we do allow CREATE TABLE AS, SELECT INTO, and CREATE
-	 * MATERIALIZED VIEW to use parallel plans, but as of now, only the leader
-	 * backend writes into a completely new table.  In the future, we can
-	 * extend it to allow workers to write into the table.  However, to allow
-	 * parallel updates and deletes, we have to solve other problems,
-	 * especially around combo CIDs.)
+	 * MATERIALIZED VIEW to use parallel plans, but this is safe only because
+	 * the command is writing into a completely new table which workers won't
+	 * be able to see.  If the workers could see the table, the fact that
+	 * group locking would cause them to ignore the leader's heavyweight GIN
+	 * page locks would make this unsafe.  We'll have to fix that somehow if
+	 * we want to allow parallel inserts in general; updates and deletes have
+	 * additional problems especially around combo CIDs.)
 	 *
 	 * For now, we don't try to use parallel mode if we're running inside a
 	 * parallel worker.  We might eventually be able to relax this
@@ -5999,6 +6001,9 @@ make_window_input_target(PlannerInfo *root,
  *		Create a pathkeys list describing the required input ordering
  *		for the given WindowClause.
  *
+ * Modifies wc's partitionClause to remove any clauses which are deemed
+ * redundant by the pathkey logic.
+ *
  * The required ordering is first the PARTITION keys, then the ORDER keys.
  * In the future we might try to implement windowing using hashing, in which
  * case the ordering could be relaxed, but for now we always sort.
@@ -6007,8 +6012,7 @@ static List *
 make_pathkeys_for_window(PlannerInfo *root, WindowClause *wc,
 						 List *tlist)
 {
-	List	   *window_pathkeys;
-	List	   *window_sortclauses;
+	List	   *window_pathkeys = NIL;
 
 	/* Throw error if can't sort */
 	if (!grouping_is_sortable(wc->partitionClause))
@@ -6022,12 +6026,45 @@ make_pathkeys_for_window(PlannerInfo *root, WindowClause *wc,
 				 errmsg("could not implement window ORDER BY"),
 				 errdetail("Window ordering columns must be of sortable datatypes.")));
 
-	/* Okay, make the combined pathkeys */
-	window_sortclauses = list_concat_copy(wc->partitionClause, wc->orderClause);
-	window_pathkeys = make_pathkeys_for_sortclauses(root,
-													window_sortclauses,
-													tlist);
-	list_free(window_sortclauses);
+	/*
+	 * First fetch the pathkeys for the PARTITION BY clause.  We can safely
+	 * remove any clauses from the wc->partitionClause for redundant pathkeys.
+	 */
+	if (wc->partitionClause != NIL)
+	{
+		bool		sortable;
+
+		window_pathkeys = make_pathkeys_for_sortclauses_extended(root,
+																 &wc->partitionClause,
+																 tlist,
+																 true,
+																 &sortable);
+
+		Assert(sortable);
+	}
+
+	/*
+	 * In principle, we could also consider removing redundant ORDER BY items
+	 * too as doing so does not alter the result of peer row checks done by
+	 * the executor.  However, we must *not* remove the ordering column for
+	 * RANGE OFFSET cases, as the executor needs that for in_range tests even
+	 * if it's known to be equal to some partitioning column.
+	 */
+	if (wc->orderClause != NIL)
+	{
+		List	   *orderby_pathkeys;
+
+		orderby_pathkeys = make_pathkeys_for_sortclauses(root,
+														 wc->orderClause,
+														 tlist);
+
+		/* Okay, make the combined pathkeys */
+		if (window_pathkeys != NIL)
+			window_pathkeys = append_pathkeys(window_pathkeys, orderby_pathkeys);
+		else
+			window_pathkeys = orderby_pathkeys;
+	}
+
 	return window_pathkeys;
 }
 
