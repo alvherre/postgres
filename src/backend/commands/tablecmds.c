@@ -7932,7 +7932,7 @@ ATExecSetAttNotNull(List **wqueue, Relation rel,
 	ObjectAddress address = InvalidObjectAddress;
 
 	attnum = get_attnum(RelationGetRelid(rel), colName);
-	if (attnum == InvalidAttrNumber)	/* XXX should not happen .. elog? */
+	if (attnum == InvalidAttrNumber)
 		ereport(ERROR,
 				errcode(ERRCODE_UNDEFINED_COLUMN),
 				errmsg("column \"%s\" of relation \"%s\" does not exist",
