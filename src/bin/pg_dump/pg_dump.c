@@ -8357,7 +8357,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	PQExpBuffer q = createPQExpBuffer();
 	PQExpBuffer tbloids = createPQExpBuffer();
 	PQExpBuffer checkoids = createPQExpBuffer();
-	PQExpBuffer defaultoids = createPQExpBuffer();
 	PGresult   *res;
 	int			ntups;
 	int			curtblindx;
@@ -8397,7 +8396,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 */
 	appendPQExpBufferChar(tbloids, '{');
 	appendPQExpBufferChar(checkoids, '{');
-	appendPQExpBufferChar(defaultoids, '{');
 	for (int i = 0; i < numTables; i++)
 	{
 		TableInfo  *tbinfo = &tblinfo[i];
@@ -8569,8 +8567,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	i_atthasdef = PQfnumber(res, "atthasdef");
 
 	/* Within the next loop, we'll accumulate OIDs of tables with defaults */
-	resetPQExpBuffer(defaultoids);
-	appendPQExpBufferChar(defaultoids, '{');
+	resetPQExpBuffer(tbloids);
+	appendPQExpBufferChar(tbloids, '{');
 
 	/*
 	 * Outer loop iterates once per table, not once per row.  Incrementing of
@@ -8792,9 +8790,9 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		if (hasdefaults)
 		{
 			/* Collect OIDs of interesting tables that have defaults */
-			if (defaultoids->len > 1)	/* do we have more than the '{'? */
-				appendPQExpBufferChar(defaultoids, ',');
-			appendPQExpBuffer(defaultoids, "%u", tbinfo->dobj.catId.oid);
+			if (tbloids->len > 1)	/* do we have more than the '{'? */
+				appendPQExpBufferChar(tbloids, ',');
+			appendPQExpBuffer(tbloids, "%u", tbinfo->dobj.catId.oid);
 		}
 	}
 
@@ -8804,7 +8802,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 * Now get info about column defaults.  This is skipped for a data-only
 	 * dump, as it is only needed for table schemas.
 	 */
-	if (!dopt->dataOnly && defaultoids->len > 1)
+	if (!dopt->dataOnly && tbloids->len > 1)
 	{
 		AttrDefInfo *attrdefs;
 		int			numDefaults;
@@ -8812,14 +8810,14 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 		pg_log_info("finding table default expressions");
 
-		appendPQExpBufferChar(defaultoids, '}');
+		appendPQExpBufferChar(tbloids, '}');
 
 		printfPQExpBuffer(q, "SELECT a.tableoid, a.oid, adrelid, adnum, "
 						  "pg_catalog.pg_get_expr(adbin, adrelid) AS adsrc\n"
 						  "FROM unnest('%s'::pg_catalog.oid[]) AS src(tbloid)\n"
 						  "JOIN pg_catalog.pg_attrdef a ON (src.tbloid = a.adrelid)\n"
 						  "ORDER BY a.adrelid, a.adnum",
-						  defaultoids->data);
+						  tbloids->data);
 
 		res = ExecuteSqlQuery(fout, q->data, PGRES_TUPLES_OK);
 
@@ -9065,7 +9063,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	destroyPQExpBuffer(q);
 	destroyPQExpBuffer(tbloids);
 	destroyPQExpBuffer(checkoids);
-	destroyPQExpBuffer(defaultoids);
 }
 
 /*
