@@ -794,7 +794,7 @@ ERROR:  cannot drop inherited constraint "check_b" of relation "part_b"
 -- traditional inheritance where they will be left behind, because they would
 -- be local constraints.
 ALTER TABLE parted DROP CONSTRAINT check_a, DROP CONSTRAINT check_b;
-SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'part_b'::regclass ORDER BY coninhcount;
+SELECT conname, conislocal, coninhcount FROM pg_constraint WHERE conrelid = 'part_b'::regclass ORDER BY coninhcount DESC, conname;
       conname      | conislocal | coninhcount 
 -------------------+------------+-------------
  part_b_b_not_null | t          |           1
