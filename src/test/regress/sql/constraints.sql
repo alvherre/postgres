@@ -589,6 +589,9 @@ ALTER TABLE notnull_tbl1 ADD CONSTRAINT foobar NOT NULL a;
 select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 DROP TABLE notnull_tbl1;
 
+-- nope
+CREATE TABLE notnull_tbl2 (a INTEGER CONSTRAINT blah NOT NULL, b INTEGER CONSTRAINT blah NOT NULL);
+
 CREATE TABLE notnull_tbl2 (a INTEGER PRIMARY KEY);
 ALTER TABLE notnull_tbl2 ALTER a DROP NOT NULL;
 

@@ -2822,7 +2822,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 			foreach(lc2, givennames)
 			{
 				if (strcmp(lfirst(lc2), constr->conname) == 0)
-					/* XXX this case seems uncovered by tests */
 					ereport(ERROR,
 							errcode(ERRCODE_DUPLICATE_OBJECT),
 							errmsg("constraint \"%s\" for relation \"%s\" already exists",
