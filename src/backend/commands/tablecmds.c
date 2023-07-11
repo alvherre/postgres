@@ -9336,10 +9336,11 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		 * If adding a NOT NULL constraint, set the pg_attribute flag and tell
 		 * phase 3 to verify existing rows, if needed.
 		 */
-		if (constr->contype == CONSTR_NOTNULL &&
+		if (constr->contype == CONSTR_NOTNULL)
 			set_attnotnull(wqueue, rel, ccon->attnum,
-						   !ccon->is_no_inherit, lockmode))
-			ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
+						   !ccon->is_no_inherit, lockmode);
+
+		ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 	}
 
 	/* At this point we must have a locked-down name to use */
