@@ -227,6 +227,9 @@ Indexes:
 -- used as replica identity.
 ALTER TABLE test_replica_identity3 ALTER COLUMN id DROP NOT NULL;
 ERROR:  column "id" is in index used as replica identity
+-- but it's OK when the identity is FULL
+ALTER TABLE test_replica_identity3 REPLICA IDENTITY FULL;
+ALTER TABLE test_replica_identity3 ALTER COLUMN id DROP NOT NULL;
 --
 -- Test that replica identity can be set on an index that's not yet valid.
 -- (This matches the way pg_dump will try to dump a partitioned table.)

@@ -97,6 +97,9 @@ ALTER TABLE test_replica_identity3 ALTER COLUMN id TYPE bigint;
 -- ALTER TABLE DROP NOT NULL is not allowed for columns part of an index
 -- used as replica identity.
 ALTER TABLE test_replica_identity3 ALTER COLUMN id DROP NOT NULL;
+-- but it's OK when the identity is FULL
+ALTER TABLE test_replica_identity3 REPLICA IDENTITY FULL;
+ALTER TABLE test_replica_identity3 ALTER COLUMN id DROP NOT NULL;
 
 --
 -- Test that replica identity can be set on an index that's not yet valid.

@@ -12572,8 +12572,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 				continue;
 
 			/*
-			 * It's not valid to drop the last NOT NULL constraint for a
-			 * GENERATED AS IDENTITY column.
+			 * It's not valid to drop the NOT NULL constraint for a GENERATED
+			 * AS IDENTITY column.
 			 */
 			if (attForm->attidentity)
 				ereport(ERROR,
@@ -12584,8 +12584,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 							   RelationGetRelationName(rel)));
 
 			/*
-			 * It's not valid to drop the last NOT NULL constraint for the
-			 * replica identity either.  XXX make exception for FULL?
+			 * It's not valid to drop the NOT NULL constraint for a column in
+			 * the replica identity index, either. (FULL is not affected.)
 			 */
 			if (bms_is_member(lfirst_int(lc) - FirstLowInvalidHeapAttributeNumber, ircols))
 				ereport(ERROR,
