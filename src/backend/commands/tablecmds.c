@@ -7846,7 +7846,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 		if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("cannot add constraint to only the partitioned table when partitions exist"),
+					errmsg("constraint must be added to child tables too"),
 					errhint("Do not specify the ONLY keyword."));
 		else
 			is_no_inherit = true;

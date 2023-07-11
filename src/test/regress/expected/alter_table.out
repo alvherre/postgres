@@ -4383,7 +4383,7 @@ ERROR:  cannot alter inherited column "b"
 -- cannot add/drop NOT NULL or check constraints to *only* the parent, when
 -- partitions exist
 ALTER TABLE ONLY list_parted2 ALTER b SET NOT NULL;
-ERROR:  cannot add constraint to only the partitioned table when partitions exist
+ERROR:  constraint must be added to child tables too
 HINT:  Do not specify the ONLY keyword.
 ALTER TABLE ONLY list_parted2 ADD CONSTRAINT check_b CHECK (b <> 'zz');
 ERROR:  constraint must be added to child tables too
