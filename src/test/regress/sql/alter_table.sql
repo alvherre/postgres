@@ -850,7 +850,9 @@ alter table non_existent alter column bar drop not null;
 -- test checking for null values and primary key
 create table atacc1 (test int not null);
 alter table atacc1 add constraint "atacc1_pkey" primary key (test);
+\d atacc1
 alter table atacc1 alter column test drop not null;
+\d atacc1
 alter table atacc1 drop constraint "atacc1_pkey";
 \d atacc1
 insert into atacc1 values (null);
