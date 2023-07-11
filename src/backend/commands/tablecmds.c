@@ -443,8 +443,6 @@ static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  List **readyRels, LOCKMODE lockmode);
 static ObjectAddress ATExecSetAttNotNull(List **wqueue, Relation rel,
 										 const char *colName, LOCKMODE lockmode);
-static void ATExecCheckNotNull(AlteredTableInfo *tab, Relation rel,
-							   const char *colName, LOCKMODE lockmode);
 static bool NotNullImpliedByRelConstraints(Relation rel, Form_pg_attribute attr);
 static bool ConstraintImpliedByRelConstraint(Relation scanrel,
 											 List *testConstraint, List *provenConstraint);
@@ -4695,15 +4693,6 @@ AlterTableGetLockLevel(List *cmds)
 				cmd_lockmode = ShareUpdateExclusiveLock;
 				break;
 
-			case AT_CheckNotNull:
-
-				/*
-				 * This only examines the table's schema; but lock must be
-				 * strong enough to prevent concurrent DROP NOT NULL.
-				 */
-				cmd_lockmode = AccessShareLock;
-				break;
-
 			default:			/* oops */
 				elog(ERROR, "unrecognized alter table type: %d",
 					 (int) cmd->subtype);
@@ -4872,12 +4861,6 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
 			/* Need command-specific recursion decision */
 			ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode, context);
-			pass = AT_PASS_COL_ATTRS;
-			break;
-		case AT_CheckNotNull:	/* check column is already marked NOT NULL */
-			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
-			ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode, context);
-			/* No command-specific prep needed */
 			pass = AT_PASS_COL_ATTRS;
 			break;
 		case AT_DropExpression: /* ALTER COLUMN DROP EXPRESSION */
@@ -5264,9 +5247,6 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab,
 			break;
 		case AT_SetAttNotNull:	/* set pg_attribute.attnotnull */
 			address = ATExecSetAttNotNull(wqueue, rel, cmd->name, lockmode);
-			break;
-		case AT_CheckNotNull:	/* check column is already marked NOT NULL */
-			ATExecCheckNotNull(tab, rel, cmd->name, lockmode);
 			break;
 		case AT_DropExpression:
 			address = ATExecDropExpression(rel, cmd->name, cmd->missing_ok, lockmode);
@@ -6392,8 +6372,6 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return NULL;		/* not real grammar */
 		case AT_DropExpression:
 			return "ALTER COLUMN ... DROP EXPRESSION";
-		case AT_CheckNotNull:
-			return NULL;		/* not real grammar */
 		case AT_SetStatistics:
 			return "ALTER COLUMN ... SET STATISTICS";
 		case AT_SetOptions:
@@ -7947,46 +7925,6 @@ ATExecSetAttNotNull(List **wqueue, Relation rel,
 							RelationGetRelid(rel), attnum);
 
 	return address;
-}
-
-/*
- * ALTER TABLE ALTER COLUMN CHECK NOT NULL
- *
- * This doesn't exist in the grammar, but we generate AT_CheckNotNull
- * commands against the partitions of a partitioned table if the user
- * writes ALTER TABLE ONLY ... SET NOT NULL on the partitioned table,
- * or tries to create a primary key on it (which internally creates
- * AT_SetNotNull on the partitioned table).   Such a command doesn't
- * allow us to actually modify any partition, but we want to let it
- * go through if the partitions are already properly marked.
- *
- * In future, this might need to adjust the child table's state, likely
- * by incrementing an inheritance count for the attnotnull constraint.
- * For now we need only check for the presence of the flag.
- */
-static void
-ATExecCheckNotNull(AlteredTableInfo *tab, Relation rel,
-				   const char *colName, LOCKMODE lockmode)
-{
-	HeapTuple	tuple;
-
-	tuple = SearchSysCacheAttName(RelationGetRelid(rel), colName);
-
-	if (!HeapTupleIsValid(tuple))
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_COLUMN),
-				 errmsg("column \"%s\" of relation \"%s\" does not exist",
-						colName, RelationGetRelationName(rel))));
-
-	if (!((Form_pg_attribute) GETSTRUCT(tuple))->attnotnull)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				 errmsg("constraint must be added to child tables too"),
-				 errdetail("Column \"%s\" of relation \"%s\" is not already NOT NULL.",
-						   colName, RelationGetRelationName(rel)),
-				 errhint("Do not specify the ONLY keyword.")));
-
-	ReleaseSysCache(tuple);
 }
 
 /*

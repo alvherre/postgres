@@ -2180,7 +2180,6 @@ typedef enum AlterTableType
 	AT_SetNotNull,				/* alter column set not null */
 	AT_SetAttNotNull,			/* set attnotnull w/o a constraint */
 	AT_DropExpression,			/* alter column drop expression */
-	AT_CheckNotNull,			/* check column is already marked not null */
 	AT_SetStatistics,			/* alter column set statistics */
 	AT_SetOptions,				/* alter column set ( options ) */
 	AT_ResetOptions,			/* alter column reset ( options ) */
