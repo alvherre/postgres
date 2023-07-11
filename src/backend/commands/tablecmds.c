@@ -12404,8 +12404,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	bool		dropping_pk = false;
 	char	   *constrName;
 	List	   *unconstrained_cols = NIL;
-	char	   *colname;		/* to match NOT NULL constraints when
-								 * recursing */
+	char	   *colname;
 	List	   *ready = NIL;
 
 	if (readyRels == NULL)
