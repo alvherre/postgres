@@ -2477,8 +2477,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 
 	/*
 	 * Scan the parents left-to-right, and merge their attributes to form a
-	 * list of inherited attributes (inhSchema).  Also check to see if we need
-	 * to inherit an OID column.
+	 * list of inherited attributes (inhSchema).
 	 */
 	child_attno = 0;
 	foreach(entry, supers)
@@ -7136,7 +7135,7 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	attribute.attrelid = myrelid;
 	namestrcpy(&(attribute.attname), colDef->colname);
 	attribute.atttypid = typeOid;
-	attribute.attstattarget = (newattnum > 0) ? -1 : 0;
+	attribute.attstattarget = -1;
 	attribute.attlen = tform->typlen;
 	attribute.attnum = newattnum;
 	if (list_length(colDef->typeName->arrayBounds) > PG_INT16_MAX)
@@ -7259,7 +7258,7 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	 * is certainly not going to touch them.  System attributes don't have
 	 * interesting defaults, either.
 	 */
-	if (RELKIND_HAS_STORAGE(relkind) && attribute.attnum > 0)
+	if (RELKIND_HAS_STORAGE(relkind))
 	{
 		/*
 		 * For an identity column, we can't use build_column_default(),

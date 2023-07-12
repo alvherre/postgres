@@ -2352,14 +2352,11 @@ SELECT conrelid::regclass, conname, contype, conkey,
  FROM pg_constraint WHERE contype IN ('n','p') AND
  conrelid IN ('atnotnull1'::regclass);
 
--- unsupported constraint types for partitioned tables
+-- cannot drop column that is part of the partition key
 CREATE TABLE partitioned (
 	a int,
 	b int
 ) PARTITION BY RANGE (a, (a+b+1));
-ALTER TABLE partitioned ADD EXCLUDE USING gist (a WITH &&);
-
--- cannot drop column that is part of the partition key
 ALTER TABLE partitioned DROP COLUMN a;
 ALTER TABLE partitioned ALTER COLUMN a TYPE char(5);
 ALTER TABLE partitioned DROP COLUMN b;
