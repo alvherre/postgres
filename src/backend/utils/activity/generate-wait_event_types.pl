@@ -72,8 +72,8 @@ my @lines_sorted =
 # Read the sorted lines and populate the hash table
 foreach my $line (@lines_sorted)
 {
-	die "unable to parse wait_event_names.txt"
-	  unless $line =~ /^(\w+)\t+(\w+)\t+("\w+")\t+("\w.*\.")$/;
+	die "unable to parse wait_event_names.txt for line $line\n"
+	  unless $line =~ /^(\w+)\t+(\w+)\t+(\w+)\t+("\w.*\.")$/;
 
 	(   my $waitclassname,
 		my $waiteventenumname,
@@ -85,13 +85,8 @@ foreach my $line (@lines_sorted)
 	my $trimmedwaiteventname = $waiteventenumname;
 	$trimmedwaiteventname =~ s/^WAIT_EVENT_//;
 
-	# An exception is required for LWLock and Lock as these don't require
-	# any C and header files generated.
 	die "wait event names must start with 'WAIT_EVENT_'"
-	  if ( $trimmedwaiteventname eq $waiteventenumname
-		&& $waiteventenumname !~ /^LWLock/
-		&& $waiteventenumname !~ /^Lock/);
-	$continue = ",\n";
+	  if ($trimmedwaiteventname eq $waiteventenumname);
 	push(@{ $hashwe{$waitclassname} }, @waiteventlist);
 }
 
@@ -141,8 +136,8 @@ if ($gen_code)
 		# Don't generate .c and .h files for LWLock and Lock, these are
 		# handled independently.
 		next
-		  if ( $waitclass =~ /^WaitEventLWLock$/
-			|| $waitclass =~ /^WaitEventLock$/);
+		  if ( $waitclass eq 'WaitEventLWLock'
+			|| $waitclass eq 'WaitEventLock');
 
 		my $last = $waitclass;
 		$last =~ s/^WaitEvent//;
@@ -173,7 +168,9 @@ if ($gen_code)
 			$firstpass = 0;
 
 			printf $c "\t\t case %s:\n", $wev->[0];
-			printf $c "\t\t\t event_name = %s;\n\t\t\t break;\n", $wev->[1];
+			# Apply quotes to the wait event name string.
+			printf $c "\t\t\t event_name = \"%s\";\n\t\t\t break;\n",
+			  $wev->[1];
 		}
 
 		printf $h "\n} $waitclass;\n\n";
@@ -226,7 +223,7 @@ elsif ($gen_docs)
 		{
 			printf $s "     <row>\n";
 			printf $s "      <entry><literal>%s</literal></entry>\n",
-			  substr $wev->[1], 1, -1;
+			  $wev->[1];
 			printf $s "      <entry>%s</entry>\n", substr $wev->[2], 1, -1;
 			printf $s "     </row>\n";
 		}
