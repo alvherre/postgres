@@ -1200,31 +1200,43 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	}
 
 	/*
-	 * However, if INCLUDING INDEXES is not given and a primary key exists,
-	 * then we can add the necessary NOT NULL constraints for the columns
-	 * therein.
+	 * If INCLUDING INDEXES is not given and a primary key exists, we need to
+	 * add NOT NULL constraints to the columns covered by the PK (except
+	 * those that already have one.)  This is required for backwards
+	 * compatibility.
 	 */
 	if ((table_like_clause->options & CREATE_TABLE_LIKE_INDEXES) == 0)
 	{
 		Bitmapset  *pkcols;
 		int			x = -1;
+		Bitmapset  *donecols = NULL;
+		ListCell   *lc;
 
+		/*
+		 * Obtain a bitmapset of columns on which we'll add NOT NULL
+		 * constraints in expandTableLikeClause, so that we skip this for
+		 * those.
+		 */
+		foreach(lc, RelationGetNotNullConstraints(relation, true))
+		{
+			CookedConstraint	*cooked = (CookedConstraint *) lfirst(lc);
+
+			donecols = bms_add_member(donecols, cooked->attnum);
+		}
 
 		pkcols = RelationGetIndexAttrBitmap(relation,
 											INDEX_ATTR_BITMAP_PRIMARY_KEY);
-
-		/*
-		 * When INCLUDING CONSTRAINTS is not specified, and the table has a
-		 * primary key, we need to add NOT NULL constraints to cover all the
-		 * columns in the PK.  This is for backwards compatibility.
-		 */
 		while ((x = bms_next_member(pkcols, x)) >= 0)
 		{
 			Constraint *notnull;
+			AttrNumber	attnum = x + FirstLowInvalidHeapAttributeNumber;
 			Form_pg_attribute attForm;
 
-			attForm = TupleDescAttr(tupleDesc,
-									x + FirstLowInvalidHeapAttributeNumber - 1);
+			/* ignore if we already have one for this column */
+			if (bms_is_member(attnum, donecols))
+				continue;
+
+			attForm = TupleDescAttr(tupleDesc, attnum - 1);
 
 			notnull = makeNode(Constraint);
 			notnull->contype = CONSTR_NOTNULL;

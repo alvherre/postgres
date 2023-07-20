@@ -2529,6 +2529,12 @@ AddRelationNewConstraints(Relation rel,
 			if (colnum == InvalidAttrNumber)
 				elog(ERROR, "invalid column name \"%s\"", cdef->colname);
 
+			if (HeapTupleIsValid(findNotNullConstraintAttnum(rel, colnum)))
+				ereport(ERROR,
+						errcode(ERRCODE_DUPLICATE_OBJECT),
+						errmsg("column \"%s\" of table \"%s\" is already NOT NULL",
+							   cdef->colname, RelationGetRelationName(rel)));
+
 			if (cdef->conname)
 				nnname = cdef->conname; /* verify clash? */
 			else
@@ -2858,6 +2864,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		ListCell   *lc2;
 
 		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
+		Assert(cooked->contype == CONSTR_NOTNULL);
 
 		/* We just preserve the first constraint name we come across, if any */
 		if (conname == NULL && cooked->name)
