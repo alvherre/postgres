@@ -4801,7 +4801,20 @@ RelationGetIndexList(Relation relation)
 		/*
 		 * Remember primary key index, if any.  We do this only if the index
 		 * is valid; but if the table is partitioned, then we do it even if
-		 * it's invalid.  XXX does this cause other problems?
+		 * it's invalid.
+		 *
+		 * The reason for returning invalid primary keys for foreign tables is
+		 * because of pg_dump of NOT NULL constraints, and the fact that PKs
+		 * remain marked invalid until the partitions' PKs are attached to it.
+		 * If we make rd_pkindex invalid, then the attnotnull flag is reset
+		 * after the PK is created, which causes the ALTER INDEX ATTACH
+		 * PARTITION to fail with 'column ... is not marked NOT NULL'.  With
+		 * this, dropconstraint_internal() will believe that the columns must
+		 * not have attnotnull reset, so the PKs-on-partitions can be attached
+		 * correctly, until finally the PK-on-parent is marked valid.
+		 *
+		 * Also, this doesn't harm anything, because rd_pkindex is not a
+		 * "real" index anyway, but a RELKIND_PARTITIONED_INDEX.
 		 */
 		if (index->indisprimary &&
 			(index->indisvalid ||
