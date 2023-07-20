@@ -10456,7 +10456,7 @@ CloneFkReferenced(Relation parentRel, Relation partitionRel)
 		Oid			deleteTriggerOid,
 					updateTriggerOid;
 
-		tuple = SearchSysCache1(CONSTROID, constrOid);
+		tuple = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constrOid));
 		if (!HeapTupleIsValid(tuple))
 			elog(ERROR, "cache lookup failed for constraint %u", constrOid);
 		constrForm = (Form_pg_constraint) GETSTRUCT(tuple);
@@ -10662,7 +10662,7 @@ CloneFkReferencing(List **wqueue, Relation parentRel, Relation partRel)
 		Oid			insertTriggerOid,
 					updateTriggerOid;
 
-		tuple = SearchSysCache1(CONSTROID, parentConstrOid);
+		tuple = SearchSysCache1(CONSTROID, ObjectIdGetDatum(parentConstrOid));
 		if (!HeapTupleIsValid(tuple))
 			elog(ERROR, "cache lookup failed for constraint %u",
 				 parentConstrOid);
@@ -14263,7 +14263,7 @@ ATExecAlterColumnGenericOptions(Relation rel,
 
 	/* First, determine FDW validator associated to the foreign table. */
 	ftrel = table_open(ForeignTableRelationId, AccessShareLock);
-	tuple = SearchSysCache1(FOREIGNTABLEREL, rel->rd_id);
+	tuple = SearchSysCache1(FOREIGNTABLEREL, ObjectIdGetDatum(rel->rd_id));
 	if (!HeapTupleIsValid(tuple))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -16784,7 +16784,8 @@ ATExecGenericOptions(Relation rel, List *options)
 
 	ftrel = table_open(ForeignTableRelationId, RowExclusiveLock);
 
-	tuple = SearchSysCacheCopy1(FOREIGNTABLEREL, rel->rd_id);
+	tuple = SearchSysCacheCopy1(FOREIGNTABLEREL,
+								ObjectIdGetDatum(rel->rd_id));
 	if (!HeapTupleIsValid(tuple))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),

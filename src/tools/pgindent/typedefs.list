@@ -1318,7 +1318,6 @@ JsonbIteratorToken
 JsonbPair
 JsonbParseState
 JsonbSubWorkspace
-JsonbTypeCategory
 JsonbValue
 JumbleState
 JunkFilter
@@ -2639,6 +2638,7 @@ Step
 StopList
 StrategyNumber
 StreamCtl
+StreamStopReason
 String
 StringInfo
 StringInfoData
