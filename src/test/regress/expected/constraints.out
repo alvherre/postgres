@@ -777,7 +777,7 @@ ERROR:  could not create exclusion constraint "deferred_excl_f1_excl"
 DETAIL:  Key (f1)=(3) conflicts with key (f1)=(3).
 DROP TABLE deferred_excl;
 -- verify constraints created for NOT NULL clauses
-CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL);
+CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL NOT NULL);
 \d notnull_tbl1
             Table "public.notnull_tbl1"
  Column |  Type   | Collation | Nullable | Default 

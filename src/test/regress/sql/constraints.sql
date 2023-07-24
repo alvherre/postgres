@@ -568,7 +568,7 @@ ALTER TABLE deferred_excl ADD EXCLUDE (f1 WITH =);
 DROP TABLE deferred_excl;
 
 -- verify constraints created for NOT NULL clauses
-CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL);
+CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL NOT NULL);
 \d notnull_tbl1
 select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 -- DROP NOT NULL gets rid of both the attnotnull flag and the constraint itself

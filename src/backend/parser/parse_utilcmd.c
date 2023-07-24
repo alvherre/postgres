@@ -669,25 +669,16 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 			case CONSTR_NOTNULL:
 
 				/*
-				 * Disallow duplicate and redundant [NOT] NULL markings
+				 * Disallow conflicting [NOT] NULL markings
 				 */
-				if (saw_nullable)
-				{
-					if (!column->is_not_null)
-						ereport(ERROR,
-								(errcode(ERRCODE_SYNTAX_ERROR),
-								 errmsg("conflicting NULL/NOT NULL declarations for column \"%s\" of table \"%s\"",
-										column->colname, cxt->relation->relname),
-								 parser_errposition(cxt->pstate,
-													constraint->location)));
-					else
-						ereport(ERROR,
-								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("redundant NOT NULL declarations for column \"%s\" of table \"%s\"",
-									   column->colname, cxt->relation->relname),
-								parser_errposition(cxt->pstate,
-												   constraint->location));
-				}
+				if (saw_nullable && !column->is_not_null)
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("conflicting NULL/NOT NULL declarations for column \"%s\" of table \"%s\"",
+									column->colname, cxt->relation->relname),
+							 parser_errposition(cxt->pstate,
+												constraint->location)));
+				/* Ignore redundant NOT NULL markings */
 
 				/*
 				 * If this is the first time we see this column being marked
