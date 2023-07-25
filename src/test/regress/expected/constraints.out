@@ -790,6 +790,9 @@ select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl
  notnull_tbl1_a_not_null | n       | {1}
 (1 row)
 
+-- no-op
+ALTER TABLE notnull_tbl1 ADD CONSTRAINT nn NOT NULL a;
+INFO:  column "a" of table "notnull_tbl1" is already NOT NULL
 -- DROP NOT NULL gets rid of both the attnotnull flag and the constraint itself
 ALTER TABLE notnull_tbl1 ALTER a DROP NOT NULL;
 \d notnull_tbl1

@@ -2530,10 +2530,13 @@ AddRelationNewConstraints(Relation rel,
 				elog(ERROR, "invalid column name \"%s\"", cdef->colname);
 
 			if (HeapTupleIsValid(findNotNullConstraintAttnum(rel, colnum)))
-				ereport(ERROR,
+			{
+				ereport(INFO,
 						errcode(ERRCODE_DUPLICATE_OBJECT),
 						errmsg("column \"%s\" of table \"%s\" is already NOT NULL",
 							   cdef->colname, RelationGetRelationName(rel)));
+				continue;
+			}
 
 			if (cdef->conname)
 				nnname = cdef->conname; /* verify clash? */
