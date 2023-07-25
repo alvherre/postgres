@@ -573,6 +573,8 @@ CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL NOT NULL);
 select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 -- no-op
 ALTER TABLE notnull_tbl1 ADD CONSTRAINT nn NOT NULL a;
+-- duplicate name
+ALTER TABLE notnull_tbl1 ADD COLUMN b INT CONSTRAINT notnull_tbl1_a_not_null NOT NULL;
 -- DROP NOT NULL gets rid of both the attnotnull flag and the constraint itself
 ALTER TABLE notnull_tbl1 ALTER a DROP NOT NULL;
 \d notnull_tbl1

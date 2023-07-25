@@ -2539,7 +2539,16 @@ AddRelationNewConstraints(Relation rel,
 			}
 
 			if (cdef->conname)
-				nnname = cdef->conname; /* verify clash? */
+			{
+				if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
+										 RelationGetRelid(rel),
+										 cdef->conname))
+					ereport(ERROR,
+							errcode(ERRCODE_DUPLICATE_OBJECT),
+							errmsg("constraint \"%s\" for relation \"%s\" already exists",
+								   cdef->conname, RelationGetRelationName(rel)));
+				nnname = cdef->conname;
+			}
 			else
 				nnname = ChooseConstraintName(RelationGetRelationName(rel),
 											  cdef->colname,
