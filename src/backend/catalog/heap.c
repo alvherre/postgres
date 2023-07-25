@@ -2529,15 +2529,17 @@ AddRelationNewConstraints(Relation rel,
 			if (colnum == InvalidAttrNumber)
 				elog(ERROR, "invalid column name \"%s\"", cdef->colname);
 
+			/*
+			 * If the column already has a NOT NULL constraint, silently
+			 * do nothing.
+			 */
 			if (HeapTupleIsValid(findNotNullConstraintAttnum(rel, colnum)))
-			{
-				ereport(INFO,
-						errcode(ERRCODE_DUPLICATE_OBJECT),
-						errmsg("column \"%s\" of table \"%s\" is already NOT NULL",
-							   cdef->colname, RelationGetRelationName(rel)));
 				continue;
-			}
 
+			/*
+			 * If a constraint name is specified, check that it isn't already
+			 * used.  Otherwise, choose a non-conflicting one ourselves.
+			 */
 			if (cdef->conname)
 			{
 				if (ConstraintNameIsUsed(CONSTRAINT_RELATION,
