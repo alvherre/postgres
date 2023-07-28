@@ -2693,9 +2693,9 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 
 				/*
 				 * In regular inheritance, columns in the parent's primary key
-				 * get an extra CHECK (NOT NULL) constraint.  Partitioning
-				 * doesn't need this, because the PK itself is going to be
-				 * cloned to the partition.
+				 * get an extra NOT NULL constraint.  Partitioning doesn't need
+				 * this, because the PK itself is going to be cloned to the
+				 * partition.
 				 */
 				if (!is_partition &&
 					bms_is_member(parent_attno - FirstLowInvalidHeapAttributeNumber,
