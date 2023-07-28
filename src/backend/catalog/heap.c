@@ -2859,8 +2859,8 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * If any column remains in the old_notnulls list, we must create a NOT
 	 * NULL constraint marked not-local.  Because multiple parents could
 	 * specify a NOT NULL for the same column, we must count how many there
-	 * are and set inhcount accordingly, deleting elements we've already
-	 * processed.
+	 * are and add to the original inhcount accordingly, deleting elements
+	 * we've already processed.
 	 *
 	 * We don't use foreach() here because we have two nested loops over the
 	 * cooked constraint list, with possible element deletions in the inner
@@ -2874,7 +2874,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	{
 		CookedConstraint *cooked;
 		char	   *conname = NULL;
-		int			inhcount = 1;
+		int			add_inhcount = 0;
 		ListCell   *lc2;
 
 		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
@@ -2894,7 +2894,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 				if (conname == NULL && other->name)
 					conname = other->name;
 
-				inhcount++;
+				add_inhcount++;
 				old_notnulls = list_delete_nth_cell(old_notnulls, restpos);
 			}
 			else
@@ -2925,7 +2925,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		nnnames = lappend(nnnames, conname);
 
 		StoreRelNotNull(rel, conname, cooked->attnum, true,
-						false, inhcount,
+						cooked->is_local, cooked->inhcount + add_inhcount,
 						cooked->is_no_inherit);
 
 		nncols = lappend_int(nncols, cooked->attnum);

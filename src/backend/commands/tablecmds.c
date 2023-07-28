@@ -2710,8 +2710,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					nn->attnum = exist_attno;
 					nn->expr = NULL;
 					nn->skip_validation = false;
-					nn->is_local = false;
-					nn->inhcount = 1;
+					nn->is_local = true;
+					nn->inhcount = 0;
 					nn->is_no_inherit = false;
 
 					nnconstraints = lappend(nnconstraints, nn);
@@ -2799,8 +2799,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					nn->attnum = newattmap->attnums[parent_attno - 1];
 					nn->expr = NULL;
 					nn->skip_validation = false;
-					nn->is_local = false;
-					nn->inhcount = 1;
+					nn->is_local = true;
+					nn->inhcount = 0;
 					nn->is_no_inherit = false;
 
 					nnconstraints = lappend(nnconstraints, nn);
@@ -2957,7 +2957,11 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		{
 			CookedConstraint *nn = lfirst(lc1);
 
+			Assert(nn->contype == CONSTR_NOTNULL);
+
 			nn->attnum = newattmap->attnums[nn->attnum - 1];
+			nn->is_local = false;
+			nn->inhcount = 1;
 
 			nnconstraints = lappend(nnconstraints, nn);
 		}
