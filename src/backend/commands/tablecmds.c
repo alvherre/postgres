@@ -2710,8 +2710,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					nn->attnum = exist_attno;
 					nn->expr = NULL;
 					nn->skip_validation = false;
-					nn->is_local = true;
-					nn->inhcount = 0;
+					nn->is_local = false;
+					nn->inhcount = 1;
 					nn->is_no_inherit = false;
 
 					nnconstraints = lappend(nnconstraints, nn);
@@ -2799,8 +2799,8 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 					nn->attnum = newattmap->attnums[parent_attno - 1];
 					nn->expr = NULL;
 					nn->skip_validation = false;
-					nn->is_local = true;
-					nn->inhcount = 0;
+					nn->is_local = false;
+					nn->inhcount = 1;
 					nn->is_no_inherit = false;
 
 					nnconstraints = lappend(nnconstraints, nn);
@@ -7605,7 +7605,8 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 					errmsg("column \"%s\" is in a primary key", colName));
 
 		/* this shouldn't happen */
-		elog(ERROR, "no NOT NULL constraint found to drop");
+		elog(ERROR, "could not find NOT NULL constraint on column \"%s\", relation \"%s\"",
+			 colName, RelationGetRelationName(rel));
 	}
 
 	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
@@ -9347,7 +9348,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	}
 
 	/* At this point we must have a locked-down name to use */
-	Assert(constr->conname != NULL);
+	//Assert(constr->conname != NULL);
 
 	/* Advance command counter in case same table is visited multiple times */
 	CommandCounterIncrement();
@@ -12364,18 +12365,27 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	constrName = NameStr(con->conname);
 
 	/*
-	 * If the constraint is marked conislocal and is also inherited, then we
-	 * just set conislocal false and we're done.  The constraint doesn't go
-	 * away, and we don't modify any children.
+	 * If the constraint has more than one definition source, we mustn't remove
+	 * it, just modify its catalogued status: if we're recursing, decrement its
+	 * inheritance count by one, and if we're not recursing, set conislocal
+	 * false.
 	 */
-	if (con->conislocal && con->coninhcount > 0)
+	if ((con->conislocal && con->coninhcount > 0) ||
+		con->coninhcount > 1)
 	{
 		HeapTuple	copytup;
 
 		/* make a copy we can scribble on */
 		copytup = heap_copytuple(constraintTup);
 		con = (Form_pg_constraint) GETSTRUCT(copytup);
-		con->conislocal = false;
+		if (recursing)
+		{
+			Assert(con->coninhcount >= 1);
+			con->coninhcount -= 1;
+		}
+		else
+			con->conislocal = false;
+
 		CatalogTupleUpdate(conrel, &copytup->t_self, copytup);
 
 		table_close(conrel, RowExclusiveLock);
@@ -12615,6 +12625,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			AttrNumber	child_colnum;
 			HeapTuple	child_tup;
 
+			/* FIXME this code seems to duplicate findNotNullConstraint */
 			child_colnum = get_attnum(RelationGetRelid(childrel), colname);
 			ScanKeyInit(&skey[0],
 						Anum_pg_constraint_conrelid,
@@ -12724,6 +12735,71 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		heap_freetuple(copy_tuple);
 
 		table_close(childrel, NoLock);
+	}
+
+	/*
+	 * In addition, when dropping a primary key from a legacy-inheritance
+	 * parent table, we must recurse to children to mark the corresponding NOT
+	 * NULL constraint as no longer inherited, or drop it if this its last
+	 * reference.
+	 */
+	if (con->contype == CONSTRAINT_PRIMARY &&
+		rel->rd_rel->relkind == RELKIND_RELATION &&
+		rel->rd_rel->relhassubclass)
+	{
+		List   *colnames = NIL;
+		ListCell *lc;
+		List   *pkready = NIL;
+
+		/*
+		 * XXX note that because primary keys are always marked as NO INHERIT,
+		 * we don't have a list of children yet, so obtain one now.
+		 */
+		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
+
+		/*
+		 * Find out the list of column names to process.  Fortunately,
+		 * we already have the list of column numbers.
+		 */
+		foreach(lc, unconstrained_cols)
+		{
+			colnames = lappend(colnames, get_attname(RelationGetRelid(rel),
+													 lfirst_int(lc), false));
+		}
+
+		foreach(child, children)
+		{
+			Oid			childrelid = lfirst_oid(child);
+			Relation	childrel;
+
+			if (list_member_oid(pkready, childrelid))
+				continue;			/* child already processed */
+
+			/* find_inheritance_children already got lock */
+			childrel = table_open(childrelid, NoLock);
+			CheckTableNotInUse(childrel, "ALTER TABLE");
+
+			foreach(lc, colnames)
+			{
+				HeapTuple	contup;
+				char	   *colName = lfirst(lc);
+
+				contup = findNotNullConstraint(childrel, colName);
+				if (contup == NULL)
+					elog(ERROR, "cache lookup failed for NOT NULL constraint on column \"%s\", relation \"%s\"",
+						 colName, RelationGetRelationName(childrel));
+
+				dropconstraint_internal(childrel, contup,
+										DROP_RESTRICT, true, true,
+										false, &pkready,
+										lockmode);
+				pkready = NIL;
+			}
+
+			table_close(childrel, NoLock);
+
+			pkready = lappend_oid(pkready, childrelid);
+		}
 	}
 
 	table_close(conrel, RowExclusiveLock);
