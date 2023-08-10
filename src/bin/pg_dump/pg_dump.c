@@ -16920,17 +16920,11 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 
 		/* Drop any NOT NULL constraints that were added to support the PK */
 		if (coninfo->contype == 'p')
-		{
 			for (int i = 0; i < tbinfo->numatts; i++)
-			{
 				if (tbinfo->notnull_throwaway[i])
-				{
 					appendPQExpBuffer(q, "\nALTER TABLE ONLY %s DROP CONSTRAINT %s;",
 									  fmtQualifiedDumpable(tbinfo),
 									  tbinfo->notnull_constrs[i]);
-				}
-			}
-		}
 
 		/* If the index is clustered, we need to record that. */
 		if (indxinfo->indisclustered)
