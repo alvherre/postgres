@@ -1740,6 +1740,43 @@ typedef struct JsonKeyValue
 } JsonKeyValue;
 
 /*
+ * JsonParseExpr -
+ *		untransformed representation of JSON()
+ */
+typedef struct JsonParseExpr
+{
+	NodeTag		type;
+	JsonValueExpr *expr;		/* string expression */
+	JsonOutput *output;			/* RETURNING clause, if specified */
+	bool		unique_keys;	/* WITH UNIQUE KEYS? */
+	int			location;		/* token location, or -1 if unknown */
+} JsonParseExpr;
+
+/*
+ * JsonScalarExpr -
+ *		untransformed representation of JSON_SCALAR()
+ */
+typedef struct JsonScalarExpr
+{
+	NodeTag		type;
+	Expr	   *expr;			/* scalar expression */
+	JsonOutput *output;			/* RETURNING clause, if specified */
+	int			location;		/* token location, or -1 if unknown */
+} JsonScalarExpr;
+
+/*
+ * JsonSerializeExpr -
+ *		untransformed representation of JSON_SERIALIZE() function
+ */
+typedef struct JsonSerializeExpr
+{
+	NodeTag		type;
+	JsonValueExpr *expr;		/* json value expression */
+	JsonOutput *output;			/* RETURNING clause, if specified  */
+	int			location;		/* token location, or -1 if unknown */
+} JsonSerializeExpr;
+
+/*
  * JsonObjectConstructor -
  *		untransformed representation of JSON_OBJECT() constructor
  */
@@ -3505,9 +3542,12 @@ typedef struct TransactionStmt
 	NodeTag		type;
 	TransactionStmtKind kind;	/* see above */
 	List	   *options;		/* for BEGIN/START commands */
-	char	   *savepoint_name; /* for savepoint commands */
+	/* for savepoint commands */
+	char	   *savepoint_name pg_node_attr(query_jumble_ignore);
 	char	   *gid;			/* for two-phase-commit related commands */
 	bool		chain;			/* AND CHAIN option */
+	/* token location, or -1 if unknown */
+	int			location pg_node_attr(query_jumble_location);
 } TransactionStmt;
 
 /* ----------------------

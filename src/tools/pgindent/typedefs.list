@@ -1274,6 +1274,7 @@ JsonManifestWALRangeField
 JsonObjectAgg
 JsonObjectConstructor
 JsonOutput
+JsonParseExpr
 JsonParseContext
 JsonParseErrorType
 JsonPath
@@ -1295,7 +1296,9 @@ JsonPathParseResult
 JsonPathPredicateCallback
 JsonPathString
 JsonReturning
+JsonScalarExpr
 JsonSemAction
+JsonSerializeExpr
 JsonTokenType
 JsonTransformStringValuesAction
 JsonTypeCategory
@@ -1683,8 +1686,6 @@ OuterJoinClauseInfo
 OutputPluginCallbacks
 OutputPluginOptions
 OutputPluginOutputType
-OverrideSearchPath
-OverrideStackEntry
 OverridingKind
 PACE_HEADER
 PACL
@@ -2461,6 +2462,7 @@ ScanState
 ScanTypeControl
 ScannerCallbackState
 SchemaQuery
+SearchPathMatcher
 SecBuffer
 SecBufferDesc
 SecLabelItem
@@ -2989,6 +2991,7 @@ WaitEventActivity
 WaitEventBufferPin
 WaitEventClient
 WaitEventExtension
+WaitEventExtensionCounterData
 WaitEventIO
 WaitEventIPC
 WaitEventSet
@@ -3859,6 +3862,7 @@ wchar2mb_with_len_converter
 wchar_t
 win32_deadchild_waitinfo
 wint_t
+worker_spi_state
 worker_state
 worktable
 wrap
