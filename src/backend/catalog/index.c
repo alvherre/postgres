@@ -2033,6 +2033,54 @@ index_constraint_create(Relation heapRelation,
 	}
 
 	/*
+	 * If creating a primary key and the table has inheritance children,
+	 * create NOT NULL constraints on them.
+	 *
+	 * FIXME -- this code looks a bit out of place here.  Should we have
+	 * another routine elsewhere?  Maybe heap.c, alongside
+	 * AddRelationNewConstraints.
+	 */
+	if (heapRelation->rd_rel->relkind == RELKIND_RELATION &&
+		heapRelation->rd_rel->relhassubclass)
+	{
+		List	   *children;
+		ListCell   *child;
+
+		/* XXX why is it OK not to lock the children here? */
+		children = find_inheritance_children(RelationGetRelid(heapRelation),
+											 NoLock);
+		foreach(child, children)
+		{
+			Oid		childrelid = lfirst_oid(child);
+			Relation	childrel = table_open(childrelid, NoLock);
+			List	   *nns = NIL;
+
+			for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+			{
+				Constraint *nnconstr;
+
+				nnconstr = makeNode(Constraint);
+				nnconstr->contype = CONSTR_NOTNULL;
+				nnconstr->conname = NULL;	/* FIXME use PK name? */
+				nnconstr->deferrable = false;
+				nnconstr->initdeferred = false;
+				nnconstr->location = -1;
+				nnconstr->colname = get_attname(RelationGetRelid(heapRelation),
+												indexInfo->ii_IndexAttrNumbers[i],
+												false);
+				nnconstr->skip_validation = false;
+				nnconstr->initially_valid = true;
+
+				nns = lappend(nns, nnconstr);
+			}
+
+			AddRelationNewConstraints(childrel, NIL, nns, true, false, false, NULL);
+
+			table_close(childrel, NoLock);
+		}
+	}
+
+	/*
 	 * If the constraint is deferrable, create the deferred uniqueness
 	 * checking trigger.  (The trigger will be given an internal dependency on
 	 * the constraint by CreateTrigger.)
