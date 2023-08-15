@@ -660,6 +660,82 @@ extractNotNullColumn(HeapTuple constrTup)
 }
 
 /*
+ * RelationEnsureNotNullConstraints
+ *
+ * Make sure there are NOT NULL constraints in all the indicated
+ * columns, and bump their inhcounts if so; otherwise, have them
+ * created.
+ */
+
+/*
+ * AdjustNotNullInheritance
+ *		Adjust NOT NULL constraints' inhcount/islocal for
+ *		ALTER TABLE [NO] INHERITS
+ *
+ * Mark the constraints that make the relation's columns non-nullable as
+ * inherited, so that they can't be dropped.  It could be a primary key
+ * or NOT NULL constraints.  When both exist, we prefer to mark the
+ * NOT NULL ones.
+ *
+ * Caller must have checked beforehand that attnotnull was set for all
+ * columns, so there should be some such constraint for all columns.
+ */
+void
+AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
+{
+	Relation	pg_constraint;
+	int			attnum;
+
+	pg_constraint = table_open(ConstraintRelationId, RowExclusiveLock);
+
+	/*
+	 * Scan the set of columns and bump inhcount for each.
+	 */
+	attnum = -1;
+	while ((attnum = bms_next_member(columns, attnum)) >= 0)
+	{
+		HeapTuple		tup;
+		Form_pg_constraint conform;
+
+		tup = findNotNullConstraintAttnum(child_rel, attnum);
+		if (!HeapTupleIsValid(tup))
+			ereport(ERROR,
+					errcode(ERRCODE_DATATYPE_MISMATCH),
+					errmsg("column \"%s\" in child table must be marked NOT NULL",
+						   get_attname(RelationGetRelid(child_rel), attnum,
+									   false)));
+		/*
+		 * XXX we could make this a little more user-friendly by allowing the
+		 * PK to be marked inherited instead of the set of NOT NULLs for each
+		 * and every column of the PK.  It's easy to code, but cleanup during
+		 * ALTER TABLE NO INHERIT is then not as easy; and dropping/changing
+		 * the PK is no longer possible for the child, so we refrain from
+		 * allowing that case.
+		 */
+
+		conform = (Form_pg_constraint) GETSTRUCT(tup);
+		conform->coninhcount += count;
+		if (conform->coninhcount < 0)
+			elog(ERROR, "invalid inhcount %d for constraint \"%s\" on relation \"%s\"",
+				 conform->coninhcount, NameStr(conform->conname),
+				 RelationGetRelationName(child_rel));
+
+		/*
+		 * If the constraints are no longer inherited, mark them local.  It's
+		 * arguable that we should drop them instead, but it's hard to see
+		 * that being better.
+		 */
+		if (conform->coninhcount == 0)
+			conform->conislocal = true;
+
+		CatalogTupleUpdate(pg_constraint, &tup->t_self, tup);
+	}
+
+	table_close(pg_constraint, RowExclusiveLock);
+}
+
+
+/*
  * Delete a single constraint record.
  */
 void

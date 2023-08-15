@@ -15602,6 +15602,37 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	/* OK to create inheritance */
 	CreateInheritance(child_rel, parent_rel);
 
+	/*
+	 * If parent_rel has a primary key, then child_rel has constraints
+	 * (either NOT NULL or PRIMARY KEY) that make these columns as non
+	 * nullable.  Make those constraints as inherited.
+	 */
+	if (parent_rel->rd_rel->relhasindex)
+	{
+		Bitmapset  *pkattnos;
+
+		pkattnos = RelationGetIndexAttrBitmap(parent_rel,
+											  INDEX_ATTR_BITMAP_PRIMARY_KEY);
+		if (pkattnos != NULL)
+		{
+			Bitmapset  *childattnums = NULL;
+			AttrMap	   *attmap;
+			int			i;
+
+			attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
+										   RelationGetDescr(child_rel),
+										   true);
+			i = -1;
+			while ((i = bms_next_member(pkattnos, i)) >= 0)
+			{
+				childattnums = bms_add_member(childattnums,
+											  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
+			}
+			CommandCounterIncrement();
+			AdjustNotNullInheritance(child_rel, childattnums, 1);
+		}
+	}
+
 	ObjectAddressSet(address, RelationRelationId,
 					 RelationGetRelid(parent_rel));
 
@@ -16062,6 +16093,50 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 
 	/* Off to RemoveInheritance() where most of the work happens */
 	RemoveInheritance(rel, parent_rel, false);
+
+	/*
+	 * If parent_rel has a primary key, then child_rel has NOT NULL
+	 * constraints that make these columns as non nullable.  Mark those
+	 * constraints as no longer inherited by this parent.  They are not
+	 * dropped, though: if they turn out to be no longer inherited, they are
+	 * marked as local.
+	 */
+	if (parent_rel->rd_rel->relhasindex)
+	{
+		Bitmapset  *pkattnos;
+
+		pkattnos = RelationGetIndexAttrBitmap(parent_rel,
+											  INDEX_ATTR_BITMAP_PRIMARY_KEY);
+		if (pkattnos != NULL)
+		{
+			Bitmapset  *childattnums = NULL;
+			AttrMap	   *attmap;
+			int			i;
+
+			attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
+										   RelationGetDescr(rel), true);
+
+			i = -1;
+			while ((i = bms_next_member(pkattnos, i)) >= 0)
+			{
+				childattnums = bms_add_member(childattnums,
+											  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
+			}
+
+			/*
+			 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
+			 * the parent: the relevant NOT NULL constraint in the child
+			 * already had its inhcount decremented earlier.
+			 */
+			CommandCounterIncrement();
+			AdjustNotNullInheritance(rel, childattnums, -1);
+		}
+	}
+
+	/*
+	 * If the parent has a primary key, then we decrement counts for all NOT
+	 * NULL constraints
+	 */
 
 	ObjectAddressSet(address, RelationRelationId,
 					 RelationGetRelid(parent_rel));

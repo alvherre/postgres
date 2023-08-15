@@ -2784,7 +2784,7 @@ list_cookedconstr_attnum_cmp(const ListCell *p1, const ListCell *p2)
 }
 
 /*
- * Create the NOT NULL constraints for the relation
+ * Create the NOT NULL constraints when creating a new relation
  *
  * These come from two sources: the 'constraints' list (of Constraint) is
  * specified directly by the user; the 'old_notnulls' list (of
