@@ -3072,7 +3072,7 @@ describeOneTableDetails(const char *schemaname,
 				tuples = PQntuples(result);
 
 			if (tuples > 0)
-				printTableAddFooter(&cont, _("Not null constraints:"));
+				printTableAddFooter(&cont, _("Not-null constraints:"));
 
 			/* Might be an empty set - that's ok */
 			for (i = 0; i < tuples; i++)

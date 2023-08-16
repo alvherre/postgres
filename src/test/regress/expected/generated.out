@@ -315,7 +315,7 @@ NOTICE:  merging column "b" with inherited definition
  a      | integer |           | not null |                                     | plain   |              | 
  b      | integer |           |          | generated always as (a * 22) stored | plain   |              | 
  x      | integer |           |          |                                     | plain   |              | 
-Not null constraints:
+Not-null constraints:
     "gtestx_a_not_null" NOT NULL "a" (inherited)
 Inherits: gtest1
 
