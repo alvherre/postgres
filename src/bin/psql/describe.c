@@ -3055,7 +3055,8 @@ describeOneTableDetails(const char *schemaname,
 		if (verbose)
 		{
 			printfPQExpBuffer(&buf,
-							  "SELECT co.conname, at.attname, co.connoinherit, co.conislocal\n"
+							  "SELECT co.conname, at.attname, co.connoinherit, co.conislocal,\n"
+							  "co.coninhcount <> 0\n"
 							  "FROM pg_catalog.pg_constraint co JOIN\n"
 							  "pg_catalog.pg_attribute at ON\n"
 							  "(at.attnum = co.conkey[1])\n"
@@ -3077,13 +3078,16 @@ describeOneTableDetails(const char *schemaname,
 			/* Might be an empty set - that's ok */
 			for (i = 0; i < tuples; i++)
 			{
+				bool	islocal = PQgetvalue(result, i, 3)[0] == 't';
+				bool	inherited = PQgetvalue(result, i, 4)[0] == 't';
+
 				printfPQExpBuffer(&buf, "    \"%s\" NOT NULL \"%s\"%s",
 								  PQgetvalue(result, i, 0),
 								  PQgetvalue(result, i, 1),
 								  PQgetvalue(result, i, 2)[0] == 't' ?
 								  " NO INHERIT" :
-								  PQgetvalue(result, i, 3)[0] == 'f' ?
-								  " (inherited)" : "");
+								  islocal && inherited ? _(" (local, inherited)") :
+								  inherited ? _(" (inherited)") : "");
 
 				printTableAddFooter(&cont, buf.data);
 			}
