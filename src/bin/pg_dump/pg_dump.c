@@ -8461,12 +8461,14 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 * versions we rely on pg_attribute.attnotnull.
 	 *
 	 * We also track whether the constraint was defined directly in this table
-	 * or via an ancestor, for binary upgrade.  Lastly, we need to know if the
-	 * PK for the table involves each column; for columns that are there we
-	 * need a NOT NULL marking even if there's no explicit constraint, to
-	 * avoid the table having to be scanned for NULLs after the data is loaded
-	 * when the PK is created, later in the dump; for this case we add
-	 * throwaway constraints that are dropped once the PK is created.
+	 * or via an ancestor, for binary upgrade.
+	 *
+	 * Lastly, we need to know if the PK for the table involves each column;
+	 * for columns that are there we need a NOT NULL marking even if there's no
+	 * explicit constraint, to avoid the table having to be scanned for NULLs
+	 * after the data is loaded when the PK is created, later in the dump; for
+	 * this case we add throwaway constraints that are dropped once the PK is
+	 * created.
 	 */
 	if (fout->remoteVersion >= 170000)
 		appendPQExpBufferStr(q,
@@ -16027,6 +16029,10 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					appendStringLiteralAH(q, qualrelname, fout);
 					appendPQExpBufferStr(q, "::pg_catalog.regclass;\n");
 
+					/*
+					 * If a NOT NULL constraint comes from inheritance, reset
+					 * conislocal.  The inhcount is fixed later.
+					 */
 					if (tbinfo->notnull_constrs[j] != NULL &&
 						!tbinfo->notnull_throwaway[j] &&
 						tbinfo->notnull_inh[j] &&
