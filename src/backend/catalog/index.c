@@ -2047,7 +2047,7 @@ index_constraint_create(Relation heapRelation,
 		List	   *children;
 		ListCell   *child;
 
-		/* XXX why is it OK not to lock the children here? */
+		/* children were already locked in ATPrepCmd */
 		children = find_inheritance_children(RelationGetRelid(heapRelation),
 											 NoLock);
 		foreach(child, children)

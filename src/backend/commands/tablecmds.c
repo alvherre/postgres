@@ -416,6 +416,7 @@ static void ATSimpleRecursion(List **wqueue, Relation rel,
 							  AlterTableCmd *cmd, bool recurse, LOCKMODE lockmode,
 							  AlterTableUtilityContext *context);
 static void ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode);
+static void ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode);
 static void ATTypedTableRecursion(List **wqueue, Relation rel, AlterTableCmd *cmd,
 								  LOCKMODE lockmode,
 								  AlterTableUtilityContext *context);
@@ -4906,7 +4907,15 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_AddIndex:		/* ADD INDEX */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
-			/* This command never recurses */
+			/*
+			 * This command recurses internally at execution time when adding
+			 * a PK to a table with inheritance children, to add NOT NULL
+			 * constraint to them.  Here we must only ensure that children are
+			 * locked appropriately.
+			 */
+			if (IsA(cmd->def, Constraint) &&
+				((Constraint *) cmd->def)->contype == CONSTRAINT_PRIMARY)
+				ATCheckChildrenNotInUse(rel, lockmode);
 			/* No command-specific prep needed */
 			pass = AT_PASS_ADD_INDEX;
 			break;
@@ -4920,7 +4929,16 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_AddIndexConstraint: /* ADD CONSTRAINT USING INDEX */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
-			/* This command never recurses */
+			/*
+			 * This command recurses internally at execution time when adding
+			 * a PK to a table with inheritance children, to add NOT NULL
+			 * constraint to them.  Here we only ensure that children are
+			 * locked appropriately.
+			 */
+			if (IsA(cmd->def, Constraint) &&
+				((Constraint *) cmd->def)->contype == CONSTRAINT_PRIMARY)
+				ATCheckChildrenNotInUse(rel, lockmode);
+
 			/* No command-specific prep needed */
 			pass = AT_PASS_ADD_INDEXCONSTR;
 			break;
@@ -5590,7 +5608,14 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 				pass = AT_PASS_COL_ATTRS;
 				break;
 			case AT_AddIndex:
-				/* This command never recurses */
+				/*
+				 * When creating a PK, this command adds (or alters) NOT NULL
+				 * constraints on children, so we must lock them now.  There
+				 * are no other recursion requirements.
+				 */
+				if (IsA(cmd->def, Constraint) &&
+					((Constraint *) cmd->def)->contype == CONSTRAINT_PRIMARY)
+					ATCheckChildrenNotInUse(rel, lockmode);
 				/* No command-specific prep needed */
 				pass = AT_PASS_ADD_INDEX;
 				break;
@@ -6638,6 +6663,37 @@ ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode)
 			CheckTableNotInUse(childrel, "ALTER TABLE");
 			table_close(childrel, NoLock);
 		}
+		list_free(inh);
+	}
+}
+
+/*
+ * Obtain list of inheritance children of the given table, locking them all at
+ * the given lockmode and ensuring that they all pass CheckTableNotInUse.
+ *
+ * This function is a no-op if the given relation is not a plain table with
+ * inheritance children.
+ */
+static void
+ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode)
+{
+	if (rel->rd_rel->relkind == RELKIND_RELATION &&
+		rel->rd_rel->relhassubclass)
+	{
+		List	   *inh;
+		ListCell   *cell;
+
+		inh = find_all_inheritors(RelationGetRelid(rel), lockmode, NULL);
+		foreach(cell, inh)
+		{
+			Relation	childrel;
+
+			/* find_all_inheritors already got lock */
+			childrel = table_open(lfirst_oid(cell), NoLock);
+			CheckTableNotInUse(childrel, "ALTER TABLE");
+			table_close(childrel, NoLock);
+		}
+
 		list_free(inh);
 	}
 }
