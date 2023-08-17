@@ -690,58 +690,36 @@ create table cc2(f4 float) inherits(pp1,cc1);
 
 -- named NOT NULL constraint
 alter table cc1 add column a2 int constraint nn not null;
-\d cc1
-\d cc2
+\d+ cc1
+\d+ cc2
 alter table pp1 alter column f1 set not null;
-\d pp1
-\d cc1
-\d cc2
-
--- have a look at pg_constraint
-select conrelid::regclass, conname, contype, conkey,
- (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
- coninhcount, conislocal
- from pg_constraint where contype = 'n' and
- conrelid in ('pp1'::regclass, 'cc1'::regclass, 'cc2'::regclass)
- order by 2, 1;
+\d+ pp1
+\d+ cc1
+\d+ cc2
 
 -- remove constraint from cc2: no dice, it's inherited
 alter table cc2 alter column a2 drop not null;
 
 -- remove constraint cc1, should succeed
 alter table cc1 alter column a2 drop not null;
-
--- have a look at pg_constraint
-select conrelid::regclass, conname, contype, conkey,
- (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
- coninhcount, conislocal
- from pg_constraint where contype = 'n' and
- conrelid in ('pp1'::regclass, 'cc1'::regclass, 'cc2'::regclass)
- order by 2, 1;
+\d+ cc1
 
 -- same for cc2
 alter table cc2 alter column f1 drop not null;
+\d+ cc2
 
 -- remove from cc1, should fail again
 alter table cc1 alter column f1 drop not null;
 
 -- remove from pp1, should succeed
 alter table pp1 alter column f1 drop not null;
+\d+ pp1
 
--- have a look at pg_constraint
-select conrelid::regclass, conname, contype, conkey,
- (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
- coninhcount, conislocal
- from pg_constraint where contype = 'n' and
- conrelid in ('pp1'::regclass, 'cc1'::regclass, 'cc2'::regclass)
- order by 2, 1;
-
-drop table pp1 cascade;
-\d cc1
-\d cc2
+alter table pp1 add primary key (f1);
+-- Leave these tables around, for pg_upgrade testing
 
 -- test "dropping" a not null constraint that's also inherited
-create table inh_parent (a int not null);
+create table inh_parent (a int not null primary key);
 create table inh_child (a int not null) inherits (inh_parent);
 select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),

@@ -3850,17 +3850,18 @@ ALTER TABLE atnotnull1
 ALTER TABLE atnotnull1
   ADD COLUMN c INT,
   ADD PRIMARY KEY (c);
-SELECT conrelid::regclass, conname, contype, conkey,
- (SELECT attname FROM pg_attribute WHERE attrelid = conrelid AND attnum = conkey[1]),
- coninhcount, conislocal
- FROM pg_constraint WHERE contype IN ('n','p') AND
- conrelid IN ('atnotnull1'::regclass);
-  conrelid  |        conname        | contype | conkey | attname | coninhcount | conislocal 
-------------+-----------------------+---------+--------+---------+-------------+------------
- atnotnull1 | atnotnull1_a_not_null | n       | {1}    | a       |           0 | t
- atnotnull1 | atnotnull1_b_not_null | n       | {2}    | b       |           0 | t
- atnotnull1 | atnotnull1_pkey       | p       | {3}    | c       |           0 | t
-(3 rows)
+\d+ atnotnull1
+                                Table "public.atnotnull1"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+ c      | integer |           | not null |         | plain   |              | 
+Indexes:
+    "atnotnull1_pkey" PRIMARY KEY, btree (c)
+Not-null constraints:
+    "atnotnull1_a_not_null" NOT NULL "a"
+    "atnotnull1_b_not_null" NOT NULL "b"
 
 -- cannot drop column that is part of the partition key
 CREATE TABLE partitioned (

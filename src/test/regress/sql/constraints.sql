@@ -199,12 +199,17 @@ DROP TABLE ATACC1 CASCADE;
 -- NOT NULL NO INHERIT
 CREATE TABLE ATACC1 (a int, not null a no inherit);
 CREATE TABLE ATACC2 () INHERITS (ATACC1);
-\d ATACC2
+\d+ ATACC2
 DROP TABLE ATACC1, ATACC2;
 CREATE TABLE ATACC1 (a int);
 ALTER TABLE ATACC1 ADD NOT NULL a NO INHERIT;
 CREATE TABLE ATACC2 () INHERITS (ATACC1);
-\d ATACC2
+\d+ ATACC2
+DROP TABLE ATACC1, ATACC2;
+CREATE TABLE ATACC1 (a int);
+CREATE TABLE ATACC2 () INHERITS (ATACC1);
+ALTER TABLE ATACC1 ADD NOT NULL a NO INHERIT;
+\d+ ATACC2
 DROP TABLE ATACC1, ATACC2;
 
 --
@@ -569,10 +574,11 @@ DROP TABLE deferred_excl;
 
 -- verify constraints created for NOT NULL clauses
 CREATE TABLE notnull_tbl1 (a INTEGER NOT NULL NOT NULL);
-\d notnull_tbl1
+\d+ notnull_tbl1
 select conname, contype, conkey from pg_constraint where conrelid = 'notnull_tbl1'::regclass;
 -- no-op
 ALTER TABLE notnull_tbl1 ADD CONSTRAINT nn NOT NULL a;
+\d+ notnull_tbl1
 -- duplicate name
 ALTER TABLE notnull_tbl1 ADD COLUMN b INT CONSTRAINT notnull_tbl1_a_not_null NOT NULL;
 -- DROP NOT NULL gets rid of both the attnotnull flag and the constraint itself
