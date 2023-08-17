@@ -2035,13 +2035,15 @@ index_constraint_create(Relation heapRelation,
 	/*
 	 * If creating a primary key and the table has inheritance children, these
 	 * need NOT NULL constraints.  Create them now, or if they already exist,
-	 * bump their inhcounts.
+	 * bump their inhcounts.  (In binary upgrade mode, those have already been
+	 * created.)
 	 *
 	 * FIXME -- this code looks a bit out of place here.  Should we have
 	 * another routine elsewhere?  Maybe heap.c, alongside
 	 * AddRelationNewConstraints.
 	 */
-	if (heapRelation->rd_rel->relkind == RELKIND_RELATION &&
+	if (!IsBinaryUpgrade &&
+		heapRelation->rd_rel->relkind == RELKIND_RELATION &&
 		heapRelation->rd_rel->relhassubclass)
 	{
 		List	   *children;
