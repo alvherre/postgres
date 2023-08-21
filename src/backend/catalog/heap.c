@@ -2533,26 +2533,29 @@ AddRelationNewConstraints(Relation rel,
 				elog(ERROR, "invalid column name \"%s\"", cdef->colname);
 
 			/*
-			 * If the column already has a NOT NULL constraint, mark it as
-			 * local if it isn't already, and we're done.
+			 * If the column already has a NOT NULL constraint, we only need
+			 * to update its catalog status depending on what is caller
+			 * requesting.
 			 */
 			contup = findNotNullConstraintAttnum(rel, colnum);
 			if (HeapTupleIsValid(contup))
 			{
-				if (!((Form_pg_constraint) GETSTRUCT(contup))->conislocal)
-				{
-					Relation	conDesc;
-					HeapTuple	copytup;
+				Relation	conDesc;
+				HeapTuple	copytup;
+				Form_pg_constraint conForm;
 
-					/* XXX a bit out of place -- want a new routine in pg_constraint.c? */
-					conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
+				/* XXX a bit out of place -- want a new routine in pg_constraint.c? */
+				conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
 
-					copytup = heap_copytuple(contup);
-					((Form_pg_constraint) GETSTRUCT(copytup))->conislocal = true;
-					CatalogTupleUpdate(conDesc, &contup->t_self, copytup);
+				copytup = heap_copytuple(contup);
+				conForm = (Form_pg_constraint) GETSTRUCT(copytup);
+				if (cdef->inhcount > 0)
+					conForm->coninhcount += cdef->inhcount;
+				else
+					conForm->conislocal = true;
+				CatalogTupleUpdate(conDesc, &contup->t_self, copytup);
 
-					table_close(conDesc, RowExclusiveLock);
-				}
+				table_close(conDesc, RowExclusiveLock);
 
 				continue;
 			}
@@ -2583,8 +2586,8 @@ AddRelationNewConstraints(Relation rel,
 			constrOid =
 				StoreRelNotNull(rel, nnname, colnum,
 								cdef->initially_valid,
-								is_local,
-								is_local ? 0 : 1,
+								cdef->inhcount == 0,
+								cdef->inhcount,
 								cdef->is_no_inherit);
 
 			nncooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
@@ -2595,7 +2598,7 @@ AddRelationNewConstraints(Relation rel,
 			nncooked->expr = NULL;
 			nncooked->skip_validation = cdef->skip_validation;
 			nncooked->is_local = is_local;
-			nncooked->inhcount = is_local ? 0 : 1;
+			nncooked->inhcount = cdef->inhcount;
 			nncooked->is_no_inherit = cdef->is_no_inherit;
 
 			cookedConstraints = lappend(cookedConstraints, nncooked);

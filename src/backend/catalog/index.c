@@ -2032,6 +2032,7 @@ index_constraint_create(Relation heapRelation,
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_PARTITION_SEC);
 	}
 
+#if 0
 	/*
 	 * If creating a primary key and the table has inheritance children, these
 	 * need NOT NULL constraints.  Create them now, or if they already exist,
@@ -2050,13 +2051,17 @@ index_constraint_create(Relation heapRelation,
 		ListCell   *child;
 
 		/* children were already locked in ATPrepCmd */
-		children = find_inheritance_children(RelationGetRelid(heapRelation),
-											 NoLock);
+		children = find_all_inheritors(RelationGetRelid(heapRelation),
+									   NoLock, NULL);
 		foreach(child, children)
 		{
 			Oid		childrelid = lfirst_oid(child);
-			Relation	childrel = table_open(childrelid, NoLock);
+			Relation	childrel;
 			List	   *nns = NIL;
+
+			if (childrelid == RelationGetRelid(heapRelation))
+				continue;
+			childrel = table_open(childrelid, NoLock);
 
 			for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
 			{
@@ -2082,6 +2087,7 @@ index_constraint_create(Relation heapRelation,
 			table_close(childrel, NoLock);
 		}
 	}
+#endif
 
 	/*
 	 * If the constraint is deferrable, create the deferred uniqueness

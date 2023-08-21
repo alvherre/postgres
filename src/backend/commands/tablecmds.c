@@ -416,7 +416,7 @@ static void ATSimpleRecursion(List **wqueue, Relation rel,
 							  AlterTableCmd *cmd, bool recurse, LOCKMODE lockmode,
 							  AlterTableUtilityContext *context);
 static void ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode);
-static void ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode);
+//static void ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode);
 static void ATTypedTableRecursion(List **wqueue, Relation rel, AlterTableCmd *cmd,
 								  LOCKMODE lockmode,
 								  AlterTableUtilityContext *context);
@@ -472,6 +472,8 @@ static ObjectAddress ATExecDropColumn(List **wqueue, Relation rel, const char *c
 									  bool recurse, bool recursing,
 									  bool missing_ok, LOCKMODE lockmode,
 									  ObjectAddresses *addrs);
+static void ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
+								LOCKMODE lockmode, AlterTableUtilityContext *context);
 static ObjectAddress ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 									IndexStmt *stmt, bool is_rebuild, LOCKMODE lockmode);
 static ObjectAddress ATExecAddStatistics(AlteredTableInfo *tab, Relation rel,
@@ -4907,37 +4909,17 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_AddIndex:		/* ADD INDEX */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
-			/*
-			 * This command recurses internally at execution time when adding
-			 * a PK to a table with inheritance children, to add NOT NULL
-			 * constraint to them.  Here we must only ensure that children are
-			 * locked appropriately.
-			 */
-			if (IsA(cmd->def, Constraint) &&
-				((Constraint *) cmd->def)->contype == CONSTRAINT_PRIMARY)
-				ATCheckChildrenNotInUse(rel, lockmode);
-			/* No command-specific prep needed */
 			pass = AT_PASS_ADD_INDEX;
 			break;
 		case AT_AddConstraint:	/* ADD CONSTRAINT */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
 			/* Recursion occurs during execution phase */
-			/* No command-specific prep needed except saving recurse flag */
 			if (recurse)
 				cmd->recurse = true;
 			pass = AT_PASS_ADD_CONSTR;
 			break;
 		case AT_AddIndexConstraint: /* ADD CONSTRAINT USING INDEX */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
-			/*
-			 * This command recurses internally at execution time when adding
-			 * a PK to a table with inheritance children, to add NOT NULL
-			 * constraint to them.  Here we only ensure that children are
-			 * locked appropriately.
-			 */
-			if (IsA(cmd->def, Constraint) &&
-				((Constraint *) cmd->def)->contype == CONSTRAINT_PRIMARY)
-				ATCheckChildrenNotInUse(rel, lockmode);
 
 			/* No command-specific prep needed */
 			pass = AT_PASS_ADD_INDEXCONSTR;
@@ -5609,19 +5591,16 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 				break;
 			case AT_AddIndex:
 				/*
-				 * When creating a PK, this command adds (or alters) NOT NULL
-				 * constraints on children, so we must lock them now.  There
-				 * are no other recursion requirements.
+				 * A primary key on a inheritance parent needs supporting NOT
+				 * NULL constraint on its children; enqueue commands to create
+				 * those or mark them inherited if they already exist.
 				 */
-				if (IsA(cmd->def, Constraint) &&
-					((Constraint *) cmd->def)->contype == CONSTRAINT_PRIMARY)
-					ATCheckChildrenNotInUse(rel, lockmode);
-				/* No command-specific prep needed */
+				ATPrepAddPrimaryKey(wqueue, rel, cmd2, lockmode, context);
 				pass = AT_PASS_ADD_INDEX;
 				break;
 			case AT_AddIndexConstraint:
-				/* This command never recurses */
-				/* No command-specific prep needed */
+				/* as above */
+				ATPrepAddPrimaryKey(wqueue, rel, cmd2, lockmode, context);
 				pass = AT_PASS_ADD_INDEXCONSTR;
 				break;
 			case AT_AddConstraint:
@@ -6667,6 +6646,7 @@ ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode)
 	}
 }
 
+#if 0
 /*
  * Obtain list of inheritance children of the given table, locking them all at
  * the given lockmode and ensuring that they all pass CheckTableNotInUse.
@@ -6697,6 +6677,7 @@ ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode)
 		list_free(inh);
 	}
 }
+#endif
 
 /*
  * ATTypedTableRecursion
@@ -7838,6 +7819,13 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 		copytup = heap_copytuple(tuple);
 		conForm = (Form_pg_constraint) GETSTRUCT(copytup);
 
+#ifdef DEBUG_CONSTRAINT_CREATE
+		elog(WARNING, "%s: in rel %s found constraint %s, inhcount %d islocal %s",
+			 __func__, RelationGetRelationName(rel),
+			 NameStr(conForm->conname),
+			 conForm->coninhcount, conForm->conislocal ? "true" : "false");
+#endif
+
 		/*
 		 * If we find an appropriate constraint, we're almost done, but just
 		 * need to change some properties on it: if we're recursing, increment
@@ -7910,6 +7898,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	constraint->location = -1;
 	constraint->colname = colName;
 	constraint->is_no_inherit = is_no_inherit;
+	constraint->inhcount = recursing ? 1 : 0;
 	constraint->skip_validation = false;
 	constraint->initially_valid = true;
 
@@ -9035,6 +9024,104 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
 }
 
 /*
+ * Prepare to add a primary key on an inheritance parent, by adding NOT NULL
+ * constraint on its children.
+ */
+static void
+ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
+					LOCKMODE lockmode, AlterTableUtilityContext *context)
+{
+	List	   *children;
+	List	   *newconstrs = NIL;
+	ListCell   *lc;
+
+	/* No work if no legacy inheritance children are present */
+	if (rel->rd_rel->relkind != RELKIND_RELATION ||
+		!rel->rd_rel->relhassubclass)
+		return;
+
+	children = find_inheritance_children(RelationGetRelid(rel), lockmode);
+
+#if 0
+	if (IsA(cmd->def, Constraint))
+	{
+		foreach(lc, castNode(Constraint, cmd->def)->keys)
+		{
+			Constraint *nnconstr;
+
+			nnconstr = makeNode(Constraint);
+
+			nnconstr = makeNode(Constraint);
+			nnconstr->contype = CONSTR_NOTNULL;
+			nnconstr->conname = NULL;	/* FIXME use PK name? */
+			nnconstr->deferrable = false;
+			nnconstr->initdeferred = false;
+			nnconstr->location = -1;
+			nnconstr->colname = strVal(lfirst(lc));		/* XXX make colname a String? */
+			nnconstr->skip_validation = false;
+			nnconstr->initially_valid = true;
+
+			newconstrs = lappend(newconstrs, nnconstr);
+		}
+	}
+	else
+#endif
+	if (IsA(cmd->def, IndexStmt))
+	{
+		foreach(lc, castNode(IndexStmt, cmd->def)->indexParams)
+		{
+			IndexElem *elem = lfirst_node(IndexElem, lc);
+			Constraint *nnconstr;
+
+			Assert(elem->expr == NULL);
+
+			nnconstr = makeNode(Constraint);
+			nnconstr->contype = CONSTR_NOTNULL;
+			nnconstr->conname = NULL;	/* FIXME use PK name? */
+			nnconstr->inhcount = 1;
+			nnconstr->deferrable = false;
+			nnconstr->initdeferred = false;
+			nnconstr->location = -1;
+			nnconstr->colname = elem->name;
+			nnconstr->skip_validation = false;
+			nnconstr->initially_valid = true;
+
+			newconstrs = lappend(newconstrs, nnconstr);
+		}
+	}
+	else
+		Assert(false);
+
+	foreach(lc, children)
+	{
+		Oid		childrelid = lfirst_oid(lc);
+		Relation	childrel = table_open(childrelid, NoLock);
+		AlterTableCmd *newcmd = makeNode(AlterTableCmd);
+		ListCell   *lc2;
+
+		newcmd->subtype = AT_AddConstraint;
+		newcmd->recurse = true;
+
+		foreach(lc2, newconstrs)
+		{
+			/* ATPrepCmd copies newcmd, so we can scribble on it here */
+			newcmd->def = lfirst(lc2);
+
+#ifdef DEBUG_CONSTRAINT_CREATE
+			elog(WARNING, "queueing command: rel %s cmd %s",
+				 RelationGetRelationName(childrel),
+				 nodeToString(newcmd));
+#endif
+
+			ATPrepCmd(wqueue, childrel, newcmd,
+					  true, false, lockmode, context);
+		}
+
+		table_close(childrel, NoLock);
+	}
+}
+
+/*
  * ALTER TABLE ADD INDEX
  *
  * There is no such command in the grammar, but parse_utilcmd.c converts
@@ -9228,6 +9315,14 @@ ATExecAddConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	Assert(IsA(newConstraint, Constraint));
 
+#ifdef DEBUG_CONSTRAINT_CREATE
+	elog(WARNING, "%s: rel %s recurse %s newConstr %s",
+		 __func__,
+		 RelationGetRelationName(rel),
+		 recurse ? "true" : "false",
+		 nodeToString(newConstraint));
+#endif
+
 	/*
 	 * Currently, we only expect to see CONSTR_CHECK, CONSTR_NOTNULL and
 	 * CONSTR_FOREIGN nodes arriving here (see the preprocessing done in
@@ -9346,6 +9441,14 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ListCell   *child;
 	ObjectAddress address = InvalidObjectAddress;
 
+#ifdef DEBUG_CONSTRAINT_CREATE
+	elog(WARNING, "%s: rel %s recurse %s recursing %s constr %s",
+		 __func__, RelationGetRelationName(rel),
+		 recurse ? "true" : "false",
+		 recursing ? "true" : "false",
+		 nodeToString(constr));
+#endif
+
 	/* At top level, permission check was done in ATPrepCmd, else do it */
 	if (recursing)
 		ATSimplePermissions(AT_AddConstraint, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
@@ -9404,7 +9507,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	}
 
 	/* At this point we must have a locked-down name to use */
-	Assert(constr->conname != NULL);
+	//Assert(constr->conname != NULL);
 
 	/* Advance command counter in case same table is visited multiple times */
 	CommandCounterIncrement();
@@ -9441,6 +9544,10 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 				 errmsg("constraint must be added to child tables too")));
+
+	/* XXX find cleaner way to do this perhaps? */
+	constr = copyObject(constr);
+	constr->inhcount = 1;
 
 	foreach(child, children)
 	{
@@ -12747,7 +12854,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 
 		if (childcon->coninhcount <= 0) /* shouldn't happen */
 			elog(ERROR, "relation %u has non-inherited constraint \"%s\"",
-				 childrelid, constrName);
+				 childrelid, NameStr(childcon->conname));
 
 		if (recurse)
 		{

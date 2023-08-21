@@ -2608,6 +2608,7 @@ typedef struct Constraint
 
 	/* Fields used for "raw" NOT NULL constraints: */
 	char	   *colname;		/* column it applies to */
+	int			inhcount;		/* initial inheritance count to apply */
 
 	/* Fields used for unique constraints (UNIQUE and PRIMARY KEY): */
 	bool		nulls_not_distinct; /* null treatment for UNIQUE constraints */

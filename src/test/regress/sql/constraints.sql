@@ -612,6 +612,37 @@ ALTER TABLE notnull_tbl3 ADD b int, ADD CONSTRAINT pk PRIMARY KEY (a, b);
 ALTER TABLE notnull_tbl3 DROP CONSTRAINT pk;
 \d notnull_tbl3
 
+-- Primary keys in parent table cause NOT NULL constraint to spawn on their
+-- children.  Verify that they work correctly.
+CREATE TABLE cnn_parent (a int, b int);
+CREATE TABLE cnn_child () INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild (NOT NULL b) INHERITS (cnn_child);
+CREATE TABLE cnn_child2 (NOT NULL a NO INHERIT) INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild2 () INHERITS (cnn_grandchild, cnn_child2);
+
+ALTER TABLE cnn_parent ADD PRIMARY KEY (b);
+\d+ cnn_grandchild
+\d+ cnn_grandchild2
+ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
+\set VERBOSITY terse
+DROP TABLE cnn_parent CASCADE;
+\set VERBOSITY default
+
+-- As above, but create the primary key ahead of time
+CREATE TABLE cnn_parent (a int, b int PRIMARY KEY);
+CREATE TABLE cnn_child () INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild (NOT NULL b) INHERITS (cnn_child);
+CREATE TABLE cnn_child2 (NOT NULL a NO INHERIT) INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild2 () INHERITS (cnn_grandchild, cnn_child2);
+
+ALTER TABLE cnn_parent ADD PRIMARY KEY (b);
+\d+ cnn_grandchild
+\d+ cnn_grandchild2
+ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
+\set VERBOSITY terse
+DROP TABLE cnn_parent CASCADE;
+\set VERBOSITY default
+
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
 CREATE ROLE regress_constraint_comments;
