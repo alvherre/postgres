@@ -1192,9 +1192,8 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 
 	/*
 	 * If INCLUDING INDEXES is not given and a primary key exists, we need to
-	 * add NOT NULL constraints to the columns covered by the PK (except
-	 * those that already have one.)  This is required for backwards
-	 * compatibility.
+	 * add NOT NULL constraints to the columns covered by the PK (except those
+	 * that already have one.)  This is required for backwards compatibility.
 	 */
 	if ((table_like_clause->options & CREATE_TABLE_LIKE_INDEXES) == 0)
 	{
@@ -1210,7 +1209,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 		 */
 		foreach(lc, RelationGetNotNullConstraints(relation, true))
 		{
-			CookedConstraint	*cooked = (CookedConstraint *) lfirst(lc);
+			CookedConstraint *cooked = (CookedConstraint *) lfirst(lc);
 
 			donecols = bms_add_member(donecols, cooked->attnum);
 		}

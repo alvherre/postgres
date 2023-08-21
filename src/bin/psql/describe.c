@@ -3078,8 +3078,8 @@ describeOneTableDetails(const char *schemaname,
 			/* Might be an empty set - that's ok */
 			for (i = 0; i < tuples; i++)
 			{
-				bool	islocal = PQgetvalue(result, i, 3)[0] == 't';
-				bool	inherited = PQgetvalue(result, i, 4)[0] == 't';
+				bool		islocal = PQgetvalue(result, i, 3)[0] == 't';
+				bool		inherited = PQgetvalue(result, i, 4)[0] == 't';
 
 				printfPQExpBuffer(&buf, "    \"%s\" NOT NULL \"%s\"%s",
 								  PQgetvalue(result, i, 0),

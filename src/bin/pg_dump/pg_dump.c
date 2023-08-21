@@ -8464,11 +8464,11 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 * or via an ancestor, for binary upgrade.
 	 *
 	 * Lastly, we need to know if the PK for the table involves each column;
-	 * for columns that are there we need a NOT NULL marking even if there's no
-	 * explicit constraint, to avoid the table having to be scanned for NULLs
-	 * after the data is loaded when the PK is created, later in the dump; for
-	 * this case we add throwaway constraints that are dropped once the PK is
-	 * created.
+	 * for columns that are there we need a NOT NULL marking even if there's
+	 * no explicit constraint, to avoid the table having to be scanned for
+	 * NULLs after the data is loaded when the PK is created, later in the
+	 * dump; for this case we add throwaway constraints that are dropped once
+	 * the PK is created.
 	 */
 	if (fout->remoteVersion >= 170000)
 		appendPQExpBufferStr(q,

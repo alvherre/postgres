@@ -694,7 +694,7 @@ AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
 	attnum = -1;
 	while ((attnum = bms_next_member(columns, attnum)) >= 0)
 	{
-		HeapTuple		tup;
+		HeapTuple	tup;
 		Form_pg_constraint conform;
 
 		tup = findNotNullConstraintAttnum(child_rel, attnum);
@@ -704,6 +704,7 @@ AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
 					errmsg("column \"%s\" in child table must be marked NOT NULL",
 						   get_attname(RelationGetRelid(child_rel), attnum,
 									   false)));
+
 		/*
 		 * XXX we could make this a little more user-friendly by allowing the
 		 * PK to be marked inherited instead of the set of NOT NULLs for each

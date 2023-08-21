@@ -2695,9 +2695,9 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 
 				/*
 				 * In regular inheritance, columns in the parent's primary key
-				 * get an extra NOT NULL constraint.  Partitioning doesn't need
-				 * this, because the PK itself is going to be cloned to the
-				 * partition.
+				 * get an extra NOT NULL constraint.  Partitioning doesn't
+				 * need this, because the PK itself is going to be cloned to
+				 * the partition.
 				 */
 				if (!is_partition &&
 					bms_is_member(parent_attno - FirstLowInvalidHeapAttributeNumber,
@@ -5589,6 +5589,7 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 				pass = AT_PASS_COL_ATTRS;
 				break;
 			case AT_AddIndex:
+
 				/*
 				 * A primary key on a inheritance parent needs supporting NOT
 				 * NULL constraint on its children; enqueue commands to create
@@ -9005,7 +9006,7 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 	stmt = castNode(IndexStmt, cmd->def);
 	foreach(lc, stmt->indexParams)
 	{
-		IndexElem *elem = lfirst_node(IndexElem, lc);
+		IndexElem  *elem = lfirst_node(IndexElem, lc);
 		Constraint *nnconstr;
 
 		Assert(elem->expr == NULL);
@@ -9026,7 +9027,7 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 
 	foreach(lc, children)
 	{
-		Oid		childrelid = lfirst_oid(lc);
+		Oid			childrelid = lfirst_oid(lc);
 		Relation	childrel = table_open(childrelid, NoLock);
 		AlterTableCmd *newcmd = makeNode(AlterTableCmd);
 		ListCell   *lc2;
@@ -9417,7 +9418,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	}
 
 	/* At this point we must have a locked-down name to use */
-	//Assert(constr->conname != NULL);
+	/* Assert(constr->conname != NULL); */
 
 	/* Advance command counter in case same table is visited multiple times */
 	CommandCounterIncrement();
@@ -12438,10 +12439,10 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	constrName = NameStr(con->conname);
 
 	/*
-	 * If the constraint has more than one definition source, we mustn't remove
-	 * it, just modify its catalogued status: if we're recursing, decrement its
-	 * inheritance count by one, and if we're not recursing, set conislocal
-	 * false.
+	 * If the constraint has more than one definition source, we mustn't
+	 * remove it, just modify its catalogued status: if we're recursing,
+	 * decrement its inheritance count by one, and if we're not recursing, set
+	 * conislocal false.
 	 */
 	if ((con->conislocal && con->coninhcount > 0) ||
 		con->coninhcount > 1)
@@ -12820,9 +12821,9 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		rel->rd_rel->relkind == RELKIND_RELATION &&
 		rel->rd_rel->relhassubclass)
 	{
-		List   *colnames = NIL;
-		ListCell *lc;
-		List   *pkready = NIL;
+		List	   *colnames = NIL;
+		ListCell   *lc;
+		List	   *pkready = NIL;
 
 		/*
 		 * XXX note that because primary keys are always marked as NO INHERIT,
@@ -12831,8 +12832,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
 
 		/*
-		 * Find out the list of column names to process.  Fortunately,
-		 * we already have the list of column numbers.
+		 * Find out the list of column names to process.  Fortunately, we
+		 * already have the list of column numbers.
 		 */
 		foreach(lc, unconstrained_cols)
 		{
@@ -12846,7 +12847,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			Relation	childrel;
 
 			if (list_member_oid(pkready, childrelid))
-				continue;			/* child already processed */
+				continue;		/* child already processed */
 
 			/* find_inheritance_children already got lock */
 			childrel = table_open(childrelid, NoLock);
@@ -15676,9 +15677,9 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	CreateInheritance(child_rel, parent_rel);
 
 	/*
-	 * If parent_rel has a primary key, then child_rel has constraints
-	 * (either NOT NULL or PRIMARY KEY) that make these columns as non
-	 * nullable.  Make those constraints as inherited.
+	 * If parent_rel has a primary key, then child_rel has constraints (either
+	 * NOT NULL or PRIMARY KEY) that make these columns as non nullable.  Make
+	 * those constraints as inherited.
 	 */
 	if (parent_rel->rd_rel->relhasindex)
 	{
@@ -15689,7 +15690,7 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 		if (pkattnos != NULL)
 		{
 			Bitmapset  *childattnums = NULL;
-			AttrMap	   *attmap;
+			AttrMap    *attmap;
 			int			i;
 
 			attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
@@ -16183,7 +16184,7 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 		if (pkattnos != NULL)
 		{
 			Bitmapset  *childattnums = NULL;
-			AttrMap	   *attmap;
+			AttrMap    *attmap;
 			int			i;
 
 			attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),

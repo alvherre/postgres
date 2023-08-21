@@ -2544,7 +2544,10 @@ AddRelationNewConstraints(Relation rel,
 				HeapTuple	copytup;
 				Form_pg_constraint conForm;
 
-				/* XXX a bit out of place -- want a new routine in pg_constraint.c? */
+				/*
+				 * XXX a bit out of place -- want a new routine in
+				 * pg_constraint.c?
+				 */
 				conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
 
 				copytup = heap_copytuple(contup);
