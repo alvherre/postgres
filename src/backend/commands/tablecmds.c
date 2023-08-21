@@ -4856,7 +4856,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_SetNotNull:		/* ALTER COLUMN SET NOT NULL */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
-			/* Need command-specific recursion decision */
+			/* Set up recursion for phase 2; no other prep needed */
 			if (recurse)
 				cmd->recurse = true;
 			pass = AT_PASS_COL_ATTRS;
@@ -4908,18 +4908,21 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_AddIndex:		/* ADD INDEX */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
+			/* This command never recurses */
+			/* No command-specific prep needed */
 			pass = AT_PASS_ADD_INDEX;
 			break;
 		case AT_AddConstraint:	/* ADD CONSTRAINT */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
 			/* Recursion occurs during execution phase */
+			/* No command-specific prep needed except saving recurse flag */
 			if (recurse)
 				cmd->recurse = true;
 			pass = AT_PASS_ADD_CONSTR;
 			break;
 		case AT_AddIndexConstraint: /* ADD CONSTRAINT USING INDEX */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE);
-
+			/* This command never recurses */
 			/* No command-specific prep needed */
 			pass = AT_PASS_ADD_INDEXCONSTR;
 			break;
@@ -12796,6 +12799,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			 * If we were told to drop ONLY in this table (no recursion), we
 			 * need to mark the inheritors' constraints as locally defined
 			 * rather than inherited.
+			 *
+			 * FIXME setting 'islocal' true is not correct if inhcount > 0.
 			 */
 			childcon->coninhcount--;
 			childcon->conislocal = true;
