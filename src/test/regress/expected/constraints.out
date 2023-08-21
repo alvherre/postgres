@@ -1005,10 +1005,7 @@ Inherits: cnn_grandchild,
 
 ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
 ERROR:  constraint "cnn_parent_pkey" of relation "cnn_parent" does not exist
-\set VERBOSITY terse
-DROP TABLE cnn_parent CASCADE;
-NOTICE:  drop cascades to 4 other objects
-\set VERBOSITY default
+-- keeps these tables around, for pg_upgrade testing
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
 CREATE ROLE regress_constraint_comments;

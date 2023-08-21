@@ -655,9 +655,8 @@ ALTER TABLE cnn_parent ADD PRIMARY KEY USING INDEX b_uq;
 \d+ cnn_grandchild
 \d+ cnn_grandchild2
 ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
-\set VERBOSITY terse
-DROP TABLE cnn_parent CASCADE;
-\set VERBOSITY default
+-- keeps these tables around, for pg_upgrade testing
+
 
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
