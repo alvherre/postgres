@@ -643,6 +643,22 @@ ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
 DROP TABLE cnn_parent CASCADE;
 \set VERBOSITY default
 
+-- As above, but create the primary key using a UNIQUE index
+CREATE TABLE cnn_parent (a int, b int);
+CREATE TABLE cnn_child () INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild (NOT NULL b) INHERITS (cnn_child);
+CREATE TABLE cnn_child2 (NOT NULL a NO INHERIT) INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild2 () INHERITS (cnn_grandchild, cnn_child2);
+
+CREATE UNIQUE INDEX b_uq ON cnn_parent (b);
+ALTER TABLE cnn_parent ADD PRIMARY KEY USING INDEX b_uq;
+\d+ cnn_grandchild
+\d+ cnn_grandchild2
+ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
+\set VERBOSITY terse
+DROP TABLE cnn_parent CASCADE;
+\set VERBOSITY default
+
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
 CREATE ROLE regress_constraint_comments;

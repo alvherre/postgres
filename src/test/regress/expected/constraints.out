@@ -971,6 +971,44 @@ ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
 DROP TABLE cnn_parent CASCADE;
 NOTICE:  drop cascades to 4 other objects
 \set VERBOSITY default
+-- As above, but create the primary key using a UNIQUE index
+CREATE TABLE cnn_parent (a int, b int);
+CREATE TABLE cnn_child () INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild (NOT NULL b) INHERITS (cnn_child);
+CREATE TABLE cnn_child2 (NOT NULL a NO INHERIT) INHERITS (cnn_parent);
+CREATE TABLE cnn_grandchild2 () INHERITS (cnn_grandchild, cnn_child2);
+NOTICE:  merging multiple inherited definitions of column "a"
+NOTICE:  merging multiple inherited definitions of column "b"
+CREATE UNIQUE INDEX b_uq ON cnn_parent (b);
+ALTER TABLE cnn_parent ADD PRIMARY KEY USING INDEX b_uq;
+\d+ cnn_grandchild
+                              Table "public.cnn_grandchild"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           |          |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+Not-null constraints:
+    "cnn_grandchild_b_not_null" NOT NULL "b" (local, inherited)
+Inherits: cnn_child
+Child tables: cnn_grandchild2
+
+\d+ cnn_grandchild2
+                              Table "public.cnn_grandchild2"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           |          |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+Not-null constraints:
+    "cnn_grandchild_b_not_null" NOT NULL "b" (inherited)
+Inherits: cnn_grandchild,
+          cnn_child2
+
+ALTER TABLE cnn_parent DROP CONSTRAINT cnn_parent_pkey;
+ERROR:  constraint "cnn_parent_pkey" of relation "cnn_parent" does not exist
+\set VERBOSITY terse
+DROP TABLE cnn_parent CASCADE;
+NOTICE:  drop cascades to 4 other objects
+\set VERBOSITY default
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
 CREATE ROLE regress_constraint_comments;
