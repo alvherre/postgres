@@ -15691,6 +15691,8 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	 * If parent_rel has a primary key, then child_rel has constraints (either
 	 * NOT NULL or PRIMARY KEY) that make these columns as non nullable.  Make
 	 * those constraints as inherited.
+	 *
+	 * XXX Split this out to its own routine?
 	 */
 	if (parent_rel->rd_rel->relhasindex)
 	{
@@ -15713,6 +15715,12 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 				childattnums = bms_add_member(childattnums,
 											  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
 			}
+
+			/*
+			 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
+			 * the parent: the relevant NOT NULL constraint in the child
+			 * already had its inhcount incremented earlier.
+			 */
 			CommandCounterIncrement();
 			AdjustNotNullInheritance(child_rel, childattnums, 1);
 		}
