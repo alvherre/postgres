@@ -416,7 +416,6 @@ static void ATSimpleRecursion(List **wqueue, Relation rel,
 							  AlterTableCmd *cmd, bool recurse, LOCKMODE lockmode,
 							  AlterTableUtilityContext *context);
 static void ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode);
-//static void ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode);
 static void ATTypedTableRecursion(List **wqueue, Relation rel, AlterTableCmd *cmd,
 								  LOCKMODE lockmode,
 								  AlterTableUtilityContext *context);
@@ -6646,39 +6645,6 @@ ATCheckPartitionsNotInUse(Relation rel, LOCKMODE lockmode)
 	}
 }
 
-#if 0
-/*
- * Obtain list of inheritance children of the given table, locking them all at
- * the given lockmode and ensuring that they all pass CheckTableNotInUse.
- *
- * This function is a no-op if the given relation is not a plain table with
- * inheritance children.
- */
-static void
-ATCheckChildrenNotInUse(Relation rel, LOCKMODE lockmode)
-{
-	if (rel->rd_rel->relkind == RELKIND_RELATION &&
-		rel->rd_rel->relhassubclass)
-	{
-		List	   *inh;
-		ListCell   *cell;
-
-		inh = find_all_inheritors(RelationGetRelid(rel), lockmode, NULL);
-		foreach(cell, inh)
-		{
-			Relation	childrel;
-
-			/* find_all_inheritors already got lock */
-			childrel = table_open(lfirst_oid(cell), NoLock);
-			CheckTableNotInUse(childrel, "ALTER TABLE");
-			table_close(childrel, NoLock);
-		}
-
-		list_free(inh);
-	}
-}
-#endif
-
 /*
  * ATTypedTableRecursion
  *
@@ -9034,6 +9000,7 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 	List	   *children;
 	List	   *newconstrs = NIL;
 	ListCell   *lc;
+	IndexStmt  *stmt;
 
 	/* No work if no legacy inheritance children are present */
 	if (rel->rd_rel->relkind != RELKIND_RELATION ||
@@ -9042,55 +9009,27 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 
 	children = find_inheritance_children(RelationGetRelid(rel), lockmode);
 
-#if 0
-	if (IsA(cmd->def, Constraint))
+	stmt = castNode(IndexStmt, cmd->def);
+	foreach(lc, stmt->indexParams)
 	{
-		foreach(lc, castNode(Constraint, cmd->def)->keys)
-		{
-			Constraint *nnconstr;
+		IndexElem *elem = lfirst_node(IndexElem, lc);
+		Constraint *nnconstr;
 
-			nnconstr = makeNode(Constraint);
+		Assert(elem->expr == NULL);
 
-			nnconstr = makeNode(Constraint);
-			nnconstr->contype = CONSTR_NOTNULL;
-			nnconstr->conname = NULL;	/* FIXME use PK name? */
-			nnconstr->deferrable = false;
-			nnconstr->initdeferred = false;
-			nnconstr->location = -1;
-			nnconstr->colname = strVal(lfirst(lc));		/* XXX make colname a String? */
-			nnconstr->skip_validation = false;
-			nnconstr->initially_valid = true;
+		nnconstr = makeNode(Constraint);
+		nnconstr->contype = CONSTR_NOTNULL;
+		nnconstr->conname = NULL;	/* FIXME use PK name? */
+		nnconstr->inhcount = 1;
+		nnconstr->deferrable = false;
+		nnconstr->initdeferred = false;
+		nnconstr->location = -1;
+		nnconstr->colname = elem->name;
+		nnconstr->skip_validation = false;
+		nnconstr->initially_valid = true;
 
-			newconstrs = lappend(newconstrs, nnconstr);
-		}
+		newconstrs = lappend(newconstrs, nnconstr);
 	}
-	else
-#endif
-	if (IsA(cmd->def, IndexStmt))
-	{
-		foreach(lc, castNode(IndexStmt, cmd->def)->indexParams)
-		{
-			IndexElem *elem = lfirst_node(IndexElem, lc);
-			Constraint *nnconstr;
-
-			Assert(elem->expr == NULL);
-
-			nnconstr = makeNode(Constraint);
-			nnconstr->contype = CONSTR_NOTNULL;
-			nnconstr->conname = NULL;	/* FIXME use PK name? */
-			nnconstr->inhcount = 1;
-			nnconstr->deferrable = false;
-			nnconstr->initdeferred = false;
-			nnconstr->location = -1;
-			nnconstr->colname = elem->name;
-			nnconstr->skip_validation = false;
-			nnconstr->initially_valid = true;
-
-			newconstrs = lappend(newconstrs, nnconstr);
-		}
-	}
-	else
-		Assert(false);
 
 	foreach(lc, children)
 	{

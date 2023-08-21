@@ -2032,63 +2032,6 @@ index_constraint_create(Relation heapRelation,
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_PARTITION_SEC);
 	}
 
-#if 0
-	/*
-	 * If creating a primary key and the table has inheritance children, these
-	 * need NOT NULL constraints.  Create them now, or if they already exist,
-	 * bump their inhcounts.  (In binary upgrade mode, those have already been
-	 * created.)
-	 *
-	 * FIXME -- this code looks a bit out of place here.  Should we have
-	 * another routine elsewhere?  Maybe heap.c, alongside
-	 * AddRelationNewConstraints.
-	 */
-	if (!IsBinaryUpgrade &&
-		heapRelation->rd_rel->relkind == RELKIND_RELATION &&
-		heapRelation->rd_rel->relhassubclass)
-	{
-		List	   *children;
-		ListCell   *child;
-
-		/* children were already locked in ATPrepCmd */
-		children = find_all_inheritors(RelationGetRelid(heapRelation),
-									   NoLock, NULL);
-		foreach(child, children)
-		{
-			Oid		childrelid = lfirst_oid(child);
-			Relation	childrel;
-			List	   *nns = NIL;
-
-			if (childrelid == RelationGetRelid(heapRelation))
-				continue;
-			childrel = table_open(childrelid, NoLock);
-
-			for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
-			{
-				Constraint *nnconstr;
-
-				nnconstr = makeNode(Constraint);
-				nnconstr->contype = CONSTR_NOTNULL;
-				nnconstr->conname = NULL;	/* FIXME use PK name? */
-				nnconstr->deferrable = false;
-				nnconstr->initdeferred = false;
-				nnconstr->location = -1;
-				nnconstr->colname = get_attname(RelationGetRelid(heapRelation),
-												indexInfo->ii_IndexAttrNumbers[i],
-												false);
-				nnconstr->skip_validation = false;
-				nnconstr->initially_valid = true;
-
-				nns = lappend(nns, nnconstr);
-			}
-
-			AddRelationNewConstraints(childrel, NIL, nns, true, false, false, NULL);
-
-			table_close(childrel, NoLock);
-		}
-	}
-#endif
-
 	/*
 	 * If the constraint is deferrable, create the deferred uniqueness
 	 * checking trigger.  (The trigger will be given an internal dependency on

@@ -3527,30 +3527,6 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 					transformTableConstraint(&cxt, (Constraint *) cmd->def);
 					if (((Constraint *) cmd->def)->contype == CONSTR_FOREIGN)
 						skipValidation = false;
-#if 0
-					else if (((Constraint *) cmd->def)->contype == CONSTR_PRIMARY)
-					{
-						if (rel->rd_rel->relkind == RELKIND_RELATION &&
-							rel->rd_rel->relhassubclass)
-						{
-							List *children;
-							ListCell *child;
-
-							children = find_inheritance_children(RelationGetRelid(rel),
-																 lockmode);
-							foreach(child, children)
-							{
-								Oid		childrelid = lfirst_oid(child);
-								Relation	child;
-
-								child = table_open(childrelid, NoLock);
-								tab = ATGetQueueEntry(wqueue, rel);
-
-
-							}
-						}
-					}
-#endif
 				}
 				else
 					elog(ERROR, "unrecognized node type: %d",
