@@ -7785,13 +7785,6 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 		copytup = heap_copytuple(tuple);
 		conForm = (Form_pg_constraint) GETSTRUCT(copytup);
 
-#ifdef DEBUG_CONSTRAINT_CREATE
-		elog(WARNING, "%s: in rel %s found constraint %s, inhcount %d islocal %s",
-			 __func__, RelationGetRelationName(rel),
-			 NameStr(conForm->conname),
-			 conForm->coninhcount, conForm->conislocal ? "true" : "false");
-#endif
-
 		/*
 		 * If we find an appropriate constraint, we're almost done, but just
 		 * need to change some properties on it: if we're recursing, increment
@@ -9046,12 +9039,6 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			/* ATPrepCmd copies newcmd, so we can scribble on it here */
 			newcmd->def = lfirst(lc2);
 
-#ifdef DEBUG_CONSTRAINT_CREATE
-			elog(WARNING, "queueing command: rel %s cmd %s",
-				 RelationGetRelationName(childrel),
-				 nodeToString(newcmd));
-#endif
-
 			ATPrepCmd(wqueue, childrel, newcmd,
 					  true, false, lockmode, context);
 		}
@@ -9254,14 +9241,6 @@ ATExecAddConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	Assert(IsA(newConstraint, Constraint));
 
-#ifdef DEBUG_CONSTRAINT_CREATE
-	elog(WARNING, "%s: rel %s recurse %s newConstr %s",
-		 __func__,
-		 RelationGetRelationName(rel),
-		 recurse ? "true" : "false",
-		 nodeToString(newConstraint));
-#endif
-
 	/*
 	 * Currently, we only expect to see CONSTR_CHECK, CONSTR_NOTNULL and
 	 * CONSTR_FOREIGN nodes arriving here (see the preprocessing done in
@@ -9379,14 +9358,6 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	List	   *children;
 	ListCell   *child;
 	ObjectAddress address = InvalidObjectAddress;
-
-#ifdef DEBUG_CONSTRAINT_CREATE
-	elog(WARNING, "%s: rel %s recurse %s recursing %s constr %s",
-		 __func__, RelationGetRelationName(rel),
-		 recurse ? "true" : "false",
-		 recursing ? "true" : "false",
-		 nodeToString(constr));
-#endif
 
 	/* At top level, permission check was done in ATPrepCmd, else do it */
 	if (recursing)
