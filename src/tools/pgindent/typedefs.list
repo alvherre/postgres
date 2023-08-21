@@ -1500,6 +1500,7 @@ LogicalRepStreamAbortData
 LogicalRepTupleData
 LogicalRepTyp
 LogicalRepWorker
+LogicalRepWorkerType
 LogicalRewriteMappingData
 LogicalTape
 LogicalTapeSet
@@ -2992,6 +2993,8 @@ WaitEventBufferPin
 WaitEventClient
 WaitEventExtension
 WaitEventExtensionCounterData
+WaitEventExtensionEntryById
+WaitEventExtensionEntryByName
 WaitEventIO
 WaitEventIPC
 WaitEventSet

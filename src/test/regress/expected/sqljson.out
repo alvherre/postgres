@@ -374,9 +374,6 @@ ERROR:  JSON ENCODING clause is only allowed for bytea input type
 LINE 1: SELECT JSON_OBJECT('foo': NULL::int FORMAT JSON ENCODING UTF...
                                             ^
 SELECT JSON_OBJECT('foo': NULL::json FORMAT JSON);
-WARNING:  FORMAT JSON has no effect for json and jsonb types
-LINE 1: SELECT JSON_OBJECT('foo': NULL::json FORMAT JSON);
-                                             ^
   json_object   
 ----------------
  {"foo" : null}
@@ -387,9 +384,6 @@ ERROR:  JSON ENCODING clause is only allowed for bytea input type
 LINE 1: SELECT JSON_OBJECT('foo': NULL::json FORMAT JSON ENCODING UT...
                                              ^
 SELECT JSON_OBJECT('foo': NULL::jsonb FORMAT JSON);
-WARNING:  FORMAT JSON has no effect for json and jsonb types
-LINE 1: SELECT JSON_OBJECT('foo': NULL::jsonb FORMAT JSON);
-                                              ^
   json_object  
 ---------------
  {"foo": null}
@@ -544,17 +538,17 @@ SELECT JSON_OBJECT('a': '1', 'b': NULL, 'c': 2 ABSENT ON NULL);
 (1 row)
 
 SELECT JSON_OBJECT(1: 1, '1': NULL WITH UNIQUE);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT JSON_OBJECT(1: 1, '1': NULL ABSENT ON NULL WITH UNIQUE);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT JSON_OBJECT(1: 1, '1': NULL NULL ON NULL WITH UNIQUE RETURNING jsonb);
-ERROR:  duplicate JSON object key
+ERROR:  duplicate JSON object key value
 SELECT JSON_OBJECT(1: 1, '1': NULL ABSENT ON NULL WITH UNIQUE RETURNING jsonb);
-ERROR:  duplicate JSON object key
+ERROR:  duplicate JSON object key value
 SELECT JSON_OBJECT(1: 1, '2': NULL, '1': 1 NULL ON NULL WITH UNIQUE);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT JSON_OBJECT(1: 1, '2': NULL, '1': 1 ABSENT ON NULL WITH UNIQUE);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT JSON_OBJECT(1: 1, '2': NULL, '1': 1 ABSENT ON NULL WITHOUT UNIQUE);
     json_object     
 --------------------
@@ -562,7 +556,7 @@ SELECT JSON_OBJECT(1: 1, '2': NULL, '1': 1 ABSENT ON NULL WITHOUT UNIQUE);
 (1 row)
 
 SELECT JSON_OBJECT(1: 1, '2': NULL, '1': 1 ABSENT ON NULL WITH UNIQUE RETURNING jsonb);
-ERROR:  duplicate JSON object key
+ERROR:  duplicate JSON object key value
 SELECT JSON_OBJECT(1: 1, '2': NULL, '1': 1 ABSENT ON NULL WITHOUT UNIQUE RETURNING jsonb);
  json_object 
 -------------
@@ -903,10 +897,10 @@ FROM
 
 SELECT JSON_OBJECTAGG(k: v WITH UNIQUE KEYS)
 FROM (VALUES (1, 1), (1, NULL), (2, 2)) foo(k, v);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT JSON_OBJECTAGG(k: v ABSENT ON NULL WITH UNIQUE KEYS)
 FROM (VALUES (1, 1), (1, NULL), (2, 2)) foo(k, v);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT JSON_OBJECTAGG(k: v ABSENT ON NULL WITH UNIQUE KEYS)
 FROM (VALUES (1, 1), (0, NULL), (3, NULL), (2, 2), (4, NULL)) foo(k, v);
     json_objectagg    
@@ -916,10 +910,10 @@ FROM (VALUES (1, 1), (0, NULL), (3, NULL), (2, 2), (4, NULL)) foo(k, v);
 
 SELECT JSON_OBJECTAGG(k: v WITH UNIQUE KEYS RETURNING jsonb)
 FROM (VALUES (1, 1), (1, NULL), (2, 2)) foo(k, v);
-ERROR:  duplicate JSON object key
+ERROR:  duplicate JSON object key value
 SELECT JSON_OBJECTAGG(k: v ABSENT ON NULL WITH UNIQUE KEYS RETURNING jsonb)
 FROM (VALUES (1, 1), (1, NULL), (2, 2)) foo(k, v);
-ERROR:  duplicate JSON object key
+ERROR:  duplicate JSON object key value
 SELECT JSON_OBJECTAGG(k: v ABSENT ON NULL WITH UNIQUE KEYS RETURNING jsonb)
 FROM (VALUES (1, 1), (0, NULL),(4, null), (5, null),(6, null),(2, 2)) foo(k, v);
   json_objectagg  
@@ -952,11 +946,11 @@ FROM (VALUES (1,1), (2,2)) a(k,v);
 
 SELECT to_json(a) AS a, JSON_OBJECTAGG(k : v WITH UNIQUE KEYS) OVER (ORDER BY k)
 FROM (VALUES (1,1), (1,2), (2,2)) a(k,v);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT to_json(a) AS a, JSON_OBJECTAGG(k : v ABSENT ON NULL WITH UNIQUE KEYS)
    OVER (ORDER BY k)
 FROM (VALUES (1,1), (1,null), (2,2)) a(k,v);
-ERROR:  duplicate JSON key "1"
+ERROR:  duplicate JSON object key value: "1"
 SELECT to_json(a) AS a, JSON_OBJECTAGG(k : v ABSENT ON NULL)
 OVER (ORDER BY k)
 FROM (VALUES (1,1), (1,null), (2,2)) a(k,v);

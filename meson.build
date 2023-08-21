@@ -2380,7 +2380,6 @@ rt_dep = cc.find_library('rt', required: false)
 dl_dep = cc.find_library('dl', required: false)
 
 util_dep = cc.find_library('util', required: false)
-posix4_dep = cc.find_library('posix4', required: false)
 
 getopt_dep = cc.find_library('getopt', required: false)
 gnugetopt_dep = cc.find_library('gnugetopt', required: false)
@@ -2414,14 +2413,13 @@ endif
 func_checks = [
   ['_configthreadlocale', {'skip': host_system != 'windows'}],
   ['backtrace_symbols', {'dependencies': [execinfo_dep]}],
-  ['clock_gettime', {'dependencies': [rt_dep, posix4_dep], 'define': false}],
+  ['clock_gettime', {'dependencies': [rt_dep], 'define': false}],
   ['copyfile'],
   # gcc/clang's sanitizer helper library provides dlopen but not dlsym, thus
   # when enabling asan the dlopen check doesn't notice that -ldl is actually
   # required. Just checking for dlsym() ought to suffice.
   ['dlsym', {'dependencies': [dl_dep], 'define': false}],
   ['explicit_bzero'],
-  ['fdatasync', {'dependencies': [rt_dep, posix4_dep], 'define': false}], # Solaris
   ['getifaddrs'],
   ['getopt', {'dependencies': [getopt_dep, gnugetopt_dep], 'skip': always_replace_getopt}],
   ['getopt_long', {'dependencies': [getopt_dep, gnugetopt_dep], 'skip': always_replace_getopt_long}],
