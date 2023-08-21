@@ -15911,13 +15911,21 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel)
 
 			/*
 			 * Check child doesn't discard NOT NULL property.  (Other
-			 * constraints are checked elsewhere.)
+			 * constraints are checked elsewhere.)  However, if the constraint
+			 * is NO INHERIT in the parent, this is allowed.
 			 */
 			if (attribute->attnotnull && !childatt->attnotnull)
-				ereport(ERROR,
-						(errcode(ERRCODE_DATATYPE_MISMATCH),
-						 errmsg("column \"%s\" in child table must be marked NOT NULL",
-								attributeName)));
+			{
+				HeapTuple	contup;
+
+				contup = findNotNullConstraintAttnum(parent_rel,
+													 attribute->attnum);
+				if (!((Form_pg_constraint) GETSTRUCT(contup))->connoinherit)
+					ereport(ERROR,
+							(errcode(ERRCODE_DATATYPE_MISMATCH),
+							 errmsg("column \"%s\" in child table must be marked NOT NULL",
+									attributeName)));
+			}
 
 			/*
 			 * Child column must be generated if and only if parent column is.
