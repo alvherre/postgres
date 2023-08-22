@@ -660,14 +660,6 @@ extractNotNullColumn(HeapTuple constrTup)
 }
 
 /*
- * RelationEnsureNotNullConstraints
- *
- * Make sure there are NOT NULL constraints in all the indicated
- * columns, and bump their inhcounts if so; otherwise, have them
- * created.
- */
-
-/*
  * AdjustNotNullInheritance
  *		Adjust NOT NULL constraints' inhcount/islocal for
  *		ALTER TABLE [NO] INHERITS
