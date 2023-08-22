@@ -1564,8 +1564,8 @@ ALTER TABLE products ADD FOREIGN KEY (product_group_id) REFERENCES product_group
 <programlisting>
 ALTER TABLE products ALTER COLUMN product_no SET NOT NULL;
 </programlisting>
-    Unlike the <literal>ADD</literal> syntax above, this command silently does
-    nothing if the column already has a not-null constraint.
+    This command silently does nothing if the column already has a
+    not-null constraint.
    </para>
 
    <para>
@@ -1611,9 +1611,9 @@ ALTER TABLE products DROP CONSTRAINT some_name;
 ALTER TABLE products ALTER COLUMN product_no DROP NOT NULL;
 </programlisting>
     This mirrors the <literal>SET NOT NULL</literal> syntax for adding a
-    not-null constraints.  This command will silently do nothing if the column
+    not-null constraint.  This command will silently do nothing if the column
     does not have a not-null constraint.  (Recall that a column can have at
-    most one not-null constraint, so it is never ambigous which constraint
+    most one not-null constraint, so it is never ambiguous which constraint
     this command acts on.)
    </para>
   </sect2>
