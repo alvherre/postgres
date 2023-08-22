@@ -7506,6 +7506,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 	AttrNumber	attnum;
 	Relation	attr_rel;
 	ObjectAddress address;
+	List	   *readyRels;
 
 	/*
 	 * lookup the attribute
@@ -7616,8 +7617,9 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 			 colName, RelationGetRelationName(rel));
 	}
 
+	readyRels = NIL;
 	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
-							false, NULL, lockmode);
+							false, &readyRels, lockmode);
 
 	heap_freetuple(conTup);
 
@@ -7739,7 +7741,10 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	 * visited relations, to skip those.
 	 */
 	if (readyRels == NULL)
+	{
+		Assert(!recursing);
 		readyRels = &ready;
+	}
 	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
 		return InvalidObjectAddress;
 	*readyRels = lappend_oid(*readyRels, RelationGetRelid(rel));
@@ -12382,8 +12387,10 @@ ATExecDropConstraint(Relation rel, const char *constrName,
 	/* There can be at most one matching row */
 	if (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
+		List	   *readyRels = NIL;
+
 		dropconstraint_internal(rel, tuple, behavior, recurse, recursing,
-								missing_ok, NULL, lockmode);
+								missing_ok, &readyRels, lockmode);
 		found = true;
 	}
 
@@ -12428,10 +12435,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	char	   *constrName;
 	List	   *unconstrained_cols = NIL;
 	char	   *colname;
-	List	   *ready = NIL;
 
-	if (readyRels == NULL)
-		readyRels = &ready;
 	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
 		return InvalidObjectAddress;
 	*readyRels = lappend_oid(*readyRels, RelationGetRelid(rel));
