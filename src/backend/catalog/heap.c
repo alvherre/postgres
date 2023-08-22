@@ -2157,11 +2157,7 @@ StoreRelNotNull(Relation rel, const char *nnname, AttrNumber attnum,
 				bool is_validated, bool is_local, int inhcount,
 				bool is_no_inherit)
 {
-	int16		attNos;
 	Oid			constrOid;
-
-	/* We only ever store one column per constraint */
-	attNos = attnum;
 
 	constrOid =
 		CreateConstraintEntry(nnname,
@@ -2172,7 +2168,7 @@ StoreRelNotNull(Relation rel, const char *nnname, AttrNumber attnum,
 							  is_validated,
 							  InvalidOid,
 							  RelationGetRelid(rel),
-							  &attNos,
+							  &attnum,
 							  1,
 							  1,
 							  InvalidOid,	/* not a domain constraint */
