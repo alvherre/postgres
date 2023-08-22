@@ -1679,7 +1679,7 @@ RemoveAttributeById(Oid relid, AttrNumber attnum)
 	 */
 	attStruct->atttypid = InvalidOid;
 
-	/* Remove any NOT NULL constraint the column may have */
+	/* Remove any not-null constraint the column may have */
 	attStruct->attnotnull = false;
 
 	/* We don't want to keep stats for it anymore */
@@ -2148,7 +2148,7 @@ StoreRelCheck(Relation rel, const char *ccname, Node *expr,
 }
 
 /*
- * Store a NOT NULL constraint for the given relation
+ * Store a not-null constraint for the given relation
  *
  * The OID of the new constraint is returned.
  */
@@ -2533,7 +2533,7 @@ AddRelationNewConstraints(Relation rel,
 				elog(ERROR, "invalid column name \"%s\"", cdef->colname);
 
 			/*
-			 * If the column already has a NOT NULL constraint, we only need
+			 * If the column already has a not-null constraint, we only need
 			 * to update its catalog status depending on what is caller
 			 * requesting.
 			 */
@@ -2790,19 +2790,19 @@ list_cookedconstr_attnum_cmp(const ListCell *p1, const ListCell *p2)
 }
 
 /*
- * Create the NOT NULL constraints when creating a new relation
+ * Create the not-null constraints when creating a new relation
  *
  * These come from two sources: the 'constraints' list (of Constraint) is
  * specified directly by the user; the 'old_notnulls' list (of
  * CookedConstraint) comes from inheritance.  We create one constraint
  * for each column, giving priority to user-specified ones, and setting
  * inhcount according to how many parents cause each column to get a
- * NOT NULL constraint.  If a user-specified name clashes with another
+ * not-null constraint.  If a user-specified name clashes with another
  * user-specified name, an error is raised.
  *
  * Note that inherited constraints have two shapes: those coming from another
- * NOT NULL constraint in the parent, which have a name already, and those
- * coming from a PRIMARY KEY in the parent, which don't.  Any name specified
+ * not-null constraint in the parent, which have a name already, and those
+ * coming from a primary key in the parent, which don't.  Any name specified
  * in a parent is disregarded in case of a conflict.
  *
  * Returns a list of AttrNumber for columns that need to have the attnotnull
@@ -2818,11 +2818,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	ListCell   *lc;
 
 	/*
-	 * First, create all NOT NULLs that are directly specified by the user.
-	 * Note that inheritance might have given us another source for each, so
-	 * we must scan the old_notnulls list and increment inhcount for each
-	 * element with identical attnum.  We delete from there any element that
-	 * we process.
+	 * First, create all not-null constraints that are directly specified by
+	 * the user.  Note that inheritance might have given us another source for
+	 * each, so we must scan the old_notnulls list and increment inhcount for
+	 * each element with identical attnum.  We delete from there any element
+	 * that we process.
 	 */
 	foreach(lc, constraints)
 	{
@@ -2883,11 +2883,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	}
 
 	/*
-	 * If any column remains in the old_notnulls list, we must create a NOT
-	 * NULL constraint marked not-local.  Because multiple parents could
-	 * specify a NOT NULL for the same column, we must count how many there
-	 * are and add to the original inhcount accordingly, deleting elements
-	 * we've already processed.
+	 * If any column remains in the old_notnulls list, we must create a not-
+	 * null constraint marked not-local.  Because multiple parents could
+	 * specify a not-null constraint for the same column, we must count how
+	 * many there are and add to the original inhcount accordingly, deleting
+	 * elements we've already processed.  We sort the list to make it easy.
 	 *
 	 * We don't use foreach() here because we have two nested loops over the
 	 * cooked constraint list, with possible element deletions in the inner

@@ -564,10 +564,10 @@ ChooseConstraintName(const char *name1, const char *name2,
 
 /*
  * Find and return the pg_constraint tuple that implements a validated
- * NOT NULL constraint for the given column of the given relation.
+ * not-null constraint for the given column of the given relation.
  *
  * XXX This would be easier if we had pg_attribute.notnullconstr with the OID
- * of the constraint that implements the NOT NULL constraint for that column.
+ * of the constraint that implements the not-null constraint for that column.
  * I'm not sure it's worth the catalog bloat and de-normalization, however.
  */
 HeapTuple
@@ -618,7 +618,7 @@ findNotNullConstraintAttnum(Relation rel, AttrNumber attnum)
 
 /*
  * Find and return the pg_constraint tuple that implements a validated
- * NOT NULL constraint for the given column of the given relation.
+ * not-null constraint for the given column of the given relation.
  */
 HeapTuple
 findNotNullConstraint(Relation rel, const char *colname)
@@ -629,7 +629,7 @@ findNotNullConstraint(Relation rel, const char *colname)
 }
 
 /*
- * Given a pg_constraint tuple for a NOT NULL constraint, return the column
+ * Given a pg_constraint tuple for a not-null constraint, return the column
  * number it is for.
  */
 AttrNumber
@@ -639,7 +639,7 @@ extractNotNullColumn(HeapTuple constrTup)
 	Datum		adatum;
 	ArrayType  *arr;
 
-	/* only tuples for NOT NULL constraints should be given */
+	/* only tuples for not-null constraints should be given */
 	Assert(((Form_pg_constraint) GETSTRUCT(constrTup))->contype == CONSTRAINT_NOTNULL);
 
 	adatum = SysCacheGetAttrNotNull(CONSTROID, constrTup,
@@ -661,13 +661,13 @@ extractNotNullColumn(HeapTuple constrTup)
 
 /*
  * AdjustNotNullInheritance
- *		Adjust NOT NULL constraints' inhcount/islocal for
+ *		Adjust not-null constraints' inhcount/islocal for
  *		ALTER TABLE [NO] INHERITS
  *
  * Mark the constraints that make the relation's columns non-nullable as
  * inherited, so that they can't be dropped.  It could be a primary key
- * or NOT NULL constraints.  When both exist, we prefer to mark the
- * NOT NULL ones.
+ * or not-null constraints.  When both exist, we prefer to mark the
+ * not-null ones.
  *
  * Caller must have checked beforehand that attnotnull was set for all
  * columns, so there should be some such constraint for all columns.

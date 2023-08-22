@@ -200,7 +200,7 @@ typedef struct AlteredTableInfo
 } AlteredTableInfo;
 
 /* Struct describing one new constraint to check in Phase 3 scan */
-/* Note: new NOT NULL constraints are handled elsewhere */
+/* Note: new not-null constraints are handled elsewhere */
 typedef struct NewConstraint
 {
 	char	   *name;			/* Constraint name, or NULL if none */
@@ -1264,7 +1264,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 								  true, true, false, queryString);
 
 	/*
-	 * Finally, merge the NOT NULL constraints that are directly declared with
+	 * Finally, merge the not-null constraints that are declared directly with
 	 * those that come from parent relations (making sure to count inheritance
 	 * appropriately for each), create them, and set the attnotnull flag on
 	 * columns that don't yet have it.
@@ -2352,7 +2352,7 @@ storage_name(char c)
  *	   If the same attribute name appears multiple times, then it appears
  *	   in the result table in the proper location for its first appearance.
  *
- *	   Constraints (including NOT NULL constraints) for the child table
+ *	   Constraints (including not-null constraints) for the child table
  *	   are the union of all relevant constraints, from both the child schema
  *	   and parent tables.  In addition, in legacy inheritance, each column that
  *	   appears in a primary key in any of the parents also gets a NOT NULL
@@ -2589,7 +2589,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		 * All columns that are part of the parent's primary key need to be
 		 * NOT NULL; if partition just the attnotnull bit, otherwise a full
 		 * constraint (if they don't have one already).  Also, we request
-		 * attnotnull on columns that have a NOT NULL constraint that's not
+		 * attnotnull on columns that have a not-null constraint that's not
 		 * marked NO INHERIT.
 		 */
 		pkattrs = RelationGetIndexAttrBitmap(relation,
@@ -2695,7 +2695,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 
 				/*
 				 * In regular inheritance, columns in the parent's primary key
-				 * get an extra NOT NULL constraint.  Partitioning doesn't
+				 * get an extra not-null constraint.  Partitioning doesn't
 				 * need this, because the PK itself is going to be cloned to
 				 * the partition.
 				 */
@@ -2783,7 +2783,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 
 				/*
 				 * In regular inheritance, columns in the parent's primary key
-				 * get an extra NOT NULL constraint.  Partitioning doesn't
+				 * get an extra not-null constraint.  Partitioning doesn't
 				 * need this, because the PK itself is going to be cloned to
 				 * the partition.
 				 */
@@ -2952,7 +2952,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		}
 
 		/*
-		 * Also copy the NOT NULL constraints from this parent.  The
+		 * Also copy the not-null constraints from this parent.  The
 		 * attnotnull markings were already installed above.
 		 */
 		foreach(lc1, nnconstrs)
@@ -3095,7 +3095,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 				}
 
 				/*
-				 * Merge of NOT NULL constraints = OR 'em together
+				 * Merge of not-null constraints = OR 'em together
 				 */
 				def->is_not_null |= newdef->is_not_null;
 
@@ -3333,7 +3333,7 @@ MergeCheckConstraint(List *constraints, char *name, Node *expr)
 }
 
 /*
- * RelationGetNotNullConstraints -- get list of NOT NULL constraints
+ * RelationGetNotNullConstraints -- get list of not-null constraints
  *
  * Caller can request cooked constraints, or raw.
  *
@@ -6047,7 +6047,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 	{
 		/*
 		 * If we are rebuilding the tuples OR if we added any new but not
-		 * verified NOT NULL constraints, check all not-null constraints. This
+		 * verified not-null constraints, check all not-null constraints. This
 		 * is a bit of overkill but it minimizes risk of bugs, and
 		 * heap_attisnull is a pretty cheap test anyway.
 		 */
@@ -7246,7 +7246,7 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	 * the effect of NULL values in the new column.
 	 *
 	 * An exception occurs when the new column is of a domain type: the domain
-	 * might have a NOT NULL constraint, or a check constraint that indirectly
+	 * might have a not-null constraint, or a check constraint that indirectly
 	 * rejects nulls.  If there are any domain constraints then we construct
 	 * an explicit NULL default value that will be passed through
 	 * CoerceToDomain processing.  (This is a tad inefficient, since it causes
@@ -7566,7 +7566,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 		{
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("NOT NULL constraint on column \"%s\" must be removed in child tables too",
+					errmsg("not-null constraint on column \"%s\" must be removed in child tables too",
 						   colName),
 					errhint("Do not specify the ONLY keyword."));
 		}
@@ -7600,7 +7600,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 		Bitmapset  *pkcols;
 
 		/*
-		 * There's no NOT NULL constraint, so throw an error.  If the column
+		 * There's no not-null constraint, so throw an error.  If the column
 		 * is in a primary key, we can throw a specific error.  Otherwise,
 		 * this is unexpected.
 		 */
@@ -7612,7 +7612,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 					errmsg("column \"%s\" is in a primary key", colName));
 
 		/* this shouldn't happen */
-		elog(ERROR, "could not find NOT NULL constraint on column \"%s\", relation \"%s\"",
+		elog(ERROR, "could not find not-null constraint on column \"%s\", relation \"%s\"",
 			 colName, RelationGetRelationName(rel));
 	}
 
@@ -7709,7 +7709,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 /*
  * ALTER TABLE ALTER COLUMN SET NOT NULL
  *
- * Add a NOT NULL constraint to a single table and its children.  Returns
+ * Add a not-null constraint to a single table and its children.  Returns
  * the address of the constraint added to the parent relation, if one gets
  * added, or InvalidObjectAddress otherwise.
  *
@@ -9338,7 +9338,7 @@ ChooseForeignKeyConstraintNameAddition(List *colnames)
 }
 
 /*
- * Add a check or NOT NULL constraint to a single table and its children.
+ * Add a check or not-null constraint to a single table and its children.
  * Returns the address of the constraint added to the parent relation,
  * if one gets added, or InvalidObjectAddress otherwise.
  *
@@ -9410,7 +9410,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			constr->conname = ccon->name;
 
 		/*
-		 * If adding a NOT NULL constraint, set the pg_attribute flag and tell
+		 * If adding a not-null constraint, set the pg_attribute flag and tell
 		 * phase 3 to verify existing rows, if needed.
 		 */
 		if (constr->contype == CONSTR_NOTNULL)
@@ -12479,7 +12479,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						constrName, RelationGetRelationName(rel))));
 
 	/*
-	 * See if we have a NOT NULL constraint or a PRIMARY KEY.  If so, we have
+	 * See if we have a not-null constraint or a PRIMARY KEY.  If so, we have
 	 * more checks and actions below, so obtain the list of columns that are
 	 * constrained by the constraint being dropped.
 	 */
@@ -12603,7 +12603,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 				continue;
 
 			/*
-			 * It's not valid to drop the NOT NULL constraint for a GENERATED
+			 * It's not valid to drop the not-null constraint for a GENERATED
 			 * AS IDENTITY column.
 			 */
 			if (attForm->attidentity)
@@ -12615,7 +12615,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 							   RelationGetRelationName(rel)));
 
 			/*
-			 * It's not valid to drop the NOT NULL constraint for a column in
+			 * It's not valid to drop the not-null constraint for a column in
 			 * the replica identity index, either. (FULL is not affected.)
 			 */
 			if (bms_is_member(lfirst_int(lc) - FirstLowInvalidHeapAttributeNumber, ircols))
@@ -12668,7 +12668,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 				 errmsg("cannot remove constraint from only the partitioned table when partitions exist"),
 				 errhint("Do not specify the ONLY keyword.")));
 
-	/* For NOT NULL constraints we recurse by column name */
+	/* For not-null constraints we recurse by column name */
 	if (con->contype == CONSTRAINT_NOTNULL)
 		colname = NameStr(TupleDescAttr(RelationGetDescr(rel),
 										linitial_int(unconstrained_cols) - 1)->attname);
@@ -12693,7 +12693,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		CheckTableNotInUse(childrel, "ALTER TABLE");
 
 		/*
-		 * We search for NOT NULL constraint by column number, and other
+		 * We search for not-null constraint by column number, and other
 		 * constraints by name.
 		 */
 		if (con->contype == CONSTRAINT_NOTNULL)
@@ -12725,7 +12725,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 				break;			/* found it */
 			}
 			if (!found)			/* shouldn't happen? */
-				elog(ERROR, "failed to find NOT NULL constraint for column \"%s\" in table \"%s\"",
+				elog(ERROR, "failed to find not-null constraint for column \"%s\" in table \"%s\"",
 					 colname, RelationGetRelationName(childrel));
 
 			copy_tuple = heap_copytuple(child_tup);
@@ -12761,10 +12761,10 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 
 		childcon = (Form_pg_constraint) GETSTRUCT(copy_tuple);
 
-		/* Right now only CHECK and NOT NULL constraints can be inherited */
+		/* Right now only CHECK and not-null constraints can be inherited */
 		if (childcon->contype != CONSTRAINT_CHECK &&
 			childcon->contype != CONSTRAINT_NOTNULL)
-			elog(ERROR, "inherited constraint is not a CHECK or NOT NULL constraint");
+			elog(ERROR, "inherited constraint is not a CHECK or not-null constraint");
 
 		if (childcon->coninhcount <= 0) /* shouldn't happen */
 			elog(ERROR, "relation %u has non-inherited constraint \"%s\"",
@@ -12865,7 +12865,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 
 				contup = findNotNullConstraint(childrel, colName);
 				if (contup == NULL)
-					elog(ERROR, "cache lookup failed for NOT NULL constraint on column \"%s\", relation \"%s\"",
+					elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\", relation \"%s\"",
 						 colName, RelationGetRelationName(childrel));
 
 				dropconstraint_internal(childrel, contup,
@@ -15718,7 +15718,7 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 
 			/*
 			 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
-			 * the parent: the relevant NOT NULL constraint in the child
+			 * the parent: the relevant not-null constraint in the child
 			 * already had its inhcount incremented earlier.
 			 */
 			CommandCounterIncrement();
@@ -16090,9 +16090,9 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			/*
 			 * If the child constraint is "no inherit" then cannot merge.
 			 *
-			 * This is not desirable for NOT NULL constraints, mostly because
+			 * This is not desirable for not-null constraints, mostly because
 			 * it breaks our pg_upgrade strategy, but it also makes sense on
-			 * its own: if a child has its own NOT NULL constraint and then
+			 * its own: if a child has its own not-null constraint and then
 			 * acquires a parent with the same constraint, then we start to
 			 * enforce that constraint for all the descendants of that child
 			 * too, if any.  XXX since pg_upgrade only needs this for
@@ -16226,7 +16226,7 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 
 			/*
 			 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
-			 * the parent: the relevant NOT NULL constraint in the child
+			 * the parent: the relevant not-null constraint in the child
 			 * already had its inhcount decremented earlier.
 			 */
 			CommandCounterIncrement();
@@ -16459,7 +16459,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 		ListCell   *lc;
 
 		/*
-		 * Match CHECK constraints by name, NOT NULL constraints by column
+		 * Match CHECK constraints by name, not-null constraints by column
 		 * number, and ignore all others.
 		 */
 		if (con->contype == CONSTRAINT_CHECK)
@@ -18378,7 +18378,7 @@ ComputePartitionAttrs(ParseState *pstate, Relation rel, List *partParams, AttrNu
  *		Do scanrel's existing constraints imply the partition constraint?
  *
  * "Existing constraints" include its check constraints and column-level
- * NOT NULL constraints.  partConstraint describes the partition constraint,
+ * not-null constraints.  partConstraint describes the partition constraint,
  * in implicit-AND form.
  */
 bool

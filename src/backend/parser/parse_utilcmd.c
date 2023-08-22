@@ -636,7 +636,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 		constraint->cooked_expr = NULL;
 		column->constraints = lappend(column->constraints, constraint);
 
-		/* have a NOT NULL constraint added later */
+		/* have a not-null constraint added later */
 		need_notnull = true;
 	}
 
@@ -865,7 +865,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	}
 
 	/*
-	 * If we need a NOT NULL constraint for SERIAL or IDENTITY, and one was
+	 * If we need a not-null constraint for SERIAL or IDENTITY, and one was
 	 * not explicitly specified, add one now.
 	 */
 	if (need_notnull && !(saw_nullable && column->is_not_null))
@@ -1078,7 +1078,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 		/*
 		 * Create a new column, which is marked as NOT inherited.
 		 *
-		 * For constraints, ONLY the NOT NULL constraint is inherited by the
+		 * For constraints, ONLY the not-null constraint is inherited by the
 		 * new column definition per SQL99; however we cannot do that
 		 * correctly here, so we leave it for expandTableLikeClause to handle.
 		 */
@@ -1192,7 +1192,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 
 	/*
 	 * If INCLUDING INDEXES is not given and a primary key exists, we need to
-	 * add NOT NULL constraints to the columns covered by the PK (except those
+	 * add not-null constraints to the columns covered by the PK (except those
 	 * that already have one.)  This is required for backwards compatibility.
 	 */
 	if ((table_like_clause->options & CREATE_TABLE_LIKE_INDEXES) == 0)
@@ -1491,7 +1491,7 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 	}
 
 	/*
-	 * Copy NOT NULL constraints, too (these do not require any option to have
+	 * Copy not-null constraints, too (these do not require any option to have
 	 * been given).
 	 */
 	foreach(lc, RelationGetNotNullConstraints(relation, false))
@@ -2590,7 +2590,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 			{
 				/*
 				 * column is defined in the new table.  For PRIMARY KEY, we
-				 * can apply the NOT NULL constraint cheaply here ... unless
+				 * can apply the not-null constraint cheaply here ... unless
 				 * the column is marked is_from_type, in which case marking it
 				 * here would be ineffective (see MergeAttributes).  Note that
 				 * this isn't effective in ALTER TABLE either, unless the

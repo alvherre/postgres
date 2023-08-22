@@ -8658,7 +8658,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			tbinfo->attislocal[j] = (PQgetvalue(res, r, i_attislocal)[0] == 't');
 
 			/*
-			 * NOT NULL constraints require a jumping through a few hoops.
+			 * Not-null constraints require a jumping through a few hoops.
 			 * First, if the user has specified a constraint name that's not
 			 * the system-assigned default name, then we need to preserve
 			 * that. But if they haven't, then we don't want to use the
@@ -8671,22 +8671,22 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			 * at pg_dump time from the server.)
 			 *
 			 * We also need to know if a column is part of the primary key. In
-			 * that case, we want to mark the column as NOT NULL at table
+			 * that case, we want to mark the column as not-null at table
 			 * creation time, so that the table doesn't have to be scanned to
 			 * check for nulls when the PK is created afterwards; this is
 			 * especially critical during pg_upgrade (where the data would not
 			 * be scanned at all otherwise.)  If the column is part of the PK
-			 * and does not have any other NOT NULL constraint, then we
+			 * and does not have any other not-null constraint, then we
 			 * fabricate a throwaway constraint name that we later use to
 			 * remove the constraint after the PK has been created.
 			 *
-			 * For inheritance child tables, we don't want to print NOT NULL
+			 * For inheritance child tables, we don't want to print not-null
 			 * when the constraint was defined at the parent level instead of
 			 * locally.
 			 */
 
 			/*
-			 * We use notnull_inh to suppress unwanted NOT NULL constraints in
+			 * We use notnull_inh to suppress unwanted not-null constraints in
 			 * inheritance children, when said constraints come from the
 			 * parent(s).
 			 */
@@ -16030,7 +16030,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 					appendPQExpBufferStr(q, "::pg_catalog.regclass;\n");
 
 					/*
-					 * If a NOT NULL constraint comes from inheritance, reset
+					 * If a not-null constraint comes from inheritance, reset
 					 * conislocal.  The inhcount is fixed later.
 					 */
 					if (tbinfo->notnull_constrs[j] != NULL &&
@@ -16164,14 +16164,14 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 
 			/*
 			 * If we didn't dump the column definition explicitly above, and
-			 * it is NOT NULL and did not inherit that property from a parent,
+			 * it is not-null and did not inherit that property from a parent,
 			 * we have to mark it separately.
 			 */
 			if (!shouldPrintColumn(dopt, tbinfo, j) &&
 				tbinfo->notnull_constrs[j] != NULL &&
 				(!tbinfo->notnull_inh[j] && !tbinfo->ispartition && !dopt->binary_upgrade))
 			{
-				/* pre-v16 NOT NULL constraints don't have names */
+				/* No constraint name desired? */
 				if (tbinfo->notnull_constrs[j][0] == '\0')
 					appendPQExpBuffer(q,
 									  "ALTER %sTABLE ONLY %s ALTER COLUMN %s SET NOT NULL;\n",
@@ -16924,7 +16924,7 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 		 * similar code in dumpIndex!
 		 */
 
-		/* Drop any NOT NULL constraints that were added to support the PK */
+		/* Drop any not-null constraints that were added to support the PK */
 		if (coninfo->contype == 'p')
 			for (int i = 0; i < tbinfo->numatts; i++)
 				if (tbinfo->notnull_throwaway[i])
