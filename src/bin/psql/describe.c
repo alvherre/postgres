@@ -3062,7 +3062,8 @@ describeOneTableDetails(const char *schemaname,
 							  "(at.attnum = co.conkey[1])\n"
 							  "WHERE co.contype = 'n' AND\n"
 							  "co.conrelid = '%s'::pg_catalog.regclass AND\n"
-							  "at.attrelid = '%s'::pg_catalog.regclass",
+							  "at.attrelid = '%s'::pg_catalog.regclass\n"
+							  "ORDER BY at.attnum",
 							  oid,
 							  oid);
 

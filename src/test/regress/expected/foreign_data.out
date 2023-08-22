@@ -1563,8 +1563,8 @@ Child tables: ft2, FOREIGN
  c7     | integer |           | not null |         |             | plain    |              | 
  c8     | integer |           |          |         |             | plain    |              | 
 Not-null constraints:
-    "fd_pt1_c7_not_null" NOT NULL "c7" (inherited)
     "ft2_c1_not_null" NOT NULL "c1" (local, inherited)
+    "fd_pt1_c7_not_null" NOT NULL "c7" (inherited)
 Server: s0
 FDW options: (delimiter ',', quote '"', "be quoted" 'value')
 Inherits: fd_pt1
@@ -1584,8 +1584,8 @@ Child tables: ct3,
  c7     | integer |           | not null |         | plain    |              | 
  c8     | integer |           |          |         | plain    |              | 
 Not-null constraints:
-    "fd_pt1_c7_not_null" NOT NULL "c7" (inherited)
     "ft2_c1_not_null" NOT NULL "c1" (inherited)
+    "fd_pt1_c7_not_null" NOT NULL "c7" (inherited)
 Inherits: ft2
 
 \d+ ft3
@@ -1601,8 +1601,8 @@ Inherits: ft2
  c7     | integer |           | not null |         |             | plain    |              | 
  c8     | integer |           |          |         |             | plain    |              | 
 Not-null constraints:
-    "fd_pt1_c7_not_null" NOT NULL "c7" (inherited)
     "ft3_c1_not_null" NOT NULL "c1" (local, inherited)
+    "fd_pt1_c7_not_null" NOT NULL "c7" (inherited)
 Server: s0
 Inherits: ft2
 
@@ -1649,8 +1649,8 @@ Child tables: ft2, FOREIGN
  c7     | integer |           |          |         |             | plain    |              | 
  c8     | text    |           |          |         |             | external |              | 
 Not-null constraints:
-    "fd_pt1_c6_not_null" NOT NULL "c6" (inherited)
     "ft2_c1_not_null" NOT NULL "c1" (local, inherited)
+    "fd_pt1_c6_not_null" NOT NULL "c6" (inherited)
 Server: s0
 FDW options: (delimiter ',', quote '"', "be quoted" 'value')
 Inherits: fd_pt1

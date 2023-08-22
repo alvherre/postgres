@@ -1922,8 +1922,8 @@ Child tables: cc1,
  f3     | integer |           |          |         | plain    |              | 
  a2     | integer |           | not null |         | plain    |              | 
 Not-null constraints:
-    "nn" NOT NULL "a2"
     "pp1_f1_not_null" NOT NULL "f1" (inherited)
+    "nn" NOT NULL "a2"
 Inherits: pp1
 Child tables: cc2
 
@@ -1937,8 +1937,8 @@ Child tables: cc2
  f4     | double precision |           |          |         | plain    |              | 
  a2     | integer          |           | not null |         | plain    |              | 
 Not-null constraints:
-    "nn" NOT NULL "a2" (inherited)
     "pp1_f1_not_null" NOT NULL "f1" (inherited)
+    "nn" NOT NULL "a2" (inherited)
 Inherits: pp1,
           cc1
 
@@ -2002,8 +2002,8 @@ create table inh_child () inherits (inh_parent1, inh_parent2);
  a      | integer |           | not null |         | plain   |              | 
  b      | integer |           | not null |         | plain   |              | 
 Not-null constraints:
-    "inh_child_b_not_null" NOT NULL "b" (inherited)
     "nn" NOT NULL "a" (inherited)
+    "inh_child_b_not_null" NOT NULL "b" (inherited)
 Inherits: inh_parent1,
           inh_parent2
 
