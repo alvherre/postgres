@@ -718,6 +718,50 @@ AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
 	table_close(pg_constraint, RowExclusiveLock);
 }
 
+/*
+ * Adjust inheritance count for the not-null constraint row of the given
+ * column, if it exists, and return true.  If no not-null constraint is
+ * found for the column, return false.
+ */
+bool
+AdjustNotNullInheritance1(Relation child_rel, AttrNumber attnum, int count)
+{
+	HeapTuple	tup;
+
+	tup = findNotNullConstraintAttnum(child_rel, attnum);
+	if (HeapTupleIsValid(tup))
+	{
+		Relation	pg_constraint;
+		Form_pg_constraint conform;
+
+		pg_constraint = table_open(ConstraintRelationId, RowExclusiveLock);
+		conform = (Form_pg_constraint) GETSTRUCT(tup);
+		if (count > 0)
+			conform->coninhcount += count;
+
+		/* sanity check */
+		if (conform->coninhcount < 0)
+			elog(ERROR, "invalid inhcount %d for constraint \"%s\" on relation \"%s\"",
+				 conform->coninhcount, NameStr(conform->conname),
+				 RelationGetRelationName(child_rel));
+
+		/*
+		 * If the constraints are no longer inherited, mark them local.  It's
+		 * arguable that we should drop them instead, but it's hard to see
+		 * that being better.  The user can drop it manually later.
+		 */
+		if (conform->coninhcount == 0)
+			conform->conislocal = true;
+
+		CatalogTupleUpdate(pg_constraint, &tup->t_self, tup);
+
+		table_close(pg_constraint, RowExclusiveLock);
+
+		return true;
+	}
+
+	return false;
+}
 
 /*
  * Delete a single constraint record.

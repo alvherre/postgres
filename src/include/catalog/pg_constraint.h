@@ -248,6 +248,8 @@ extern char *ChooseConstraintName(const char *name1, const char *name2,
 extern HeapTuple findNotNullConstraintAttnum(Relation rel, AttrNumber attnum);
 extern HeapTuple findNotNullConstraint(Relation rel, const char *colname);
 extern AttrNumber extractNotNullColumn(HeapTuple constrTup);
+extern bool AdjustNotNullInheritance1(Relation child_rel, AttrNumber attnum,
+									  int count);
 extern void AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns,
 									 int count);
 

@@ -2518,46 +2518,21 @@ AddRelationNewConstraints(Relation rel,
 		}
 		else if (cdef->contype == CONSTR_NOTNULL)
 		{
-			HeapTuple	contup;
 			CookedConstraint *nncooked;
 			AttrNumber	colnum;
 			char	   *nnname;
-
-			colnum = get_attnum(RelationGetRelid(rel),
-								cdef->colname);
-			if (colnum == InvalidAttrNumber)
-				elog(ERROR, "invalid column name \"%s\"", cdef->colname);
 
 			/*
 			 * If the column already has a not-null constraint, we only need
 			 * to update its catalog status depending on what is caller
 			 * requesting.
 			 */
-			contup = findNotNullConstraintAttnum(rel, colnum);
-			if (HeapTupleIsValid(contup))
-			{
-				Relation	conDesc;
-				HeapTuple	copytup;
-				Form_pg_constraint conForm;
-
-				/*
-				 * XXX a bit out of place -- want a new routine in
-				 * pg_constraint.c?
-				 */
-				conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
-
-				copytup = heap_copytuple(contup);
-				conForm = (Form_pg_constraint) GETSTRUCT(copytup);
-				if (cdef->inhcount > 0)
-					conForm->coninhcount += cdef->inhcount;
-				else
-					conForm->conislocal = true;
-				CatalogTupleUpdate(conDesc, &contup->t_self, copytup);
-
-				table_close(conDesc, RowExclusiveLock);
-
+			colnum = get_attnum(RelationGetRelid(rel), cdef->colname);
+			if (colnum == InvalidAttrNumber)	/* shouldn't happen */
+				elog(ERROR, "cache lookup failed for attribute \"%s\" of relation \"%s\"",
+					 cdef->colname, RelationGetRelationName(rel));
+			if (AdjustNotNullInheritance1(rel, colnum, cdef->inhcount))
 				continue;
-			}
 
 			/*
 			 * If a constraint name is specified, check that it isn't already
