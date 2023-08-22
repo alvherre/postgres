@@ -697,15 +697,6 @@ AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
 						   get_attname(RelationGetRelid(child_rel), attnum,
 									   false)));
 
-		/*
-		 * XXX we could make this a little more user-friendly by allowing the
-		 * PK to be marked inherited instead of the set of NOT NULLs for each
-		 * and every column of the PK.  It's easy to code, but cleanup during
-		 * ALTER TABLE NO INHERIT is then not as easy; and dropping/changing
-		 * the PK is no longer possible for the child, so we refrain from
-		 * allowing that case.
-		 */
-
 		conform = (Form_pg_constraint) GETSTRUCT(tup);
 		conform->coninhcount += count;
 		if (conform->coninhcount < 0)
@@ -716,7 +707,7 @@ AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
 		/*
 		 * If the constraints are no longer inherited, mark them local.  It's
 		 * arguable that we should drop them instead, but it's hard to see
-		 * that being better.
+		 * that being better.  The user can drop it manually later.
 		 */
 		if (conform->coninhcount == 0)
 			conform->conislocal = true;

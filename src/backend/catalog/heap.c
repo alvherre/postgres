@@ -2835,6 +2835,10 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		attnum = get_attnum(RelationGetRelid(rel), constr->colname);
 
+		/*
+		 * Search in the list of inherited constraints for any entries on the
+		 * same column.
+		 */
 		foreach(lc2, old_notnulls)
 		{
 			CookedConstraint *old = (CookedConstraint *) lfirst(lc2);
@@ -2890,11 +2894,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * elements we've already processed.  We sort the list to make it easy.
 	 *
 	 * We don't use foreach() here because we have two nested loops over the
-	 * cooked constraint list, with possible element deletions in the inner
-	 * one. If we used foreach_delete_current() it could only fix up the state
-	 * of one of the loops, so it seems cleaner to use looping over list
-	 * indexes for both loops.  Note that any deletion will happen beyond
-	 * where the outer loop is, so its index never needs adjustment.
+	 * constraint list, with possible element deletions in the inner one. If
+	 * we used foreach_delete_current() it could only fix up the state of one
+	 * of the loops, so it seems cleaner to use looping over list indexes for
+	 * both loops.  Note that any deletion will happen beyond where the outer
+	 * loop is, so its index never needs adjustment.
 	 */
 	list_sort(old_notnulls, list_cookedconstr_attnum_cmp);
 	for (int outerpos = 0; outerpos < list_length(old_notnulls); outerpos++)
@@ -2907,7 +2911,10 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
 		Assert(cooked->contype == CONSTR_NOTNULL);
 
-		/* We just preserve the first constraint name we come across, if any */
+		/*
+		 * Preserve the first non-conflicting constraint name we come
+		 * across, if any
+		 */
 		if (conname == NULL && cooked->name)
 			conname = cooked->name;
 
