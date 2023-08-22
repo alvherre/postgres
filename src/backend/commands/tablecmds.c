@@ -12686,9 +12686,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		Relation	childrel;
 		HeapTuple	tuple;
 		Form_pg_constraint childcon;
-		HeapTuple	copy_tuple;
-		SysScanDesc scan;
-		ScanKeyData skey[3];
 
 		if (list_member_oid(*readyRels, childrelid))
 			continue;			/* child already processed */
@@ -12703,41 +12700,16 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		 */
 		if (con->contype == CONSTRAINT_NOTNULL)
 		{
-			bool		found = false;
-			AttrNumber	child_colnum;
-			HeapTuple	child_tup;
-
-			/* FIXME this code seems to duplicate findNotNullConstraint */
-			child_colnum = get_attnum(RelationGetRelid(childrel), colname);
-			ScanKeyInit(&skey[0],
-						Anum_pg_constraint_conrelid,
-						BTEqualStrategyNumber, F_OIDEQ,
-						ObjectIdGetDatum(childrelid));
-			scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId,
-									  true, NULL, 1, skey);
-			while (HeapTupleIsValid(child_tup = systable_getnext(scan)))
-			{
-				Form_pg_constraint constr = (Form_pg_constraint) GETSTRUCT(child_tup);
-				AttrNumber	constr_colnum;
-
-				if (constr->contype != CONSTRAINT_NOTNULL)
-					continue;
-				constr_colnum = extractNotNullColumn(child_tup);
-				if (constr_colnum != child_colnum)
-					continue;
-
-				found = true;
-				break;			/* found it */
-			}
-			if (!found)			/* shouldn't happen? */
-				elog(ERROR, "failed to find not-null constraint for column \"%s\" in table \"%s\"",
-					 colname, RelationGetRelationName(childrel));
-
-			copy_tuple = heap_copytuple(child_tup);
-			systable_endscan(scan);
+			tuple = findNotNullConstraint(childrel, colname);
+			if (!HeapTupleIsValid(tuple))
+				elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\" of relation %u",
+					 colname, RelationGetRelid(childrel));
 		}
 		else
 		{
+			SysScanDesc scan;
+			ScanKeyData skey[3];
+
 			ScanKeyInit(&skey[0],
 						Anum_pg_constraint_conrelid,
 						BTEqualStrategyNumber, F_OIDEQ,
@@ -12760,11 +12732,11 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						 errmsg("constraint \"%s\" of relation \"%s\" does not exist",
 								constrName,
 								RelationGetRelationName(childrel))));
-			copy_tuple = heap_copytuple(tuple);
+			tuple = heap_copytuple(tuple);
 			systable_endscan(scan);
 		}
 
-		childcon = (Form_pg_constraint) GETSTRUCT(copy_tuple);
+		childcon = (Form_pg_constraint) GETSTRUCT(tuple);
 
 		/* Right now only CHECK and not-null constraints can be inherited */
 		if (childcon->contype != CONSTRAINT_CHECK &&
@@ -12784,7 +12756,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			if (childcon->coninhcount == 1 && !childcon->conislocal)
 			{
 				/* Time to delete this child constraint, too */
-				dropconstraint_internal(childrel, copy_tuple, behavior,
+				dropconstraint_internal(childrel, tuple, behavior,
 										recurse, true, missing_ok, readyRels,
 										lockmode);
 			}
@@ -12792,7 +12764,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			{
 				/* Child constraint must survive my deletion */
 				childcon->coninhcount--;
-				CatalogTupleUpdate(conrel, &copy_tuple->t_self, copy_tuple);
+				CatalogTupleUpdate(conrel, &tuple->t_self, tuple);
 
 				/* Make update visible */
 				CommandCounterIncrement();
@@ -12810,13 +12782,13 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			childcon->coninhcount--;
 			childcon->conislocal = true;
 
-			CatalogTupleUpdate(conrel, &copy_tuple->t_self, copy_tuple);
+			CatalogTupleUpdate(conrel, &tuple->t_self, tuple);
 
 			/* Make update visible */
 			CommandCounterIncrement();
 		}
 
-		heap_freetuple(copy_tuple);
+		heap_freetuple(tuple);
 
 		table_close(childrel, NoLock);
 	}
