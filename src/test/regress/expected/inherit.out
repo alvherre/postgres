@@ -1992,6 +1992,22 @@ Child tables: cc1,
 
 alter table pp1 add primary key (f1);
 -- Leave these tables around, for pg_upgrade testing
+create table inh_parent1(a int constraint nn not null);
+create table inh_parent2(b int constraint nn not null);
+create table inh_child () inherits (inh_parent1, inh_parent2);
+\d+ inh_child
+                                 Table "public.inh_child"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+Not-null constraints:
+    "inh_child_b_not_null" NOT NULL "b" (inherited)
+    "nn" NOT NULL "a" (inherited)
+Inherits: inh_parent1,
+          inh_parent2
+
+drop table inh_parent1, inh_parent2, inh_child;
 -- test "dropping" a not null constraint that's also inherited
 create table inh_parent (a int not null primary key);
 create table inh_child (a int not null) inherits (inh_parent);

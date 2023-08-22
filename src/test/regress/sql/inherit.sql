@@ -718,6 +718,12 @@ alter table pp1 alter column f1 drop not null;
 alter table pp1 add primary key (f1);
 -- Leave these tables around, for pg_upgrade testing
 
+create table inh_parent1(a int constraint nn not null);
+create table inh_parent2(b int constraint nn not null);
+create table inh_child () inherits (inh_parent1, inh_parent2);
+\d+ inh_child
+drop table inh_parent1, inh_parent2, inh_child;
+
 -- test "dropping" a not null constraint that's also inherited
 create table inh_parent (a int not null primary key);
 create table inh_child (a int not null) inherits (inh_parent);
