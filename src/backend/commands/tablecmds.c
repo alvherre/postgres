@@ -12586,7 +12586,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			 */
 			atttup = SearchSysCacheCopyAttNum(RelationGetRelid(rel), attnum);
 			if (!HeapTupleIsValid(atttup))
-				elog(ERROR, "cache lookup failed for column %d", attnum);
+				elog(ERROR, "cache lookup failed for attribute %d of relation %u",
+					 attnum, RelationGetRelid(rel));
 			attForm = (Form_pg_attribute) GETSTRUCT(atttup);
 
 			/*

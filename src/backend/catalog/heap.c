@@ -2529,8 +2529,8 @@ AddRelationNewConstraints(Relation rel,
 			 */
 			colnum = get_attnum(RelationGetRelid(rel), cdef->colname);
 			if (colnum == InvalidAttrNumber)	/* shouldn't happen */
-				elog(ERROR, "cache lookup failed for attribute \"%s\" of relation \"%s\"",
-					 cdef->colname, RelationGetRelationName(rel));
+				elog(ERROR, "cache lookup failed for attribute \"%s\" of relation %u",
+					 cdef->colname, RelationGetRelid(rel));
 			if (AdjustNotNullInheritance1(rel, colnum, cdef->inhcount))
 				continue;
 
