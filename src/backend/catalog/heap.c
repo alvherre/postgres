@@ -2894,8 +2894,8 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		Assert(cooked->contype == CONSTR_NOTNULL);
 
 		/*
-		 * Preserve the first non-conflicting constraint name we come
-		 * across, if any
+		 * Preserve the first non-conflicting constraint name we come across,
+		 * if any
 		 */
 		if (conname == NULL && cooked->name)
 			conname = cooked->name;
