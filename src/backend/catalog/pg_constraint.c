@@ -1329,6 +1329,7 @@ get_primary_key_attnos(Oid relid, bool deferrableOk, Oid *constraintOid)
 	{
 		Form_pg_constraint con = (Form_pg_constraint) GETSTRUCT(tuple);
 		Datum		adatum;
+		bool		isNull;
 		ArrayType  *arr;
 		int16	   *attnums;
 		int			numkeys;
@@ -1347,8 +1348,11 @@ get_primary_key_attnos(Oid relid, bool deferrableOk, Oid *constraintOid)
 			break;
 
 		/* Extract the conkey array, ie, attnums of PK's columns */
-		adatum = SysCacheGetAttrNotNull(CONSTROID, tuple,
-										Anum_pg_constraint_conkey);
+		adatum = heap_getattr(tuple, Anum_pg_constraint_conkey,
+							  RelationGetDescr(pg_constraint), &isNull);
+		if (isNull)
+			elog(ERROR, "null conkey for constraint %u",
+				 ((Form_pg_constraint) GETSTRUCT(tuple))->oid);
 		arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
 		numkeys = ARR_DIMS(arr)[0];
 		if (ARR_NDIM(arr) != 1 ||
