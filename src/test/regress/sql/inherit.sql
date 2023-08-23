@@ -718,52 +718,38 @@ alter table pp1 alter column f1 drop not null;
 alter table pp1 add primary key (f1);
 -- Leave these tables around, for pg_upgrade testing
 
+-- Test the same constraint name for different columns in different parents
 create table inh_parent1(a int constraint nn not null);
 create table inh_parent2(b int constraint nn not null);
 create table inh_child () inherits (inh_parent1, inh_parent2);
 \d+ inh_child
 drop table inh_parent1, inh_parent2, inh_child;
 
--- test "dropping" a not null constraint that's also inherited
-create table inh_parent (a int not null primary key);
-create table inh_child (a int not null) inherits (inh_parent);
+-- Test multiple parents with overlapping primary keys
+create table inh_parent1(a int, b int, c int, primary key (a, b));
+create table inh_parent2(d int, e int, b int, primary key (d, b));
+create table inh_child() inherits (inh_parent1, inh_parent2);
 select conrelid::regclass, conname, contype, conkey,
- (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype in ('n','p') and
- conrelid in ('inh_child'::regclass, 'inh_parent'::regclass)
+ conrelid::regclass::text in ('inh_child', 'inh_parent1', 'inh_parent2')
  order by 1, 2;
-alter table inh_child alter a drop not null;
-select conrelid::regclass, conname, contype, conkey,
- (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
- coninhcount, conislocal, connoinherit
- from pg_constraint where contype in ('n','p') and
- conrelid in ('inh_child'::regclass, 'inh_parent'::regclass)
- order by 1, 2;
-alter table inh_parent alter a drop not null;
-select conrelid::regclass, conname, contype, conkey,
- (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
- coninhcount, conislocal, connoinherit
- from pg_constraint where contype in ('n','p') and
- conrelid in ('inh_child'::regclass, 'inh_parent'::regclass)
- order by 1, 2;
-drop table inh_parent, inh_child;
+\d+ inh_child
+drop table inh_parent1, inh_parent2, inh_child;
 
 -- NOT NULL NO INHERIT
-create table inh_parent(a int);
-create table inh_child() inherits (inh_parent);
-alter table inh_parent add not null a no inherit;
-create table inh_child2() inherits (inh_parent);
+create table inh_nn_parent(a int);
+create table inh_nn_child() inherits (inh_nn_parent);
+alter table inh_nn_parent add not null a no inherit;
+create table inh_nn_child2() inherits (inh_nn_parent);
 select conrelid::regclass, conname, contype, conkey,
  (select attname from pg_attribute where attrelid = conrelid and attnum = conkey[1]),
  coninhcount, conislocal, connoinherit
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_parent'::regclass, 'inh_child'::regclass, 'inh_child2'::regclass)
+ conrelid::regclass::text like 'inh\_nn\_%'
  order by 2, 1;
-\d inh_parent
-\d inh_child
-\d inh_child2
-drop table inh_parent, inh_child, inh_child2;
+\d+ inh_nn*
+drop table inh_nn_parent, inh_nn_child, inh_nn_child2;
 
 --
 -- test inherit/deinherit
@@ -784,9 +770,9 @@ alter table inh_child2 inherit inh_child1;
 -- add NOT NULL constraint recursively
 alter table inh_parent alter column f1 set not null;
 
-\d inh_parent
-\d inh_child1
-\d inh_child2
+\d+ inh_parent
+\d+ inh_child1
+\d+ inh_child2
 
 select conrelid::regclass, conname, contype, coninhcount, conislocal
  from pg_constraint where contype = 'n' and
@@ -798,22 +784,16 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
 --
 
 -- deinherit inh_child1
+create table inh_grandchld () inherits (inh_child1);
 alter table inh_child1 no inherit inh_parent;
-\d inh_parent
-\d inh_child1
-\d inh_child2
+\d+ inh_parent
+\d+ inh_child1
+\d+ inh_child2
 select conrelid::regclass, conname, contype, coninhcount, conislocal
  from pg_constraint where contype = 'n' and
- conrelid in ('inh_parent'::regclass, 'inh_child1'::regclass, 'inh_child2'::regclass)
+ conrelid::regclass::text in ('inh_parent', 'inh_child1', 'inh_child2', 'inh_grandchld')
  order by 2, 1;
-
--- test inhcount of inh_child2, should fail
-alter table inh_child2 alter f1 drop not null;
-
--- should succeed
-
-drop table inh_parent;
-drop table inh_child1 cascade;
+drop table inh_parent, inh_child1, inh_child2, inh_grandchld;
 
 --
 -- test multi inheritance tree

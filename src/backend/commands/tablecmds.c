@@ -12461,11 +12461,18 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		con = (Form_pg_constraint) GETSTRUCT(copytup);
 		if (recursing)
 		{
-			Assert(con->coninhcount >= 1);
+			if (con->coninhcount <= 0)	/* shouldn't happen */
+				elog(ERROR, "attempted recursive deletion of local constraint \"%s\" on relation %u",
+					 NameStr(con->conname), RelationGetRelid(rel));
 			con->coninhcount -= 1;
 		}
 		else
+		{
+			if (!con->conislocal)	/* shouldn't happen */
+				elog(ERROR, "attempted non-recursive deletion of non-local constraint \"%s\" on relation %u",
+					 NameStr(con->conname), RelationGetRelid(rel));
 			con->conislocal = false;
+		}
 
 		CatalogTupleUpdate(conrel, &copytup->t_self, copytup);
 
@@ -12773,14 +12780,14 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		else
 		{
 			/*
-			 * If we were told to drop ONLY in this table (no recursion), we
-			 * need to mark the inheritors' constraints as locally defined
-			 * rather than inherited.
-			 *
-			 * FIXME setting 'islocal' true is not correct if inhcount > 0.
+			 * If we were told to drop ONLY in this table (no recursion) and
+			 * there are no further parents for this constraint, we need to
+			 * mark the inheritors' constraints as locally defined rather than
+			 * inherited.
 			 */
 			childcon->coninhcount--;
-			childcon->conislocal = true;
+			if (childcon->coninhcount == 0)
+				childcon->conislocal = true;
 
 			CatalogTupleUpdate(conrel, &tuple->t_self, tuple);
 
