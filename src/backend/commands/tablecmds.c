@@ -3332,6 +3332,7 @@ MergeCheckConstraint(List *constraints, char *name, Node *expr)
 	return false;
 }
 
+
 /*
  * StoreCatalogInheritance
  *		Updates the system catalogs with proper inheritance information.

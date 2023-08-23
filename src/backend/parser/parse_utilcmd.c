@@ -1203,7 +1203,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 		ListCell   *lc;
 
 		/*
-		 * Obtain a bitmapset of columns on which we'll add NOT NULL
+		 * Obtain a bitmapset of columns on which we'll add not-null
 		 * constraints in expandTableLikeClause, so that we skip this for
 		 * those.
 		 */
@@ -1670,8 +1670,8 @@ transformOfType(CreateStmtContext *cxt, TypeName *ofTypename)
  * with the index there.
  *
  * Unlike transformIndexConstraint, we don't make any effort to force primary
- * key columns to be NOT NULL.  The larger cloning process this is part of
- * should have cloned their NOT NULL status separately (and DefineIndex will
+ * key columns to be not-null.  The larger cloning process this is part of
+ * should have cloned their not-null status separately (and DefineIndex will
  * complain if that fails to happen).
  */
 IndexStmt *
@@ -2219,9 +2219,9 @@ transformIndexConstraints(CreateStmtContext *cxt)
 	 * Run through the constraints that need to generate an index, and do so.
 	 *
 	 * For PRIMARY KEY, in addition we set each column's attnotnull flag true.
-	 * We do not create a separate CHECK (IS NOT NULL) constraint, as that
-	 * would be redundant: the PRIMARY KEY constraint itself fulfills that
-	 * role.  Other constraint types don't need any NOT NULL markings.
+	 * We do not create a separate not-null constraint, as that would be
+	 * redundant: the PRIMARY KEY constraint itself fulfills that role.  Other
+	 * constraint types don't need any not-null markings.
 	 */
 	foreach(lc, cxt->ixconstraints)
 	{
@@ -2306,7 +2306,7 @@ transformIndexConstraints(CreateStmtContext *cxt)
  *		transformIndexConstraints. An IndexStmt is returned.
  *
  * For a PRIMARY KEY constraint, we additionally force the columns to be
- * marked as NOT NULL, without producing a CHECK (IS NOT NULL) constraint.
+ * marked as not-null, without producing a not-null constraint.
  */
 static IndexStmt *
 transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
@@ -2564,7 +2564,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 	 * For UNIQUE and PRIMARY KEY, we just have a list of column names.
 	 *
 	 * Make sure referenced keys exist.  If we are making a PRIMARY KEY index,
-	 * also make sure they are NOT NULL.
+	 * also make sure they are not-null.
 	 */
 	else
 	{
