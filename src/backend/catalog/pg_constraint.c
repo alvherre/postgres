@@ -664,13 +664,12 @@ extractNotNullColumn(HeapTuple constrTup)
  *		Adjust not-null constraints' inhcount/islocal for
  *		ALTER TABLE [NO] INHERITS
  *
- * Mark the constraints that make the relation's columns non-nullable as
- * inherited, so that they can't be dropped.  It could be a primary key
- * or not-null constraints.  When both exist, we prefer to mark the
- * not-null ones.
+ * Mark the NOT NULL constraints for the given relation columns as
+ * inherited, so that they can't be dropped.
  *
  * Caller must have checked beforehand that attnotnull was set for all
- * columns, so there should be some such constraint for all columns.
+ * columns.  However, some of those could be set because of a primary
+ * key, so throw a proper user-visible error if one is not found.
  */
 void
 AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns, int count)
