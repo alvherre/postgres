@@ -245,13 +245,12 @@ extern char *ChooseConstraintName(const char *name1, const char *name2,
 								  const char *label, Oid namespaceid,
 								  List *others);
 
-extern HeapTuple findNotNullConstraintAttnum(Relation rel, AttrNumber attnum);
-extern HeapTuple findNotNullConstraint(Relation rel, const char *colname);
+extern HeapTuple findNotNullConstraintAttnum(Oid relid, AttrNumber attnum);
+extern HeapTuple findNotNullConstraint(Oid relid, const char *colname);
 extern AttrNumber extractNotNullColumn(HeapTuple constrTup);
-extern bool AdjustNotNullInheritance1(Relation child_rel, AttrNumber attnum,
-									  int count);
-extern void AdjustNotNullInheritance(Relation child_rel, Bitmapset *columns,
-									 int count);
+extern bool AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count);
+extern void AdjustNotNullInheritance(Oid relid, Bitmapset *columns, int count);
+extern List *RelationGetNotNullConstraints(Oid relid, bool cooked);
 
 extern void RemoveConstraintById(Oid conId);
 extern void RenameConstraintById(Oid conId, const char *newname);

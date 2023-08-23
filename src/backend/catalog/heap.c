@@ -2532,7 +2532,8 @@ AddRelationNewConstraints(Relation rel,
 			 * If the column already has a not-null constraint, we need only
 			 * update its catalog status and we're done.
 			 */
-			if (AdjustNotNullInheritance1(rel, colnum, cdef->inhcount))
+			if (AdjustNotNullInheritance1(RelationGetRelid(rel), colnum,
+										  cdef->inhcount))
 				continue;
 
 			/*

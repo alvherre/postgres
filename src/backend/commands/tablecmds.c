@@ -2594,7 +2594,7 @@ MergeAttributes(List *schema, List *supers, char relpersistence,
 		 */
 		pkattrs = RelationGetIndexAttrBitmap(relation,
 											 INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		nnconstrs = RelationGetNotNullConstraints(relation, true);
+		nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation), true);
 		foreach(lc1, nnconstrs)
 			nncols = bms_add_member(nncols,
 									((CookedConstraint *) lfirst(lc1))->attnum);
@@ -3330,86 +3330,6 @@ MergeCheckConstraint(List *constraints, char *name, Node *expr)
 	}
 
 	return false;
-}
-
-/*
- * RelationGetNotNullConstraints -- get list of not-null constraints
- *
- * Caller can request cooked constraints, or raw.
- *
- * This is seldom needed, so we just scan pg_constraint each time.
- *
- * XXX This is only used to create derived tables, so NO INHERIT constraints
- * are always skipped.
- */
-List *
-RelationGetNotNullConstraints(Relation relation, bool cooked)
-{
-	List	   *notnulls = NIL;
-	Relation	constrRel;
-	HeapTuple	htup;
-	SysScanDesc conscan;
-	ScanKeyData skey;
-
-	constrRel = table_open(ConstraintRelationId, AccessShareLock);
-	ScanKeyInit(&skey,
-				Anum_pg_constraint_conrelid,
-				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(RelationGetRelid(relation)));
-	conscan = systable_beginscan(constrRel, ConstraintRelidTypidNameIndexId, true,
-								 NULL, 1, &skey);
-
-	while (HeapTupleIsValid(htup = systable_getnext(conscan)))
-	{
-		Form_pg_constraint conForm = (Form_pg_constraint) GETSTRUCT(htup);
-		AttrNumber	colnum;
-
-		if (conForm->contype != CONSTRAINT_NOTNULL)
-			continue;
-		if (conForm->connoinherit)
-			continue;
-
-		colnum = extractNotNullColumn(htup);
-
-		if (cooked)
-		{
-			CookedConstraint *cooked;
-
-			cooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
-
-			cooked->contype = CONSTR_NOTNULL;
-			cooked->name = pstrdup(NameStr(conForm->conname));
-			cooked->attnum = colnum;
-			cooked->expr = NULL;
-			cooked->skip_validation = false;
-			cooked->is_local = true;
-			cooked->inhcount = 0;
-			cooked->is_no_inherit = conForm->connoinherit;
-
-			notnulls = lappend(notnulls, cooked);
-		}
-		else
-		{
-			Constraint *constr;
-
-			constr = makeNode(Constraint);
-			constr->contype = CONSTR_NOTNULL;
-			constr->conname = pstrdup(NameStr(conForm->conname));
-			constr->deferrable = false;
-			constr->initdeferred = false;
-			constr->location = -1;
-			constr->colname = get_attname(RelationGetRelid(relation),
-										  colnum, false);
-			constr->skip_validation = false;
-			constr->initially_valid = true;
-			notnulls = lappend(notnulls, constr);
-		}
-	}
-
-	systable_endscan(conscan);
-	table_close(constrRel, AccessShareLock);
-
-	return notnulls;
 }
 
 /*
@@ -7595,7 +7515,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 	/*
 	 * Find the constraint that makes this column NOT NULL.
 	 */
-	conTup = findNotNullConstraint(rel, colName);
+	conTup = findNotNullConstraint(RelationGetRelid(rel), colName);
 	if (conTup == NULL)
 	{
 		Bitmapset  *pkcols;
@@ -12608,7 +12528,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			 * whole thing with a specific error message, because the
 			 * constraint is required in that case.
 			 */
-			contup = findNotNullConstraintAttnum(rel, attnum);
+			contup = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
 			if (contup ||
 				bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
 							  pkcols))
@@ -12707,7 +12627,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		 */
 		if (con->contype == CONSTRAINT_NOTNULL)
 		{
-			tuple = findNotNullConstraint(childrel, colname);
+			tuple = findNotNullConstraint(childrelid, colname);
 			if (!HeapTupleIsValid(tuple))
 				elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\" of relation %u",
 					 colname, RelationGetRelid(childrel));
@@ -12851,7 +12771,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 				HeapTuple	contup;
 				char	   *colName = lfirst(lc);
 
-				contup = findNotNullConstraint(childrel, colName);
+				contup = findNotNullConstraint(childrelid, colName);
 				if (contup == NULL)
 					elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\", relation \"%s\"",
 						 colName, RelationGetRelationName(childrel));
@@ -15710,7 +15630,8 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 			 * already had its inhcount incremented earlier.
 			 */
 			CommandCounterIncrement();
-			AdjustNotNullInheritance(child_rel, childattnums, 1);
+			AdjustNotNullInheritance(RelationGetRelid(child_rel),
+									 childattnums, 1);
 		}
 	}
 
@@ -15914,7 +15835,7 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel)
 			{
 				HeapTuple	contup;
 
-				contup = findNotNullConstraintAttnum(parent_rel,
+				contup = findNotNullConstraintAttnum(RelationGetRelid(parent_rel),
 													 attribute->attnum);
 				if (!((Form_pg_constraint) GETSTRUCT(contup))->connoinherit)
 					ereport(ERROR,
@@ -16218,7 +16139,7 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 			 * already had its inhcount decremented earlier.
 			 */
 			CommandCounterIncrement();
-			AdjustNotNullInheritance(rel, childattnums, -1);
+			AdjustNotNullInheritance(RelationGetRelid(rel), childattnums, -1);
 		}
 	}
 
