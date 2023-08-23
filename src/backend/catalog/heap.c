@@ -2522,15 +2522,16 @@ AddRelationNewConstraints(Relation rel,
 			AttrNumber	colnum;
 			char	   *nnname;
 
-			/*
-			 * If the column already has a not-null constraint, we only need
-			 * to update its catalog status depending on what is caller
-			 * requesting.
-			 */
+			/* Determine which column to modify */
 			colnum = get_attnum(RelationGetRelid(rel), cdef->colname);
 			if (colnum == InvalidAttrNumber)	/* shouldn't happen */
 				elog(ERROR, "cache lookup failed for attribute \"%s\" of relation %u",
 					 cdef->colname, RelationGetRelid(rel));
+
+			/*
+			 * If the column already has a not-null constraint, we need only
+			 * update its catalog status and we're done.
+			 */
 			if (AdjustNotNullInheritance1(rel, colnum, cdef->inhcount))
 				continue;
 
