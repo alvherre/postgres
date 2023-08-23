@@ -2783,10 +2783,19 @@ List *
 AddRelationNotNullConstraints(Relation rel, List *constraints,
 							  List *old_notnulls)
 {
-	List	   *nnnames = NIL;
-	List	   *givennames = NIL;
+	List	   *givennames;
+	List	   *nnnames;
 	List	   *nncols = NIL;
 	ListCell   *lc;
+
+	/*
+	 * We track two lists of names: nnnames keeps all the constraint names,
+	 * givennames tracks user-generated names.  The distinction is important,
+	 * because we must raise error for user-generated name conflicts, but for
+	 * system-generated name conflicts we just generate another.
+	 */
+	nnnames = NIL;
+	givennames = NIL;
 
 	/*
 	 * First, create all not-null constraints that are directly specified by
