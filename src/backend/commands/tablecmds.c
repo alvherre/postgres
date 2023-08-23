@@ -12482,7 +12482,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		return conobj;
 	}
 
-	/* Don't drop inherited constraints */
+	/* But other than the above, don't drop inherited constraints */
 	if (con->coninhcount > 0 && !recursing)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -12759,6 +12759,10 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			/*
 			 * If the child constraint has other definition sources, just
 			 * decrement its inheritance count; if not, recurse to delete it.
+			 *
+			 * XXX this is at odds with the decision we take elsewhere of
+			 * leaving NOT NULL constraint defined as 'islocal' when a PK is
+			 * deleted from its parent table.
 			 */
 			if (childcon->coninhcount == 1 && !childcon->conislocal)
 			{
