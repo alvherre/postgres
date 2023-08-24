@@ -2184,6 +2184,14 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
 (4 rows)
 
 drop table inh_parent, inh_child1, inh_child2, inh_grandchld;
+-- a PK in parent must have a not-null in child that it can mark inherited
+create table inh_parent (a int primary key);
+create table inh_child (a int primary key);
+alter table inh_child inherit inh_parent;		-- nope
+ERROR:  column "a" in child table must be marked NOT NULL
+alter table inh_child alter a set not null;
+alter table inh_child inherit inh_parent;		-- now it works
+drop table inh_parent, inh_child;
 --
 -- test multi inheritance tree
 --
