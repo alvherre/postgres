@@ -9347,7 +9347,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	}
 
 	/* At this point we must have a locked-down name to use */
-	/* Assert(constr->conname != NULL); */
+	Assert(newcons == NIL || constr->conname != NULL);
 
 	/* Advance command counter in case same table is visited multiple times */
 	CommandCounterIncrement();
