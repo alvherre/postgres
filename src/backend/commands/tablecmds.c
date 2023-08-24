@@ -622,6 +622,8 @@ static void ComputePartitionAttrs(ParseState *pstate, Relation rel, List *partPa
 static void CreateInheritance(Relation child_rel, Relation parent_rel);
 static void RemoveInheritance(Relation child_rel, Relation parent_rel,
 							  bool expect_detached);
+static void ATInheritAdjustNotNulls(Relation parent_rel, Relation child_rel,
+									int inhcount);
 static ObjectAddress ATExecAttachPartition(List **wqueue, Relation rel,
 										   PartitionCmd *cmd,
 										   AlterTableUtilityContext *context);
@@ -12368,44 +12370,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	con = (Form_pg_constraint) GETSTRUCT(constraintTup);
 	constrName = NameStr(con->conname);
 
-	/*
-	 * If the constraint has more than one definition source, we mustn't
-	 * remove it, just modify its catalogued status: if we're recursing,
-	 * decrement its inheritance count by one, and if we're not recursing, set
-	 * conislocal false.
-	 */
-	if ((con->conislocal && con->coninhcount > 0) ||
-		con->coninhcount > 1)
-	{
-		HeapTuple	copytup;
-
-		/* make a copy we can scribble on */
-		copytup = heap_copytuple(constraintTup);
-		con = (Form_pg_constraint) GETSTRUCT(copytup);
-		if (recursing)
-		{
-			if (con->coninhcount <= 0)	/* shouldn't happen */
-				elog(ERROR, "attempted recursive deletion of local constraint \"%s\" on relation %u",
-					 NameStr(con->conname), RelationGetRelid(rel));
-			con->coninhcount -= 1;
-		}
-		else
-		{
-			if (!con->conislocal)	/* shouldn't happen */
-				elog(ERROR, "attempted non-recursive deletion of non-local constraint \"%s\" on relation %u",
-					 NameStr(con->conname), RelationGetRelid(rel));
-			con->conislocal = false;
-		}
-
-		CatalogTupleUpdate(conrel, &copytup->t_self, copytup);
-
-		table_close(conrel, RowExclusiveLock);
-
-		ObjectAddressSet(conobj, ConstraintRelationId, con->oid);
-		return conobj;
-	}
-
-	/* But other than the above, don't drop inherited constraints */
+	/* Don't allow drop of inherited constraints */
 	if (con->coninhcount > 0 && !recursing)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -12682,10 +12647,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			/*
 			 * If the child constraint has other definition sources, just
 			 * decrement its inheritance count; if not, recurse to delete it.
-			 *
-			 * XXX this is at odds with the decision we take elsewhere of
-			 * leaving NOT NULL constraint defined as 'islocal' when a PK is
-			 * deleted from its parent table.
 			 */
 			if (childcon->coninhcount == 1 && !childcon->conislocal)
 			{
@@ -12742,8 +12703,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		List	   *pkready = NIL;
 
 		/*
-		 * XXX note that because primary keys are always marked as NO INHERIT,
-		 * we don't have a list of children yet, so obtain one now.
+		 * Because primary keys are always marked as NO INHERIT, we don't have
+		 * a list of children yet, so obtain one now.
 		 */
 		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
 
@@ -15599,44 +15560,11 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	CreateInheritance(child_rel, parent_rel);
 
 	/*
-	 * If parent_rel has a primary key, then child_rel has constraints (either
-	 * NOT NULL or PRIMARY KEY) that make these columns as non nullable.  Make
-	 * those constraints as inherited.
-	 *
-	 * XXX Split this out to its own routine?
+	 * If parent_rel has a primary key, then child_rel has not-null constraints
+	 * that make these columns as non nullable.  Make those constraints as
+	 * inherited.
 	 */
-	if (parent_rel->rd_rel->relhasindex)
-	{
-		Bitmapset  *pkattnos;
-
-		pkattnos = RelationGetIndexAttrBitmap(parent_rel,
-											  INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		if (pkattnos != NULL)
-		{
-			Bitmapset  *childattnums = NULL;
-			AttrMap    *attmap;
-			int			i;
-
-			attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
-										   RelationGetDescr(child_rel),
-										   true);
-			i = -1;
-			while ((i = bms_next_member(pkattnos, i)) >= 0)
-			{
-				childattnums = bms_add_member(childattnums,
-											  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
-			}
-
-			/*
-			 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
-			 * the parent: the relevant not-null constraint in the child
-			 * already had its inhcount incremented earlier.
-			 */
-			CommandCounterIncrement();
-			AdjustNotNullInheritance(RelationGetRelid(child_rel),
-									 childattnums, 1);
-		}
-	}
+	ATInheritAdjustNotNulls(parent_rel, child_rel, 1);
 
 	ObjectAddressSet(address, RelationRelationId,
 					 RelationGetRelid(parent_rel));
@@ -16108,43 +16036,11 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 	RemoveInheritance(rel, parent_rel, false);
 
 	/*
-	 * If parent_rel has a primary key, then child_rel has NOT NULL
+	 * If parent_rel has a primary key, then child_rel has not-null
 	 * constraints that make these columns as non nullable.  Mark those
-	 * constraints as no longer inherited by this parent.  They are not
-	 * dropped, though: if they turn out to be no longer inherited, they are
-	 * marked as local.
+	 * constraints as no longer inherited by this parent.
 	 */
-	if (parent_rel->rd_rel->relhasindex)
-	{
-		Bitmapset  *pkattnos;
-
-		pkattnos = RelationGetIndexAttrBitmap(parent_rel,
-											  INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		if (pkattnos != NULL)
-		{
-			Bitmapset  *childattnums = NULL;
-			AttrMap    *attmap;
-			int			i;
-
-			attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
-										   RelationGetDescr(rel), true);
-
-			i = -1;
-			while ((i = bms_next_member(pkattnos, i)) >= 0)
-			{
-				childattnums = bms_add_member(childattnums,
-											  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
-			}
-
-			/*
-			 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
-			 * the parent: the relevant not-null constraint in the child
-			 * already had its inhcount decremented earlier.
-			 */
-			CommandCounterIncrement();
-			AdjustNotNullInheritance(RelationGetRelid(rel), childattnums, -1);
-		}
-	}
+	ATInheritAdjustNotNulls(parent_rel, rel, -1);
 
 	/*
 	 * If the parent has a primary key, then we decrement counts for all NOT
@@ -16437,6 +16333,54 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	InvokeObjectPostAlterHookArg(InheritsRelationId,
 								 RelationGetRelid(child_rel), 0,
 								 RelationGetRelid(parent_rel), false);
+}
+
+/*
+ * Adjust coninhcount of not-null constraints upwards or downwards when a
+ * table is marked as inheriting or no longer doing so a table with a primary
+ * key.
+ *
+ * Note: these constraints are not dropped, even if their inhcount goes to zero
+ * and conislocal is false.  Instead we mark the constraints as locally defined.
+ * This is seen as more useful behavior, with no downsides.  The user can always
+ * drop them afterwards.
+ */
+static void
+ATInheritAdjustNotNulls(Relation parent_rel, Relation child_rel, int inhcount)
+{
+	Bitmapset  *pkattnos;
+
+	/* Quick exit when parent has no PK */
+	if (!parent_rel->rd_rel->relhasindex)
+		return;
+
+	pkattnos = RelationGetIndexAttrBitmap(parent_rel,
+										  INDEX_ATTR_BITMAP_PRIMARY_KEY);
+	if (pkattnos != NULL)
+	{
+		Bitmapset  *childattnums = NULL;
+		AttrMap    *attmap;
+		int			i;
+
+		attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
+									   RelationGetDescr(child_rel), true);
+
+		i = -1;
+		while ((i = bms_next_member(pkattnos, i)) >= 0)
+		{
+			childattnums = bms_add_member(childattnums,
+										  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
+		}
+
+		/*
+		 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
+		 * the parent: the relevant not-null constraint in the child
+		 * already had its inhcount decremented earlier.
+		 */
+		CommandCounterIncrement();
+		AdjustNotNullInheritance(RelationGetRelid(child_rel), childattnums,
+								 inhcount);
+	}
 }
 
 /*
