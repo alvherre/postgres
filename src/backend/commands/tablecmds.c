@@ -8944,7 +8944,7 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 
 		nnconstr = makeNode(Constraint);
 		nnconstr->contype = CONSTR_NOTNULL;
-		nnconstr->conname = NULL;	/* FIXME use PK name? */
+		nnconstr->conname = NULL;	/* XXX use PK name? */
 		nnconstr->inhcount = 1;
 		nnconstr->deferrable = false;
 		nnconstr->initdeferred = false;
@@ -15928,16 +15928,15 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 								NameStr(parent_con->conname))));
 
 			/*
-			 * If the child constraint is "no inherit" then cannot merge.
+			 * If the CHECK child constraint is "no inherit" then cannot
+			 * merge.
 			 *
 			 * This is not desirable for not-null constraints, mostly because
 			 * it breaks our pg_upgrade strategy, but it also makes sense on
 			 * its own: if a child has its own not-null constraint and then
 			 * acquires a parent with the same constraint, then we start to
 			 * enforce that constraint for all the descendants of that child
-			 * too, if any.  XXX since pg_upgrade only needs this for
-			 * inheritance and not partitioning, maybe we should also restrict
-			 * this behavior to that case?
+			 * too, if any.
 			 */
 			if (child_con->contype == CONSTRAINT_CHECK &&
 				child_con->connoinherit)
