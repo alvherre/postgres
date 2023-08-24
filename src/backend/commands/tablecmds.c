@@ -9385,10 +9385,12 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 				 errmsg("constraint must be added to child tables too")));
 
-	/* XXX find cleaner way to do this perhaps? */
+	/*
+	 * The constraint must appear as inherited in children, so create a
+	 * modified constraint object to use.
+	 */
 	constr = copyObject(constr);
 	constr->inhcount = 1;
-
 	foreach(child, children)
 	{
 		Oid			childrelid = lfirst_oid(child);
