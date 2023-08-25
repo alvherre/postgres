@@ -690,7 +690,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 					column->is_not_null = true;
 					saw_nullable = true;
 
-					constraint->colname = column->colname;
+					constraint->keys = list_make1(makeString(column->colname));
 					cxt->nnconstraints = lappend(cxt->nnconstraints, constraint);
 
 					/* Don't need this anymore, if we had it */
@@ -880,7 +880,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 		notnull->deferrable = false;
 		notnull->initdeferred = false;
 		notnull->location = -1;
-		notnull->colname = column->colname;
+		notnull->keys = list_make1(makeString(column->colname));
 		notnull->skip_validation = false;
 		notnull->initially_valid = true;
 
@@ -1235,7 +1235,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 			notnull->deferrable = false;
 			notnull->initdeferred = false;
 			notnull->location = -1;
-			notnull->colname = pstrdup(NameStr(attForm->attname));
+			notnull->keys = list_make1(makeString(pstrdup(NameStr(attForm->attname))));
 			notnull->skip_validation = false;
 			notnull->initially_valid = true;
 

@@ -2607,7 +2607,6 @@ typedef struct Constraint
 	char		generated_when; /* ALWAYS or BY DEFAULT */
 
 	/* Fields used for "raw" NOT NULL constraints: */
-	char	   *colname;		/* column it applies to */
 	int			inhcount;		/* initial inheritance count to apply */
 
 	/* Fields used for unique constraints (UNIQUE and PRIMARY KEY): */

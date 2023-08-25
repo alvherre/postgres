@@ -394,9 +394,9 @@ _readConstraint(void)
 			break;
 
 		case CONSTR_NOTNULL:
-			READ_BOOL_FIELD(is_no_inherit);
-			READ_STRING_FIELD(colname);
+			READ_NODE_FIELD(keys);
 			READ_INT_FIELD(inhcount);
+			READ_BOOL_FIELD(is_no_inherit);
 			READ_BOOL_FIELD(skip_validation);
 			READ_BOOL_FIELD(initially_valid);
 			break;

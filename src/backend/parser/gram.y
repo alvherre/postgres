@@ -4088,7 +4088,7 @@ ConstraintElem:
 
 					n->contype = CONSTR_NOTNULL;
 					n->location = @1;
-					n->colname = $3;
+					n->keys = list_make1(makeString($3));
 					/* no NOT VALID support yet */
 					processCASbits($4, @4, "NOT NULL",
 								   NULL, NULL, NULL,

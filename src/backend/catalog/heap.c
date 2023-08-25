@@ -2523,10 +2523,10 @@ AddRelationNewConstraints(Relation rel,
 			char	   *nnname;
 
 			/* Determine which column to modify */
-			colnum = get_attnum(RelationGetRelid(rel), cdef->colname);
+			colnum = get_attnum(RelationGetRelid(rel), strVal(linitial(cdef->keys)));
 			if (colnum == InvalidAttrNumber)	/* shouldn't happen */
 				elog(ERROR, "cache lookup failed for attribute \"%s\" of relation %u",
-					 cdef->colname, RelationGetRelid(rel));
+					 strVal(linitial(cdef->keys)), RelationGetRelid(rel));
 
 			/*
 			 * If the column already has a not-null constraint, we need only
@@ -2553,7 +2553,7 @@ AddRelationNewConstraints(Relation rel,
 			}
 			else
 				nnname = ChooseConstraintName(RelationGetRelationName(rel),
-											  cdef->colname,
+											  strVal(linitial(cdef->keys)),
 											  "not_null",
 											  RelationGetNamespace(rel),
 											  nnnames);
@@ -2815,7 +2815,10 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		int			inhcount = 0;
 		ListCell   *lc2;
 
-		attnum = get_attnum(RelationGetRelid(rel), constr->colname);
+		Assert(constr->contype == CONSTR_NOTNULL);
+
+		attnum = get_attnum(RelationGetRelid(rel),
+							strVal(linitial(constr->keys)));
 
 		/*
 		 * Search in the list of inherited constraints for any entries on the

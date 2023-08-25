@@ -833,7 +833,8 @@ RelationGetNotNullConstraints(Oid relid, bool cooked)
 			constr->deferrable = false;
 			constr->initdeferred = false;
 			constr->location = -1;
-			constr->colname = get_attname(relid, colnum, false);
+			constr->keys = list_make1(makeString(get_attname(relid, colnum,
+															 false)));
 			constr->skip_validation = false;
 			constr->initially_valid = true;
 			notnulls = lappend(notnulls, constr);

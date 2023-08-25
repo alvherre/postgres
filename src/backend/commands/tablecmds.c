@@ -7787,7 +7787,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	constraint->deferrable = false;
 	constraint->initdeferred = false;
 	constraint->location = -1;
-	constraint->colname = colName;
+	constraint->keys = list_make1(makeString(colName));
 	constraint->is_no_inherit = is_no_inherit;
 	constraint->inhcount = recursing ? 1 : 0;
 	constraint->skip_validation = false;
@@ -8949,7 +8949,7 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		nnconstr->deferrable = false;
 		nnconstr->initdeferred = false;
 		nnconstr->location = -1;
-		nnconstr->colname = elem->name;
+		nnconstr->keys = list_make1(makeString(elem->name));
 		nnconstr->skip_validation = false;
 		nnconstr->initially_valid = true;
 
