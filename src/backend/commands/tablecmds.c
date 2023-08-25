@@ -16374,7 +16374,7 @@ ATInheritAdjustNotNulls(Relation parent_rel, Relation child_rel, int inhcount)
 		/*
 		 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in the
 		 * parent: the relevant not-null constraint in the child already had
-		 * its inhcount decremented earlier.
+		 * its inhcount modified earlier.
 		 */
 		CommandCounterIncrement();
 		AdjustNotNullInheritance(RelationGetRelid(child_rel), childattnums,
