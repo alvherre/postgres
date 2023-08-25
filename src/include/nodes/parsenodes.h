@@ -2612,7 +2612,7 @@ typedef struct Constraint
 	/* Fields used for unique constraints (UNIQUE and PRIMARY KEY): */
 	bool		nulls_not_distinct; /* null treatment for UNIQUE constraints */
 	List	   *keys;			/* String nodes naming referenced key
-								 * column(s) */
+								 * column(s); also used for NOT NULL */
 	List	   *including;		/* String nodes naming referenced nonkey
 								 * column(s) */
 
