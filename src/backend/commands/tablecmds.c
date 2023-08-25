@@ -15560,9 +15560,9 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	CreateInheritance(child_rel, parent_rel);
 
 	/*
-	 * If parent_rel has a primary key, then child_rel has not-null constraints
-	 * that make these columns as non nullable.  Make those constraints as
-	 * inherited.
+	 * If parent_rel has a primary key, then child_rel has not-null
+	 * constraints that make these columns as non nullable.  Make those
+	 * constraints as inherited.
 	 */
 	ATInheritAdjustNotNulls(parent_rel, child_rel, 1);
 
@@ -16372,9 +16372,9 @@ ATInheritAdjustNotNulls(Relation parent_rel, Relation child_rel, int inhcount)
 		}
 
 		/*
-		 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in
-		 * the parent: the relevant not-null constraint in the child
-		 * already had its inhcount decremented earlier.
+		 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in the
+		 * parent: the relevant not-null constraint in the child already had
+		 * its inhcount decremented earlier.
 		 */
 		CommandCounterIncrement();
 		AdjustNotNullInheritance(RelationGetRelid(child_rel), childattnums,
