@@ -116,7 +116,7 @@
  * frontend during startup.)  The above design guarantees that notifies from
  * other backends will never be missed by ignoring self-notifies.
  *
- * The amount of shared memory used for notify management (NUM_NOTIFY_BUFFERS)
+ * The amount of shared memory used for notify management (notify_buffers)
  * can be varied without affecting anything but performance.  The maximum
  * amount of notification data that can be queued at one time is determined
  * by max_notify_queue_pages GUC.
@@ -234,7 +234,7 @@ typedef struct QueuePosition
  *
  * Resist the temptation to make this really large.  While that would save
  * work in some places, it would add cost in others.  In particular, this
- * should likely be less than NUM_NOTIFY_BUFFERS, to ensure that backends
+ * should likely be less than notify_buffers, to ensure that backends
  * catch up before the pages they'll need to read fall out of SLRU cache.
  */
 #define QUEUE_CLEANUP_DELAY 4
@@ -492,7 +492,7 @@ AsyncShmemSize(void)
 	size = mul_size(MaxBackends + 1, sizeof(QueueBackendStatus));
 	size = add_size(size, offsetof(AsyncQueueControl, backend));
 
-	size = add_size(size, SimpleLruShmemSize(NUM_NOTIFY_BUFFERS, 0));
+	size = add_size(size, SimpleLruShmemSize(notify_buffers, 0));
 
 	return size;
 }
@@ -541,7 +541,7 @@ AsyncShmemInit(void)
 	 * names are used in order to avoid wraparound.
 	 */
 	NotifyCtl->PagePrecedes = asyncQueuePagePrecedes;
-	SimpleLruInit(NotifyCtl, "Notify", NUM_NOTIFY_BUFFERS, 0,
+	SimpleLruInit(NotifyCtl, "Notify", notify_buffers, 0,
 				  NotifySLRULock, "pg_notify", LWTRANCHE_NOTIFY_BUFFER,
 				  SYNC_HANDLER_NONE, true);
 

@@ -163,4 +163,6 @@ extern void assign_wal_consistency_checking(const char *newval, void *extra);
 extern bool check_wal_segment_size(int *newval, void **extra, GucSource source);
 extern void assign_wal_sync_method(int new_wal_sync_method, void *extra);
 
+extern const char *show_xact_buffers(void);
+extern const char *show_commit_ts_buffers(void);
 #endif							/* GUC_HOOKS_H */
