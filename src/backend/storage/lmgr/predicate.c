@@ -208,6 +208,7 @@
 #include "storage/predicate_internals.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "utils/guc_hooks.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 
@@ -5011,4 +5012,13 @@ AttachSerializableXact(SerializableXactHandle handle)
 	MySerializableXact = (SERIALIZABLEXACT *) handle;
 	if (MySerializableXact != InvalidSerializableXact)
 		CreateLocalPredicateLockHash();
+}
+
+/*
+ * GUC check_hook for serial_buffers
+ */
+bool
+check_serial_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("serial_buffers", newval);
 }

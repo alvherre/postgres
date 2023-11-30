@@ -148,6 +148,7 @@
 #include "storage/sinval.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/guc_hooks.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/snapmgr.h"
@@ -2377,4 +2378,13 @@ ClearPendingActionsAndNotifies(void)
 	 */
 	pendingActions = NULL;
 	pendingNotifies = NULL;
+}
+
+/*
+ * GUC check_hook for notify_buffers
+ */
+bool
+check_notify_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("notify_buffers", newval);
 }

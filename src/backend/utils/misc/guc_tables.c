@@ -2329,7 +2329,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&multixact_offsets_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, NULL
+		check_multixact_offsets_buffers, NULL, NULL
 	},
 
 	{
@@ -2340,7 +2340,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&multixact_members_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, NULL
+		check_multixact_members_buffers, NULL, NULL
 	},
 
 	{
@@ -2351,7 +2351,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&subtrans_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, NULL
+		check_subtrans_buffers, NULL, NULL
 	},
 	{
 		{"notify_buffers", PGC_POSTMASTER, RESOURCES_MEM,
@@ -2361,7 +2361,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&notify_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, NULL
+		check_notify_buffers, NULL, NULL
 	},
 
 	{
@@ -2372,7 +2372,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&serial_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, NULL
+		check_serial_buffers, NULL, NULL
 	},
 
 	{
@@ -2383,7 +2383,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&xact_buffers,
 		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, show_xact_buffers
+		check_xact_buffers, NULL, show_xact_buffers
 	},
 
 	{
@@ -2394,7 +2394,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&commit_ts_buffers,
 		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		NULL, NULL, show_commit_ts_buffers
+		check_commit_ts_buffers, NULL, show_commit_ts_buffers
 	},
 
 	{

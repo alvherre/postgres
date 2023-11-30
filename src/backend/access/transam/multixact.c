@@ -88,6 +88,7 @@
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "utils/builtins.h"
+#include "utils/guc_hooks.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 
@@ -3420,4 +3421,22 @@ int
 multixactmemberssyncfiletag(const FileTag *ftag, char *path)
 {
 	return SlruSyncFileTag(MultiXactMemberCtl, ftag, path);
+}
+
+/*
+ * GUC check_hook for multixact_offsets_buffers
+ */
+bool
+check_multixact_offsets_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("multixact_offsets_buffers", newval);
+}
+
+/*
+ * GUC check_hook for multixact_members_buffers
+ */
+bool
+check_multixact_members_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("multixact_members_buffers", newval);
 }

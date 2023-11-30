@@ -18,6 +18,14 @@
 #include "storage/sync.h"
 
 /*
+ * SLRU bank size for slotno hash banks.  Limit the bank size to 16 because we
+ * perform sequential search within a bank (while looking for a target page or
+ * while doing victim buffer search) and if we keep this size big then it may
+ * affect the performance.
+ */
+#define SLRU_BANK_SIZE		16
+
+/*
  * To avoid overflowing internal arithmetic and the size_t data type, the
  * number of buffers should not exceed this number.
  */
@@ -147,6 +155,12 @@ typedef struct SlruCtlData
 	 * it's always the same, it doesn't need to be in shared memory.
 	 */
 	char		Dir[64];
+
+	/*
+	 * Mask for slotno banks, considering 1GB SLRU buffer pool size and the
+	 * SLRU_BANK_SIZE bits16 should be sufficient for the bank mask.
+	 */
+	bits16		bank_mask;
 } SlruCtlData;
 
 typedef SlruCtlData *SlruCtl;
@@ -184,5 +198,6 @@ extern bool SlruScanDirCbReportPresence(SlruCtl ctl, char *filename,
 										int64 segpage, void *data);
 extern bool SlruScanDirCbDeleteAll(SlruCtl ctl, char *filename, int64 segpage,
 								   void *data);
+extern bool check_slru_buffers(const char *name, int *newval);
 
 #endif							/* SLRU_H */

@@ -130,6 +130,17 @@ extern bool check_ssl(bool *newval, void **extra, GucSource source);
 extern bool check_stage_log_stats(bool *newval, void **extra, GucSource source);
 extern bool check_synchronous_standby_names(char **newval, void **extra,
 											GucSource source);
+extern bool check_multixact_offsets_buffers(int *newval, void **extra,
+											GucSource source);
+extern bool check_multixact_members_buffers(int *newval, void **extra,
+											GucSource source);
+extern bool check_subtrans_buffers(int *newval, void **extra,
+								   GucSource source);
+extern bool check_notify_buffers(int *newval, void **extra, GucSource source);
+extern bool check_serial_buffers(int *newval, void **extra, GucSource source);
+extern bool check_xact_buffers(int *newval, void **extra, GucSource source);
+extern bool check_commit_ts_buffers(int *newval, void **extra,
+									GucSource source);
 extern void assign_synchronous_standby_names(const char *newval, void *extra);
 extern void assign_synchronous_commit(int newval, void *extra);
 extern void assign_syslog_facility(int newval, void *extra);

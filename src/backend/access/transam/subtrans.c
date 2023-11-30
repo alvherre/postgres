@@ -33,6 +33,7 @@
 #include "access/transam.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#include "utils/guc_hooks.h"
 #include "utils/snapmgr.h"
 
 
@@ -382,4 +383,13 @@ SubTransPagePrecedes(int64 page1, int64 page2)
 
 	return (TransactionIdPrecedes(xid1, xid2) &&
 			TransactionIdPrecedes(xid1, xid2 + SUBTRANS_XACTS_PER_PAGE - 1));
+}
+
+/*
+ * GUC check_hook for subtrans_buffers
+ */
+bool
+check_subtrans_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("subtrans_buffers", newval);
 }

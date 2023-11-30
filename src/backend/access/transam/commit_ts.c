@@ -33,6 +33,7 @@
 #include "pg_trace.h"
 #include "storage/shmem.h"
 #include "utils/builtins.h"
+#include "utils/guc_hooks.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
 
@@ -1026,4 +1027,13 @@ int
 committssyncfiletag(const FileTag *ftag, char *path)
 {
 	return SlruSyncFileTag(CommitTsCtl, ftag, path);
+}
+
+/*
+ * GUC check_hook for commit_ts_buffers
+ */
+bool
+check_commit_ts_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("commit_ts_buffers", newval);
 }

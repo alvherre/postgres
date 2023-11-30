@@ -43,6 +43,7 @@
 #include "pgstat.h"
 #include "storage/proc.h"
 #include "storage/sync.h"
+#include "utils/guc_hooks.h"
 
 /*
  * Defines for CLOG page sizes.  A page is the same BLCKSZ as is used
@@ -1028,4 +1029,13 @@ int
 clogsyncfiletag(const FileTag *ftag, char *path)
 {
 	return SlruSyncFileTag(XactCtl, ftag, path);
+}
+
+/*
+ * GUC check_hook for xact_buffers
+ */
+bool
+check_xact_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("xact_buffers", newval);
 }
