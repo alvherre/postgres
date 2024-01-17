@@ -451,38 +451,38 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 
 	/*
 	 * The underlying SLRU is using bank-wise lock so it is possible that here
-	 * we might get requesters who are contending on different SLRU-bank locks.
-	 * But in the group, we try to only add the requesters who want to update
-	 * the same page i.e. they would be requesting for the same SLRU-bank lock
-	 * as well.  The main reason for now allowing requesters of different pages
-	 * together is 1) Once the leader acquires the lock they don't need to
-	 * fetch multiple pages and do multiple I/O under the same lock 2) The
-	 * leader need not switch the SLRU-bank lock if the different pages are
-	 * from different SLRU banks 3) And the most important reason is that most
-	 * of the time the contention will occur in high concurrent OLTP workload
-	 * is going on and at that time most of the transactions would be generated
-	 * during the same time and most of them would fall in same clog page as
-	 * each page can hold status of 32k transactions.  However, there is an
-	 * exception where in some extreme conditions we might get different page
-	 * requests added in the same group but we have handled that by switching
-	 * the bank lock, although that is not the most performant way that's not
-	 * the common case either so we are fine with that.
+	 * we might get requesters who are contending on different SLRU-bank
+	 * locks. But in the group, we try to only add the requesters who want to
+	 * update the same page i.e. they would be requesting for the same
+	 * SLRU-bank lock as well.  The main reason for now allowing requesters of
+	 * different pages together is 1) Once the leader acquires the lock they
+	 * don't need to fetch multiple pages and do multiple I/O under the same
+	 * lock 2) The leader need not switch the SLRU-bank lock if the different
+	 * pages are from different SLRU banks 3) And the most important reason is
+	 * that most of the time the contention will occur in high concurrent OLTP
+	 * workload is going on and at that time most of the transactions would be
+	 * generated during the same time and most of them would fall in same clog
+	 * page as each page can hold status of 32k transactions.  However, there
+	 * is an exception where in some extreme conditions we might get different
+	 * page requests added in the same group but we have handled that by
+	 * switching the bank lock, although that is not the most performant way
+	 * that's not the common case either so we are fine with that.
 	 *
 	 * Also to be noted that unless the leader of the current group does not
 	 * get the lock we don't clear the 'procglobal->clogGroupFirst' that means
 	 * concurrently if we get the requesters for different SLRU pages then
 	 * those will have to go for the normal update instead of group update and
 	 * that's fine as that is not the common case.  As soon as the leader of
-	 * the current group gets the lock for the required bank that time we clear
-	 * this value and now other requesters (which might want to update a
+	 * the current group gets the lock for the required bank that time we
+	 * clear this value and now other requesters (which might want to update a
 	 * different page and that might fall into the different bank as well) are
 	 * allowed to form a new group as the first group is now detached.  So if
 	 * the new group has a request for a different SLRU-bank lock then the
-	 * group leader of this group might also get the lock while the first group
-	 * is performing the update and these two groups can perform the group
-	 * update concurrently but it is completely safe as these two leaders are
-	 * operating on completely different SLRU pages and they both are holding
-	 * their respective SLRU locks.
+	 * group leader of this group might also get the lock while the first
+	 * group is performing the update and these two groups can perform the
+	 * group update concurrently but it is completely safe as these two
+	 * leaders are operating on completely different SLRU pages and they both
+	 * are holding their respective SLRU locks.
 	 */
 	nextidx = pg_atomic_read_u32(&procglobal->clogGroupFirst);
 

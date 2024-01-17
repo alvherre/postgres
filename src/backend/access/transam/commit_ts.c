@@ -836,7 +836,7 @@ void
 ExtendCommitTs(TransactionId newestXact)
 {
 	int64		pageno;
-	LWLock     *lock;
+	LWLock	   *lock;
 
 	/*
 	 * Nothing to do if module not enabled.  Note we do an unlocked read of
@@ -1018,7 +1018,7 @@ commit_ts_redo(XLogReaderState *record)
 	{
 		int64		pageno;
 		int			slotno;
-		LWLock     *lock;
+		LWLock	   *lock;
 
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 

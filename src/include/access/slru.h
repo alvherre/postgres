@@ -193,7 +193,7 @@ typedef SlruCtlData *SlruCtl;
 static inline LWLock *
 SimpleLruGetBankLock(SlruCtl ctl, int64 pageno)
 {
-	int		banklockno = (pageno & ctl->bank_mask) % SLRU_MAX_BANKLOCKS;
+	int			banklockno = (pageno & ctl->bank_mask) % SLRU_MAX_BANKLOCKS;
 
 	return &(ctl->shared->bank_locks[banklockno].lock);
 }

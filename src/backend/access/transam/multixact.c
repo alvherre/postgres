@@ -2056,7 +2056,7 @@ static void
 MaybeExtendOffsetSlru(void)
 {
 	int64		pageno;
-	LWLock     *lock;
+	LWLock	   *lock;
 
 	pageno = MultiXactIdToOffsetPage(MultiXactState->nextMXact);
 	lock = SimpleLruGetBankLock(MultiXactOffsetCtl, pageno);
@@ -2491,7 +2491,7 @@ static void
 ExtendMultiXactOffset(MultiXactId multi)
 {
 	int64		pageno;
-	LWLock     *lock;
+	LWLock	   *lock;
 
 	/*
 	 * No work except at first MultiXactId of a page.  But beware: just after
@@ -2542,7 +2542,7 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 		if (flagsoff == 0 && flagsbit == 0)
 		{
 			int64		pageno;
-			LWLock     *lock;
+			LWLock	   *lock;
 
 			pageno = MXOffsetToMemberPage(offset);
 			lock = SimpleLruGetBankLock(MultiXactMemberCtl, pageno);
@@ -3332,7 +3332,7 @@ multixact_redo(XLogReaderState *record)
 	{
 		int64		pageno;
 		int			slotno;
-		LWLock     *lock;
+		LWLock	   *lock;
 
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 
@@ -3349,7 +3349,7 @@ multixact_redo(XLogReaderState *record)
 	{
 		int64		pageno;
 		int			slotno;
-		LWLock     *lock;
+		LWLock	   *lock;
 
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 

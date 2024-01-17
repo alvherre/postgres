@@ -274,8 +274,8 @@ StartupSUBTRANS(TransactionId oldestActiveXID)
 	FullTransactionId nextXid;
 	int64		startPage;
 	int64		endPage;
-	LWLock     *prevlock;
-	LWLock     *lock;
+	LWLock	   *prevlock;
+	LWLock	   *lock;
 
 	/*
 	 * Since we don't expect pg_subtrans to be valid across crashes, we
@@ -357,7 +357,7 @@ void
 ExtendSUBTRANS(TransactionId newestXact)
 {
 	int64		pageno;
-	LWLock     *lock;
+	LWLock	   *lock;
 
 	/*
 	 * No work except at first XID of a page.  But beware: just after
