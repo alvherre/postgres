@@ -809,7 +809,7 @@ SerialInit(void)
 	 */
 	SerialSlruCtl->PagePrecedes = SerialPagePrecedesLogically;
 	SimpleLruInit(SerialSlruCtl, "Serial",
-				  serial_buffers, 0, "pg_serial",
+				  serializable_buffers, 0, "pg_serial",
 				  LWTRANCHE_SERIAL_BUFFER, LWTRANCHE_SERIAL_SLRU,
 				  SYNC_HANDLER_NONE, false);
 #ifdef USE_ASSERT_CHECKING
@@ -833,6 +833,15 @@ SerialInit(void)
 		serialControl->headXid = InvalidTransactionId;
 		serialControl->tailXid = InvalidTransactionId;
 	}
+}
+
+/*
+ * GUC check_hook for serializable_buffers
+ */
+bool
+check_serial_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("serializable_buffers", newval);
 }
 
 /*
@@ -1351,7 +1360,7 @@ PredicateLockShmemSize(void)
 
 	/* Shared memory structures for SLRU tracking of old committed xids. */
 	size = add_size(size, sizeof(SerialControlData));
-	size = add_size(size, SimpleLruShmemSize(serial_buffers, 0));
+	size = add_size(size, SimpleLruShmemSize(serializable_buffers, 0));
 
 	return size;
 }
@@ -5014,13 +5023,4 @@ AttachSerializableXact(SerializableXactHandle handle)
 	MySerializableXact = (SERIALIZABLEXACT *) handle;
 	if (MySerializableXact != InvalidSerializableXact)
 		CreateLocalPredicateLockHash();
-}
-
-/*
- * GUC check_hook for serial_buffers
- */
-bool
-check_serial_buffers(int *newval, void **extra, GucSource source)
-{
-	return check_slru_buffers("serial_buffers", newval);
 }

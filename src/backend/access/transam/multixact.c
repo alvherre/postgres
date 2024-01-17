@@ -1946,6 +1946,24 @@ MultiXactShmemInit(void)
 }
 
 /*
+ * GUC check_hook for multixact_offsets_buffers
+ */
+bool
+check_multixact_offsets_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("multixact_offsets_buffers", newval);
+}
+
+/*
+ * GUC check_hook for multixact_members_buffers
+ */
+bool
+check_multixact_members_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("multixact_members_buffers", newval);
+}
+
+/*
  * This func must be called ONCE on system install.  It creates the initial
  * MultiXact segments.  (The MultiXacts directories are assumed to have been
  * created by initdb, and MultiXactShmemInit must have been called already.)
@@ -3496,22 +3514,4 @@ int
 multixactmemberssyncfiletag(const FileTag *ftag, char *path)
 {
 	return SlruSyncFileTag(MultiXactMemberCtl, ftag, path);
-}
-
-/*
- * GUC check_hook for multixact_offsets_buffers
- */
-bool
-check_multixact_offsets_buffers(int *newval, void **extra, GucSource source)
-{
-	return check_slru_buffers("multixact_offsets_buffers", newval);
-}
-
-/*
- * GUC check_hook for multixact_members_buffers
- */
-bool
-check_multixact_members_buffers(int *newval, void **extra, GucSource source)
-{
-	return check_slru_buffers("multixact_members_buffers", newval);
 }

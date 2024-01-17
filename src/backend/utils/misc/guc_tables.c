@@ -2322,19 +2322,19 @@ struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"multixact_offsets_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the number of shared memory buffers used for the MultiXact offset SLRU cache."),
+		{"commit_timestamp_buffers", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Sets the size of the dedicated buffer pool used for the commit timestamp cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
-		&multixact_offsets_buffers,
-		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		check_multixact_offsets_buffers, NULL, NULL
+		&commit_timestamp_buffers,
+		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
+		check_commit_ts_buffers, NULL, show_commit_ts_buffers
 	},
 
 	{
 		{"multixact_members_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the number of shared memory buffers used for the MultiXact member SLRU cache."),
+			gettext_noop("Sets the size of the dedicated buffer pool used for the MultiXact member cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
@@ -2344,18 +2344,19 @@ struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"subtrans_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the number of shared memory buffers used for the sub-transaction SLRU cache."),
+		{"multixact_offsets_buffers", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Sets the size of the dedicated buffer pool used for the MultiXact offset cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
-		&subtrans_buffers,
+		&multixact_offsets_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		check_subtrans_buffers, NULL, NULL
+		check_multixact_offsets_buffers, NULL, NULL
 	},
+
 	{
 		{"notify_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the number of shared memory buffers used for the NOTIFY message SLRU cache."),
+			gettext_noop("Sets the size of the dedicated buffer pool used for the LISTEN/NOTIFY message cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
@@ -2365,36 +2366,36 @@ struct config_int ConfigureNamesInt[] =
 	},
 
 	{
-		{"serial_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the number of shared memory buffers used for the serializable transaction SLRU cache."),
+		{"serializable_buffers", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Sets the size of the dedicated buffer pool used for the serializable transaction cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
-		&serial_buffers,
+		&serializable_buffers,
 		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
 		check_serial_buffers, NULL, NULL
 	},
 
 	{
-		{"xact_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the number of shared memory buffers used for the transaction status SLRU cache."),
+		{"subtransaction_buffers", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Sets the size of the dedicated buffer pool used for the sub-transaction cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
-		&xact_buffers,
-		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		check_xact_buffers, NULL, show_xact_buffers
+		&subtransaction_buffers,
+		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
+		check_subtrans_buffers, NULL, NULL
 	},
 
 	{
-		{"commit_ts_buffers", PGC_POSTMASTER, RESOURCES_MEM,
-			gettext_noop("Sets the size of the dedicated buffer pool used for the commit timestamp SLRU cache."),
+		{"transaction_buffers", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Sets the size of the dedicated buffer pool used for the transaction status cache."),
 			NULL,
 			GUC_UNIT_BLOCKS
 		},
-		&commit_ts_buffers,
+		&transaction_buffers,
 		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		check_commit_ts_buffers, NULL, show_commit_ts_buffers
+		check_transaction_buffers, NULL, show_transaction_buffers
 	},
 
 	{

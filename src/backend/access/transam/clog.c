@@ -764,8 +764,8 @@ Size
 CLOGShmemBuffers(void)
 {
 	/* Use configured value if provided. */
-	if (xact_buffers > 0)
-		return Max(16, xact_buffers);
+	if (transaction_buffers > 0)
+		return Max(16, transaction_buffers);
 	return Min(SLRU_MAX_ALLOWED_BUFFERS, Max(16, NBuffers / 512));
 }
 
@@ -786,6 +786,27 @@ CLOGShmemInit(void)
 				  "pg_xact", LWTRANCHE_XACT_BUFFER,
 				  LWTRANCHE_XACT_SLRU, SYNC_HANDLER_CLOG, false);
 	SlruPagePrecedesUnitTests(XactCtl, CLOG_XACTS_PER_PAGE);
+}
+
+/*
+ * GUC check_hook for transaction_buffers
+ */
+bool
+check_transaction_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("transaction_buffers", newval);
+}
+
+/*
+ * GUC show_hook for transaction_buffers
+ */
+const char *
+show_transaction_buffers(void)
+{
+	static char nbuf[16];
+
+	snprintf(nbuf, sizeof(nbuf), "%zu", CLOGShmemBuffers());
+	return nbuf;
 }
 
 /*
@@ -1114,13 +1135,4 @@ int
 clogsyncfiletag(const FileTag *ftag, char *path)
 {
 	return SlruSyncFileTag(XactCtl, ftag, path);
-}
-
-/*
- * GUC check_hook for xact_buffers
- */
-bool
-check_xact_buffers(int *newval, void **extra, GucSource source)
-{
-	return check_slru_buffers("xact_buffers", newval);
 }

@@ -22,6 +22,8 @@
  * perform sequential search within a bank (while looking for a target page or
  * while doing victim buffer search) and if we keep this size big then it may
  * affect the performance.
+ *
+ * FIXME is this comment up to date?
  */
 #define SLRU_BANK_SIZE		16
 

@@ -403,30 +403,6 @@ show_timezone(void)
 }
 
 /*
- * GUC show_hook for xact_buffers
- */
-const char *
-show_xact_buffers(void)
-{
-	static char nbuf[16];
-
-	snprintf(nbuf, sizeof(nbuf), "%zu", CLOGShmemBuffers());
-	return nbuf;
-}
-
-/*
- * GUC show_hook for commit_ts_buffers
- */
-const char *
-show_commit_ts_buffers(void)
-{
-	static char nbuf[16];
-
-	snprintf(nbuf, sizeof(nbuf), "%zu", CommitTsShmemBuffers());
-	return nbuf;
-}
-
-/*
  * LOG_TIMEZONE
  *
  * For log_timezone, we don't support the interval-based methods of setting a

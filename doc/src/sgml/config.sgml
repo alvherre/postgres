@@ -2006,26 +2006,27 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
-    <varlistentry id="guc-multixact-offsets-buffers" xreflabel="multixact_offsets_buffers">
-      <term><varname>multixact_offsets_buffers</varname> (<type>integer</type>)
+     <varlistentry id="guc-commit-timestamp-buffers" xreflabel="commit_timestamp_buffers">
+      <term><varname>commit_timestamp_buffers</varname> (<type>integer</type>)
       <indexterm>
-       <primary><varname>multixact_offsets_buffers</varname> configuration parameter</primary>
+       <primary><varname>commit_timestamp_buffers</varname> configuration parameter</primary>
       </indexterm>
       </term>
       <listitem>
        <para>
-        Specifies the amount of shared memory to use to cache the contents
-        of <literal>pg_multixact/offsets</literal> (see
+        Specifies the amount of memory to use to cache the contents of
+        <literal>pg_commit_ts</literal> (see
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>64</literal>.
+        The default value is <literal>0</literal>, which requests
+        <varname>shared_buffers</varname> / 256, but not fewer than 16 blocks.
         This parameter can only be set at server start.
        </para>
       </listitem>
      </varlistentry>
 
-    <varlistentry id="guc-multixact-members-buffers" xreflabel="multixact_members_buffers">
+     <varlistentry id="guc-multixact-members-buffers" xreflabel="multixact_members_buffers">
       <term><varname>multixact_members_buffers</varname> (<type>integer</type>)
       <indexterm>
        <primary><varname>multixact_members_buffers</varname> configuration parameter</primary>
@@ -2044,16 +2045,16 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
-    <varlistentry id="guc-subtrans-buffers" xreflabel="subtrans_buffers">
-      <term><varname>subtrans_buffers</varname> (<type>integer</type>)
+     <varlistentry id="guc-multixact-offsets-buffers" xreflabel="multixact_offsets_buffers">
+      <term><varname>multixact_offsets_buffers</varname> (<type>integer</type>)
       <indexterm>
-       <primary><varname>subtrans_buffers</varname> configuration parameter</primary>
+       <primary><varname>multixact_offsets_buffers</varname> configuration parameter</primary>
       </indexterm>
       </term>
       <listitem>
        <para>
         Specifies the amount of shared memory to use to cache the contents
-        of <literal>pg_subtrans</literal> (see
+        of <literal>pg_multixact/offsets</literal> (see
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
@@ -2063,7 +2064,7 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
-    <varlistentry id="guc-notify-buffers" xreflabel="notify_buffers">
+     <varlistentry id="guc-notify-buffers" xreflabel="notify_buffers">
       <term><varname>notify_buffers</varname> (<type>integer</type>)
       <indexterm>
        <primary><varname>notify_buffers</varname> configuration parameter</primary>
@@ -2082,10 +2083,10 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
-    <varlistentry id="guc-serial-buffers" xreflabel="serial_buffers">
-      <term><varname>serial_buffers</varname> (<type>integer</type>)
+     <varlistentry id="guc-serializable-buffers" xreflabel="serializable_buffers">
+      <term><varname>serializable_buffers</varname> (<type>integer</type>)
       <indexterm>
-       <primary><varname>serial_buffers</varname> configuration parameter</primary>
+       <primary><varname>serializable_buffers</varname> configuration parameter</primary>
       </indexterm>
       </term>
       <listitem>
@@ -2101,10 +2102,29 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
-    <varlistentry id="guc-xact-buffers" xreflabel="xact_buffers">
-      <term><varname>xact_buffers</varname> (<type>integer</type>)
+     <varlistentry id="guc-subtransaction-buffers" xreflabel="subtransaction_buffers">
+      <term><varname>subtransaction_buffers</varname> (<type>integer</type>)
       <indexterm>
-       <primary><varname>xact_buffers</varname> configuration parameter</primary>
+       <primary><varname>subtransaction_buffers</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Specifies the amount of shared memory to use to cache the contents
+        of <literal>pg_subtrans</literal> (see
+        <xref linkend="pgdata-contents-table"/>).
+        If this value is specified without units, it is taken as blocks,
+        that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
+        The default value is <literal>64</literal>.
+        This parameter can only be set at server start.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-transaction-buffers" xreflabel="transaction_buffers">
+      <term><varname>transaction_buffers</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>transaction_buffers</varname> configuration parameter</primary>
       </indexterm>
       </term>
       <listitem>
@@ -2116,26 +2136,6 @@ include_dir 'conf.d'
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
         The default value is <literal>0</literal>, which requests
         <varname>shared_buffers</varname> / 512, but not fewer than 16 blocks.
-        This parameter can only be set at server start.
-       </para>
-      </listitem>
-     </varlistentry>
-
-    <varlistentry id="guc-commit-ts-buffers" xreflabel="commit_ts_buffers">
-      <term><varname>commit_ts_buffers</varname> (<type>integer</type>)
-      <indexterm>
-       <primary><varname>commit_ts_buffers</varname> configuration parameter</primary>
-      </indexterm>
-      </term>
-      <listitem>
-       <para>
-        Specifies the amount of memory to use to cache the contents of
-        <literal>pg_commit_ts</literal> (see
-        <xref linkend="pgdata-contents-table"/>).
-        If this value is specified without units, it is taken as blocks,
-        that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>0</literal>, which requests
-        <varname>shared_buffers</varname> / 256, but not fewer than 16 blocks.
         This parameter can only be set at server start.
        </para>
       </listitem>

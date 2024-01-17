@@ -1782,12 +1782,11 @@ SlruRecentlyUsed(SlruShared shared, int slotno)
 bool
 check_slru_buffers(const char *name, int *newval)
 {
-	/* Value upper and lower hard limits are inclusive */
+	/* Valid values are multiples of SLRU_BANK_SIZE */
 	if (*newval % SLRU_BANK_SIZE == 0)
 		return true;
 
-	/* Value does not fall within any allowable range */
-	GUC_check_errdetail("\"%s\" must be in multiple of %d", name,
+	GUC_check_errdetail("\"%s\" must be a multiple of %d", name,
 						SLRU_BANK_SIZE);
 	return false;
 }

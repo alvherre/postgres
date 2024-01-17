@@ -252,10 +252,13 @@ static void
 TransactionIdSetCommitTs(TransactionId xid, TimestampTz ts,
 						 RepOriginId nodeid, int slotno)
 {
-	int			entryno = TransactionIdToCTsEntry(xid);
+	int			entryno;
 	CommitTimestampEntry entry;
 
-	Assert(TransactionIdIsNormal(xid));
+	if (!TransactionIdIsNormal(xid))
+		return;
+
+	entryno = TransactionIdToCTsEntry(xid);
 
 	entry.time = ts;
 	entry.nodeid = nodeid;
@@ -511,8 +514,8 @@ Size
 CommitTsShmemBuffers(void)
 {
 	/* Use configured value if provided. */
-	if (commit_ts_buffers > 0)
-		return Max(16, commit_ts_buffers);
+	if (commit_timestamp_buffers > 0)
+		return Max(16, commit_timestamp_buffers);
 	return Min(256, Max(16, NBuffers / 256));
 }
 
@@ -558,6 +561,27 @@ CommitTsShmemInit(void)
 	}
 	else
 		Assert(found);
+}
+
+/*
+ * GUC check_hook for commit_timestamp_buffers
+ */
+bool
+check_commit_ts_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("commit_timestamp_buffers", newval);
+}
+
+/*
+ * GUC show_hook for commit_timestamp_buffers
+ */
+const char *
+show_commit_ts_buffers(void)
+{
+	static char nbuf[16];
+
+	snprintf(nbuf, sizeof(nbuf), "%zu", CommitTsShmemBuffers());
+	return nbuf;
 }
 
 /*
@@ -1033,13 +1057,4 @@ int
 committssyncfiletag(const FileTag *ftag, char *path)
 {
 	return SlruSyncFileTag(CommitTsCtl, ftag, path);
-}
-
-/*
- * GUC check_hook for commit_ts_buffers
- */
-bool
-check_commit_ts_buffers(int *newval, void **extra, GucSource source)
-{
-	return check_slru_buffers("commit_ts_buffers", newval);
 }

@@ -197,17 +197,26 @@ SubTransGetTopmostTransaction(TransactionId xid)
 Size
 SUBTRANSShmemSize(void)
 {
-	return SimpleLruShmemSize(subtrans_buffers, 0);
+	return SimpleLruShmemSize(subtransaction_buffers, 0);
 }
 
 void
 SUBTRANSShmemInit(void)
 {
 	SubTransCtl->PagePrecedes = SubTransPagePrecedes;
-	SimpleLruInit(SubTransCtl, "Subtrans", subtrans_buffers, 0,
+	SimpleLruInit(SubTransCtl, "Subtrans", subtransaction_buffers, 0,
 				  "pg_subtrans", LWTRANCHE_SUBTRANS_BUFFER,
 				  LWTRANCHE_SUBTRANS_SLRU, SYNC_HANDLER_NONE, false);
 	SlruPagePrecedesUnitTests(SubTransCtl, SUBTRANS_XACTS_PER_PAGE);
+}
+
+/*
+ * GUC check_hook for subtransaction_buffers
+ */
+bool
+check_subtrans_buffers(int *newval, void **extra, GucSource source)
+{
+	return check_slru_buffers("subtransaction_buffers", newval);
 }
 
 /*
@@ -413,13 +422,4 @@ SubTransPagePrecedes(int64 page1, int64 page2)
 
 	return (TransactionIdPrecedes(xid1, xid2) &&
 			TransactionIdPrecedes(xid1, xid2 + SUBTRANS_XACTS_PER_PAGE - 1));
-}
-
-/*
- * GUC check_hook for subtrans_buffers
- */
-bool
-check_subtrans_buffers(int *newval, void **extra, GucSource source)
-{
-	return check_slru_buffers("subtrans_buffers", newval);
 }
