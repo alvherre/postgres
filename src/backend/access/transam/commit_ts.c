@@ -720,7 +720,7 @@ ActivateCommitTs(void)
 	/*
 	 * Re-Initialize our idea of the latest page number.
 	 */
-	pg_atomic_write_u64(&CommitTsCtl->shared->latest_page_number, pageno);
+	pg_atomic_init_u64(&CommitTsCtl->shared->latest_page_number, pageno);
 
 	/*
 	 * If CommitTs is enabled, but it wasn't in the previous server run, we
@@ -1043,6 +1043,7 @@ commit_ts_redo(XLogReaderState *record)
 		 */
 		pg_atomic_write_u64(&CommitTsCtl->shared->latest_page_number,
 							trunc->pageno);
+		pg_write_barrier();
 
 		SimpleLruTruncate(CommitTsCtl, trunc->pageno);
 	}

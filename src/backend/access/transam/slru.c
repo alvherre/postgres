@@ -342,6 +342,7 @@ SimpleLruZeroPage(SlruCtl ctl, int64 pageno)
 
 	/* Assume this page is now the latest active page */
 	pg_atomic_write_u64(&shared->latest_page_number, pageno);
+	pg_write_barrier();
 
 	/* update the stats counter of zeroed pages */
 	pgstat_count_slru_page_zeroed(shared->slru_stats_idx);
@@ -1146,6 +1147,8 @@ SlruSelectLRUPage(SlruCtl ctl, int64 pageno)
 				this_delta = 0;
 			}
 			this_page_number = shared->page_number[slotno];
+
+			pg_read_barrier();
 			if (this_page_number ==
 				pg_atomic_read_u64(&shared->latest_page_number))
 				continue;
@@ -1316,9 +1319,10 @@ SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage)
 restart:
 
 	/*
-	 * While we are holding the lock, make an important safety check: the
-	 * current endpoint page must not be eligible for removal.
+	 * An important safety check: the current endpoint page must not be
+	 * eligible for removal.
 	 */
+	pg_read_barrier();
 	if (ctl->PagePrecedes(pg_atomic_read_u64(&shared->latest_page_number),
 						  cutoffPage))
 	{

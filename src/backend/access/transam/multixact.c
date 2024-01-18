@@ -2138,6 +2138,7 @@ TrimMultiXact(void)
 	pageno = MultiXactIdToOffsetPage(nextMXact);
 	pg_atomic_write_u64(&MultiXactOffsetCtl->shared->latest_page_number,
 						pageno);
+	pg_write_barrier();
 
 	/*
 	 * Zero out the remainder of the current offsets page.  See notes in
@@ -2173,6 +2174,7 @@ TrimMultiXact(void)
 	pageno = MXOffsetToMemberPage(offset);
 	pg_atomic_write_u64(&MultiXactMemberCtl->shared->latest_page_number,
 						pageno);
+	pg_write_barrier();
 
 	/*
 	 * Zero out the remainder of the current members page.  See notes in
@@ -3428,6 +3430,7 @@ multixact_redo(XLogReaderState *record)
 		pageno = MultiXactIdToOffsetPage(xlrec.endTruncOff);
 		pg_atomic_write_u64(&MultiXactOffsetCtl->shared->latest_page_number,
 							pageno);
+		pg_write_barrier();
 		PerformOffsetsTruncation(xlrec.startTruncOff, xlrec.endTruncOff);
 
 		LWLockRelease(MultiXactTruncationLock);
