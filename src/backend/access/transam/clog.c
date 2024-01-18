@@ -668,6 +668,11 @@ TransactionIdSetStatusBit(TransactionId xid, XidStatus status, XLogRecPtr lsn, i
 	char		byteval;
 	char		curval;
 
+	Assert(XactCtl->shared->page_number[slotno] == TransactionIdToPage(xid));
+	Assert(LWLockHeldByMeInMode(SimpleLruGetBankLock(XactCtl,
+													 XactCtl->shared->page_number[slotno]),
+								LW_EXCLUSIVE));
+
 	byteptr = XactCtl->shared->page_buffer[slotno] + byteno;
 	curval = (*byteptr >> bshift) & CLOG_XACT_BITMASK;
 
