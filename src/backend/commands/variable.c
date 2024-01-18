@@ -18,8 +18,6 @@
 
 #include <ctype.h>
 
-#include "access/clog.h"
-#include "access/commit_ts.h"
 #include "access/htup_details.h"
 #include "access/parallel.h"
 #include "access/xact.h"
@@ -401,6 +399,7 @@ show_timezone(void)
 
 	return "unknown";
 }
+
 
 /*
  * LOG_TIMEZONE
