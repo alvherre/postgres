@@ -61,6 +61,10 @@
 #define MIN_DELAY_USEC		1000L
 #define MAX_DELAY_USEC		1000000L
 
+#ifdef S_LOCK_TEST
+static uint32 local_my_wait_event_info;
+uint32 *my_wait_event_info = &local_my_wait_event_info;
+#endif
 
 slock_t		dummy_spinlock;
 
