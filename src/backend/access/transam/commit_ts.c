@@ -226,9 +226,9 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 					 TransactionId *subxids, TimestampTz ts,
 					 RepOriginId nodeid, int64 pageno)
 {
+	LWLock	   *lock = SimpleLruGetBankLock(CommitTsCtl, pageno);
 	int			slotno;
 	int			i;
-	LWLock	   *lock = SimpleLruGetBankLock(CommitTsCtl, pageno);
 
 	LWLockAcquire(lock, LW_EXCLUSIVE);
 
@@ -246,7 +246,7 @@ SetXidCommitTsInPage(TransactionId xid, int nsubxids,
 /*
  * Sets the commit timestamp of a single transaction.
  *
- * Must be called with slot specific SLRU bank's Lock held
+ * Caller must hold the correct SLRU bank lock, will be held at exit
  */
 static void
 TransactionIdSetCommitTs(TransactionId xid, TimestampTz ts,

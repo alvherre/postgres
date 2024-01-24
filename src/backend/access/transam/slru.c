@@ -98,8 +98,7 @@ SlruFileName(SlruCtl ctl, char *path, int64 segno)
 #define MAX_WRITEALL_BUFFERS	16
 
 /*
- * Macro to get the index of lock for a given slotno in bank_lock array in
- * SlruSharedData.
+ * Macro to get the index of the lock for the given slot.
  *
  * Basically, the slru buffer pool is divided into banks of buffer and there is
  * total SLRU_MAX_BANKLOCKS number of locks to protect access to buffer in the

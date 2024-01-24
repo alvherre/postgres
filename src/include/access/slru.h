@@ -30,7 +30,7 @@
 /*
  * Number of bank locks to protect the in memory buffer slot access within a
  * SLRU bank.  If the number of banks are <= SLRU_MAX_BANKLOCKS then there will
- * be one lock per bank otherwise each lock will protect multiple banks depends
+ * be one lock per bank; otherwise each lock will protect multiple banks depends
  * upon the number of banks.
  */
 #define	SLRU_MAX_BANKLOCKS	128
@@ -193,8 +193,9 @@ typedef SlruCtlData *SlruCtl;
 static inline LWLock *
 SimpleLruGetBankLock(SlruCtl ctl, int64 pageno)
 {
-	int			banklockno = (pageno & ctl->bank_mask) % SLRU_MAX_BANKLOCKS;
+	int			banklockno;
 
+	banklockno = (pageno & ctl->bank_mask) % SLRU_MAX_BANKLOCKS;
 	return &(ctl->shared->bank_locks[banklockno].lock);
 }
 
