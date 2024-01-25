@@ -508,7 +508,7 @@ pg_xact_commit_timestamp_origin(PG_FUNCTION_ARGS)
  * but always at least 16 buffers.  Otherwise just cap the configured amount to
  * be between 16 and the maximum allowed.
  */
-static Size
+static int
 CommitTsShmemBuffers(void)
 {
 	/* auto-tune based on shared buffers */
@@ -537,7 +537,19 @@ CommitTsShmemInit(void)
 {
 	bool		found;
 
-	// SLRU_MAX_ALLOWED_BUFFERS ??
+	/* If auto-tuning is requested, now is the time to do it */
+	if (commit_timestamp_buffers == 0)
+	{
+		char		buf[32];
+
+		snprintf(buf, sizeof(buf), "%d", CommitTsShmemBuffers());
+		SetConfigOption("commit_timestamp_buffers", buf, PGC_POSTMASTER,
+						PGC_S_DYNAMIC_DEFAULT);
+		if (commit_timestamp_buffers == 0)	/* failed to apply it? */
+			SetConfigOption("commit_timestamp_buffers", buf, PGC_POSTMASTER,
+							PGC_S_OVERRIDE);
+	}
+	Assert(commit_timestamp_buffers != 0);
 
 	CommitTsCtl->PagePrecedes = CommitTsPagePrecedes;
 	SimpleLruInit(CommitTsCtl, "CommitTs", CommitTsShmemBuffers(), 0,
@@ -571,18 +583,6 @@ bool
 check_commit_ts_buffers(int *newval, void **extra, GucSource source)
 {
 	return check_slru_buffers("commit_timestamp_buffers", newval);
-}
-
-/*
- * GUC show_hook for commit_timestamp_buffers
- */
-const char *
-show_commit_ts_buffers(void)
-{
-	static char nbuf[16];
-
-	snprintf(nbuf, sizeof(nbuf), "%zu", CommitTsShmemBuffers());
-	return nbuf;
 }
 
 /*

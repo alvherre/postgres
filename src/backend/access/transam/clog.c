@@ -775,7 +775,7 @@ TransactionIdGetStatus(TransactionId xid, XLogRecPtr *lsn)
  * but always at least 16 buffers.  Otherwise just cap the configured amount to
  * be between 16 and the maximum allowed.
  */
-static Size
+static int
 CLOGShmemBuffers(void)
 {
 	/* auto-tune based on shared buffers */
@@ -797,6 +797,20 @@ CLOGShmemSize(void)
 void
 CLOGShmemInit(void)
 {
+	/* If auto-tuning is requested, now is the time to do it */
+	if (transaction_buffers == 0)
+	{
+		char		buf[32];
+
+		snprintf(buf, sizeof(buf), "%d", CLOGShmemBuffers());
+		SetConfigOption("transaction_buffers", buf, PGC_POSTMASTER,
+						PGC_S_DYNAMIC_DEFAULT);
+		if (transaction_buffers == 0)	/* failed to apply it? */
+			SetConfigOption("transaction_buffers", buf, PGC_POSTMASTER,
+							PGC_S_OVERRIDE);
+	}
+	Assert(transaction_buffers != 0);
+
 	XactCtl->PagePrecedes = CLOGPagePrecedes;
 	SimpleLruInit(XactCtl, "Xact", CLOGShmemBuffers(), CLOG_LSNS_PER_PAGE,
 				  "pg_xact", LWTRANCHE_XACT_BUFFER,
@@ -811,18 +825,6 @@ bool
 check_transaction_buffers(int *newval, void **extra, GucSource source)
 {
 	return check_slru_buffers("transaction_buffers", newval);
-}
-
-/*
- * GUC show_hook for transaction_buffers
- */
-const char *
-show_transaction_buffers(void)
-{
-	static char nbuf[16];
-
-	snprintf(nbuf, sizeof(nbuf), "%zu", CLOGShmemBuffers());
-	return nbuf;
 }
 
 /*

@@ -197,7 +197,7 @@ SubTransGetTopmostTransaction(TransactionId xid)
  * but always at least 16 buffers.  Otherwise just cap the configured amount to
  * be between 16 and the maximum allowed.
  */
-static Size
+static int
 SUBTRANSShmemBuffers(void)
 {
 	/* auto-tune based on shared buffers */
@@ -219,6 +219,20 @@ SUBTRANSShmemSize(void)
 void
 SUBTRANSShmemInit(void)
 {
+	/* If auto-tuning is requested, now is the time to do it */
+	if (subtransaction_buffers == 0)
+	{
+		char		buf[32];
+
+		snprintf(buf, sizeof(buf), "%d", SUBTRANSShmemBuffers());
+		SetConfigOption("subtransaction_buffers", buf, PGC_POSTMASTER,
+						PGC_S_DYNAMIC_DEFAULT);
+		if (subtransaction_buffers == 0)	/* failed to apply it? */
+			SetConfigOption("subtransaction_buffers", buf, PGC_POSTMASTER,
+							PGC_S_OVERRIDE);
+	}
+	Assert(subtransaction_buffers != 0);
+
 	SubTransCtl->PagePrecedes = SubTransPagePrecedes;
 	SimpleLruInit(SubTransCtl, "Subtrans", SUBTRANSShmemBuffers(), 0,
 				  "pg_subtrans", LWTRANCHE_SUBTRANS_BUFFER,
@@ -233,18 +247,6 @@ bool
 check_subtrans_buffers(int *newval, void **extra, GucSource source)
 {
 	return check_slru_buffers("subtransaction_buffers", newval);
-}
-
-/*
- * GUC show_hook for subtransaction_buffers
- */
-const char *
-show_subtrans_buffers(void)
-{
-	static char nbuf[16];
-
-	snprintf(nbuf, sizeof(nbuf), "%zu", SUBTRANSShmemBuffers());
-	return nbuf;
 }
 
 /*

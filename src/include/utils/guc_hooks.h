@@ -48,7 +48,6 @@ extern void assign_client_encoding(const char *newval, void *extra);
 extern bool check_cluster_name(char **newval, void **extra, GucSource source);
 extern bool check_commit_ts_buffers(int *newval, void **extra,
 									GucSource source);
-extern const char *show_commit_ts_buffers(void);
 extern const char *show_data_directory_mode(void);
 extern bool check_datestyle(char **newval, void **extra, GucSource source);
 extern void assign_datestyle(const char *newval, void *extra);
@@ -139,7 +138,6 @@ extern bool check_ssl(bool *newval, void **extra, GucSource source);
 extern bool check_stage_log_stats(bool *newval, void **extra, GucSource source);
 extern bool check_subtrans_buffers(int *newval, void **extra,
 								   GucSource source);
-const char *show_subtrans_buffers(void);
 extern bool check_synchronous_standby_names(char **newval, void **extra,
 											GucSource source);
 extern void assign_synchronous_standby_names(const char *newval, void *extra);
@@ -165,7 +163,6 @@ extern bool check_timezone_abbreviations(char **newval, void **extra,
 										 GucSource source);
 extern void assign_timezone_abbreviations(const char *newval, void *extra);
 extern bool check_transaction_buffers(int *newval, void **extra, GucSource source);
-extern const char *show_transaction_buffers(void);
 extern bool check_transaction_deferrable(bool *newval, void **extra, GucSource source);
 extern bool check_transaction_isolation(int *newval, void **extra, GucSource source);
 extern bool check_transaction_read_only(bool *newval, void **extra, GucSource source);

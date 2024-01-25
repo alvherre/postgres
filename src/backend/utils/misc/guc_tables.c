@@ -2329,7 +2329,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&commit_timestamp_buffers,
 		0, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		check_commit_ts_buffers, NULL, show_commit_ts_buffers
+		check_commit_ts_buffers, NULL, NULL
 	},
 
 	{
@@ -2384,7 +2384,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&subtransaction_buffers,
 		0, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		check_subtrans_buffers, NULL, show_subtrans_buffers
+		check_subtrans_buffers, NULL, NULL
 	},
 
 	{
@@ -2395,7 +2395,7 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&transaction_buffers,
 		0, 0, SLRU_MAX_ALLOWED_BUFFERS,
-		check_transaction_buffers, NULL, show_transaction_buffers
+		check_transaction_buffers, NULL, NULL
 	},
 
 	{
