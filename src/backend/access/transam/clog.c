@@ -63,6 +63,15 @@
 #define CLOG_XACTS_PER_PAGE (BLCKSZ * CLOG_XACTS_PER_BYTE)
 #define CLOG_XACT_BITMASK	((1 << CLOG_BITS_PER_XACT) - 1)
 
+/*
+ * Because space used in CLOG by each transaction is so small, we place a
+ * smaller limit on the number of CLOG buffers than SLRU allows.  No other
+ * SLRU needs this.
+ */
+#define CLOG_MAX_ALLOWED_BUFFERS \
+	Min(SLRU_MAX_ALLOWED_BUFFERS, \
+		(((MaxTransactionId / 2) + (CLOG_XACTS_PER_PAGE - 1)) / CLOG_XACTS_PER_PAGE))
+
 
 /*
  * Although we return an int64 the actual value can't currently exceed
@@ -768,10 +777,11 @@ TransactionIdGetStatus(TransactionId xid, XLogRecPtr *lsn)
 Size
 CLOGShmemBuffers(void)
 {
-	/* Use configured value if provided. */
-	if (transaction_buffers > 0)
-		return Max(16, transaction_buffers);
-	return Min(SLRU_MAX_ALLOWED_BUFFERS, Max(16, NBuffers / 512));
+	/* auto-tune based on shared buffers */
+	if (transaction_buffers == 0)
+		return Min(CLOG_MAX_ALLOWED_BUFFERS, Max(16, NBuffers / 512));
+
+	return Min(Max(16, transaction_buffers), CLOG_MAX_ALLOWED_BUFFERS);
 }
 
 /*

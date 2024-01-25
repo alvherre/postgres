@@ -173,6 +173,8 @@ SimpleLruShmemSize(int nslots, int nlsns)
 	int			nbanks = nslots / SLRU_BANK_SIZE;
 	int			nbanklocks = Min(nbanks, SLRU_MAX_BANKLOCKS);
 
+	Assert(nslots <= SLRU_MAX_ALLOWED_BUFFERS);
+
 	/* we assume nslots isn't so large as to risk overflow */
 	sz = MAXALIGN(sizeof(SlruSharedData));
 	sz += MAXALIGN(nslots * sizeof(char *));	/* page_buffer[] */
@@ -212,6 +214,8 @@ SimpleLruInit(SlruCtl ctl, const char *name, int nslots, int nlsns,
 	bool		found;
 	int			nbanks = nslots / SLRU_BANK_SIZE;
 	int			nbanklocks = Min(nbanks, SLRU_MAX_BANKLOCKS);
+
+	Assert(nslots <= SLRU_MAX_ALLOWED_BUFFERS);
 
 	shared = (SlruShared) ShmemInitStruct(name,
 										  SimpleLruShmemSize(nslots, nlsns),

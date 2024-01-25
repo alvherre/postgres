@@ -504,19 +504,17 @@ pg_xact_commit_timestamp_origin(PG_FUNCTION_ARGS)
 /*
  * Number of shared CommitTS buffers.
  *
- * We use a very similar logic as for the number of CLOG buffers (except we
- * scale up twice as fast with shared buffers, and the maximum is twice as
- * high); see comments in CLOGShmemBuffers.
- * By default, we'll use 4MB of for every 1GB of shared buffers, up to the
- * maximum value that slru.c will allow, but always at least 16 buffers.
+ * By default, we'll use 4MB for every 1GB of shared buffers, but always at
+ * least 16 buffers.
  */
 Size
 CommitTsShmemBuffers(void)
 {
-	/* Use configured value if provided. */
-	if (commit_timestamp_buffers > 0)
-		return Max(16, commit_timestamp_buffers);
-	return Min(256, Max(16, NBuffers / 256));
+	/* auto-tune based on shared buffers */
+	if (commit_timestamp_buffers == 0)
+		return Min(SLRU_MAX_ALLOWED_BUFFERS, Max(16, NBuffers / 256));
+
+	return Min(Max(16, commit_timestamp_buffers), SLRU_MAX_ALLOWED_BUFFERS);
 }
 
 /*
@@ -537,6 +535,8 @@ void
 CommitTsShmemInit(void)
 {
 	bool		found;
+
+	// SLRU_MAX_ALLOWED_BUFFERS ??
 
 	CommitTsCtl->PagePrecedes = CommitTsPagePrecedes;
 	SimpleLruInit(CommitTsCtl, "CommitTs", CommitTsShmemBuffers(), 0,
@@ -746,8 +746,8 @@ ActivateCommitTs(void)
 	/* Create the current segment file, if necessary */
 	if (!SimpleLruDoesPhysicalPageExist(CommitTsCtl, pageno))
 	{
-		int			slotno;
 		LWLock	   *lock = SimpleLruGetBankLock(CommitTsCtl, pageno);
+		int			slotno;
 
 		LWLockAcquire(lock, LW_EXCLUSIVE);
 		slotno = ZeroCommitTsPage(pageno, false);

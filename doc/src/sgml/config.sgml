@@ -2020,7 +2020,8 @@ include_dir 'conf.d'
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
         The default value is <literal>0</literal>, which requests
-        <varname>shared_buffers</varname> / 256, but not fewer than 16 blocks.
+        <varname>shared_buffers</varname> / 256, but not fewer than 16 blocks
+        and no more than 256 blocks.
         This parameter can only be set at server start.
        </para>
       </listitem>

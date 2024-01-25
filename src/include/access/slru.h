@@ -37,7 +37,7 @@
 
 /*
  * To avoid overflowing internal arithmetic and the size_t data type, the
- * number of buffers should not exceed this number.
+ * number of buffers must not exceed this number.
  */
 #define SLRU_MAX_ALLOWED_BUFFERS ((1024 * 1024 * 1024) / BLCKSZ)
 
