@@ -365,6 +365,14 @@ LogicalRepLauncherDSA	"Waiting to access logical replication launcher's dynamic 
 LogicalRepLauncherHash	"Waiting to access logical replication launcher's shared hash table."
 DSMRegistryDSA	"Waiting to access dynamic shared memory registry's dynamic shared memory allocator."
 DSMRegistryHash	"Waiting to access dynamic shared memory registry's shared hash table."
+CommitTsSLRU	"Waiting to access the commit timestamp SLRU cache."
+MultiXactOffsetSLRU	"Waiting to access the multixact offset SLRU cache."
+MultiXactMemberSLRU	"Waiting to access the multixact member SLRU cache."
+NotifySLRU	"Waiting to access the <command>NOTIFY</command> message SLRU cache."
+SerialSLRU	"Waiting to access the serializable transaction conflict SLRU cache."
+SubtransSLRU	"Waiting to access the sub-transaction SLRU cache."
+XactSLRU	"Waiting to access the transaction status SLRU cache."
+
 
 #
 # Wait Events - Lock
