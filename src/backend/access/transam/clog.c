@@ -306,8 +306,8 @@ TransactionIdSetPageStatus(TransactionId xid, int nsubxids,
 	/*
 	 * When there is contention on the bank lock, we try to group multiple
 	 * updates; a single leader process will perform transaction status
-	 * updates for multiple backends so that the number of times the bank
-	 * lock needs to be acquired is reduced.
+	 * updates for multiple backends so that the number of times the bank lock
+	 * needs to be acquired is reduced.
 	 *
 	 * For this optimization to be safe, the XID and subxids in MyProc must be
 	 * the same as the ones for which we're setting the status.  Check that
@@ -325,10 +325,10 @@ TransactionIdSetPageStatus(TransactionId xid, int nsubxids,
 				nsubxids * sizeof(TransactionId)) == 0))
 	{
 		/*
-		 * If we can immediately acquire the lock, we update the status of
-		 * our own XID and release the lock.  If not, try use group XID
-		 * update.  If that doesn't work out, fall back to waiting for the
-		 * lock to perform an update for this transaction only.
+		 * If we can immediately acquire the lock, we update the status of our
+		 * own XID and release the lock.  If not, try use group XID update. If
+		 * that doesn't work out, fall back to waiting for the lock to perform
+		 * an update for this transaction only.
 		 */
 		if (LWLockConditionalAcquire(lock, LW_EXCLUSIVE))
 		{
