@@ -504,15 +504,16 @@ pg_xact_commit_timestamp_origin(PG_FUNCTION_ARGS)
 /*
  * Number of shared CommitTS buffers.
  *
- * By default, we'll use 4MB for every 1GB of shared buffers, but always at
- * least 16 buffers.
+ * If asked to autotune, we use 2MB for every 1GB of shared buffers, up to 8MB,
+ * but always at least 16 buffers.  Otherwise just cap the configured amount to
+ * be between 16 and the maximum allowed.
  */
-Size
+static Size
 CommitTsShmemBuffers(void)
 {
 	/* auto-tune based on shared buffers */
 	if (commit_timestamp_buffers == 0)
-		return Min(SLRU_MAX_ALLOWED_BUFFERS, Max(16, NBuffers / 256));
+		return Min(1024, Max(16, NBuffers / 512));
 
 	return Min(Max(16, commit_timestamp_buffers), SLRU_MAX_ALLOWED_BUFFERS);
 }

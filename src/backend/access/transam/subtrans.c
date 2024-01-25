@@ -190,6 +190,22 @@ SubTransGetTopmostTransaction(TransactionId xid)
 	return previousXid;
 }
 
+/*
+ * Number of shared SUBTRANS buffers.
+ *
+ * If asked to autotune, we use 2MB for every 1GB of shared buffers, up to 8MB,
+ * but always at least 16 buffers.  Otherwise just cap the configured amount to
+ * be between 16 and the maximum allowed.
+ */
+static Size
+SUBTRANSShmemBuffers(void)
+{
+	/* auto-tune based on shared buffers */
+	if (subtransaction_buffers == 0)
+		return Min(1024, Max(16, NBuffers / 512));
+
+	return Min(Max(16, subtransaction_buffers), SLRU_MAX_ALLOWED_BUFFERS);
+}
 
 /*
  * Initialization of shared memory for SUBTRANS
@@ -197,14 +213,14 @@ SubTransGetTopmostTransaction(TransactionId xid)
 Size
 SUBTRANSShmemSize(void)
 {
-	return SimpleLruShmemSize(subtransaction_buffers, 0);
+	return SimpleLruShmemSize(SUBTRANSShmemBuffers(), 0);
 }
 
 void
 SUBTRANSShmemInit(void)
 {
 	SubTransCtl->PagePrecedes = SubTransPagePrecedes;
-	SimpleLruInit(SubTransCtl, "Subtrans", subtransaction_buffers, 0,
+	SimpleLruInit(SubTransCtl, "Subtrans", SUBTRANSShmemBuffers(), 0,
 				  "pg_subtrans", LWTRANCHE_SUBTRANS_BUFFER,
 				  LWTRANCHE_SUBTRANS_SLRU, SYNC_HANDLER_NONE, false);
 	SlruPagePrecedesUnitTests(SubTransCtl, SUBTRANS_XACTS_PER_PAGE);
@@ -217,6 +233,18 @@ bool
 check_subtrans_buffers(int *newval, void **extra, GucSource source)
 {
 	return check_slru_buffers("subtransaction_buffers", newval);
+}
+
+/*
+ * GUC show_hook for subtransaction_buffers
+ */
+const char *
+show_subtrans_buffers(void)
+{
+	static char nbuf[16];
+
+	snprintf(nbuf, sizeof(nbuf), "%zu", SUBTRANSShmemBuffers());
+	return nbuf;
 }
 
 /*

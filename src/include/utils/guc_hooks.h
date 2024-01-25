@@ -139,6 +139,7 @@ extern bool check_ssl(bool *newval, void **extra, GucSource source);
 extern bool check_stage_log_stats(bool *newval, void **extra, GucSource source);
 extern bool check_subtrans_buffers(int *newval, void **extra,
 								   GucSource source);
+const char *show_subtrans_buffers(void);
 extern bool check_synchronous_standby_names(char **newval, void **extra,
 											GucSource source);
 extern void assign_synchronous_standby_names(const char *newval, void *extra);

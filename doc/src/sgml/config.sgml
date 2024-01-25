@@ -2020,8 +2020,8 @@ include_dir 'conf.d'
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
         The default value is <literal>0</literal>, which requests
-        <varname>shared_buffers</varname> / 256, but not fewer than 16 blocks
-        and no more than 256 blocks.
+        <varname>shared_buffers</varname>/512 up to 1024 blocks,
+        but not fewer than 16 blocks.
         This parameter can only be set at server start.
        </para>
       </listitem>
@@ -2040,7 +2040,7 @@ include_dir 'conf.d'
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>64</literal>.
+        The default value is <literal>32</literal>.
         This parameter can only be set at server start.
        </para>
       </listitem>
@@ -2059,7 +2059,7 @@ include_dir 'conf.d'
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>64</literal>.
+        The default value is <literal>16</literal>.
         This parameter can only be set at server start.
        </para>
       </listitem>
@@ -2078,7 +2078,7 @@ include_dir 'conf.d'
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>64</literal>.
+        The default value is <literal>16</literal>.
         This parameter can only be set at server start.
        </para>
       </listitem>
@@ -2097,7 +2097,7 @@ include_dir 'conf.d'
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>64</literal>.
+        The default value is <literal>32</literal>.
         This parameter can only be set at server start.
        </para>
       </listitem>
@@ -2116,7 +2116,9 @@ include_dir 'conf.d'
         <xref linkend="pgdata-contents-table"/>).
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
-        The default value is <literal>64</literal>.
+        The default value is <literal>0</literal>, which requests
+        <varname>shared_buffers</varname>/512 up to 1024 blocks,
+        but not fewer than 16 blocks.
         This parameter can only be set at server start.
        </para>
       </listitem>
@@ -2136,7 +2138,8 @@ include_dir 'conf.d'
         If this value is specified without units, it is taken as blocks,
         that is <symbol>BLCKSZ</symbol> bytes, typically 8kB.
         The default value is <literal>0</literal>, which requests
-        <varname>shared_buffers</varname> / 512, but not fewer than 16 blocks.
+        <varname>shared_buffers</varname>/512 up to 1024 blocks,
+        but not fewer than 16 blocks.
         This parameter can only be set at server start.
        </para>
       </listitem>

@@ -53,11 +53,11 @@
 # - SLRU Buffers (change requires restart) -
 
 #commit_timestamp_buffers = 0			# memory for pg_commit_ts (0 = auto)
-#multixact_offsets_buffers = 64			# memory for pg_multixact/offsets
-#multixact_members_buffers = 64			# memory for pg_multixact/members
-#notify_buffers = 64					# memory for pg_notify
-#serializable_buffers = 64				# memory for pg_serial
-#subtransaction_buffers = 64			# memory for pg_subtrans
+#multixact_offsets_buffers = 16			# memory for pg_multixact/offsets
+#multixact_members_buffers = 32			# memory for pg_multixact/members
+#notify_buffers = 16					# memory for pg_notify
+#serializable_buffers = 32				# memory for pg_serial
+#subtransaction_buffers = 0 			# memory for pg_subtrans (0 = auto)
 #transaction_buffers = 0				# memory for pg_xact (0 = auto)
 
 #------------------------------------------------------------------------------

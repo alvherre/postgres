@@ -771,15 +771,16 @@ TransactionIdGetStatus(TransactionId xid, XLogRecPtr *lsn)
 /*
  * Number of shared CLOG buffers.
  *
- * By default, we'll use 2MB of for every 1GB of shared buffers, up to the
- * maximum value that slru.c will allow, but always at least 16 buffers.
+ * If asked to autotune, we use 2MB for every 1GB of shared buffers, up to 8MB,
+ * but always at least 16 buffers.  Otherwise just cap the configured amount to
+ * be between 16 and the maximum allowed.
  */
-Size
+static Size
 CLOGShmemBuffers(void)
 {
 	/* auto-tune based on shared buffers */
 	if (transaction_buffers == 0)
-		return Min(CLOG_MAX_ALLOWED_BUFFERS, Max(16, NBuffers / 512));
+		return Min(1024, Max(16, NBuffers / 512));
 
 	return Min(Max(16, transaction_buffers), CLOG_MAX_ALLOWED_BUFFERS);
 }

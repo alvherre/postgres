@@ -2328,7 +2328,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&commit_timestamp_buffers,
-		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
+		0, 0, SLRU_MAX_ALLOWED_BUFFERS,
 		check_commit_ts_buffers, NULL, show_commit_ts_buffers
 	},
 
@@ -2339,7 +2339,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&multixact_members_buffers,
-		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
+		32, 16, SLRU_MAX_ALLOWED_BUFFERS,
 		check_multixact_members_buffers, NULL, NULL
 	},
 
@@ -2350,7 +2350,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&multixact_offsets_buffers,
-		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
+		16, 8, SLRU_MAX_ALLOWED_BUFFERS,
 		check_multixact_offsets_buffers, NULL, NULL
 	},
 
@@ -2361,7 +2361,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&notify_buffers,
-		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
+		16, 8, SLRU_MAX_ALLOWED_BUFFERS,
 		check_notify_buffers, NULL, NULL
 	},
 
@@ -2372,7 +2372,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&serializable_buffers,
-		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
+		32, 16, SLRU_MAX_ALLOWED_BUFFERS,
 		check_serial_buffers, NULL, NULL
 	},
 
@@ -2383,8 +2383,8 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&subtransaction_buffers,
-		64, 16, SLRU_MAX_ALLOWED_BUFFERS,
-		check_subtrans_buffers, NULL, NULL
+		0, 0, SLRU_MAX_ALLOWED_BUFFERS,
+		check_subtrans_buffers, NULL, show_subtrans_buffers
 	},
 
 	{
@@ -2394,7 +2394,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&transaction_buffers,
-		64, 0, SLRU_MAX_ALLOWED_BUFFERS,
+		0, 0, SLRU_MAX_ALLOWED_BUFFERS,
 		check_transaction_buffers, NULL, show_transaction_buffers
 	},
 
