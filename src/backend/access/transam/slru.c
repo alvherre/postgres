@@ -433,7 +433,7 @@ SimpleLruWaitIO(SlruCtl ctl, int slotno)
  * Return value is the shared-buffer slot number now holding the page.
  * The buffer's LRU access info is updated.
  *
- * Control lock must be held at entry, and will be held at exit.
+ * The correct bank lock must be held at entry, and will be held at exit.
  */
 int
 SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok,

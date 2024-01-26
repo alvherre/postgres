@@ -304,10 +304,10 @@ TransactionIdSetPageStatus(TransactionId xid, int nsubxids,
 	lock = SimpleLruGetBankLock(XactCtl, pageno);
 
 	/*
-	 * When there is contention on the bank lock, we try to group multiple
-	 * updates; a single leader process will perform transaction status
-	 * updates for multiple backends so that the number of times the bank lock
-	 * needs to be acquired is reduced.
+	 * When there is contention on the specific SLRU bank lock, we try to
+	 * group multiple updates; a single leader process will perform transaction
+	 * status updates for multiple backends so that the number of times the
+	 * bank lock needs to be acquired is reduced.
 	 *
 	 * For this optimization to be safe, the XID and subxids in MyProc must be
 	 * the same as the ones for which we're setting the status.  Check that
@@ -422,6 +422,8 @@ TransactionIdSetPageStatusInternal(TransactionId xid, int nsubxids,
 }
 
 /*
+ * Subroutine for TransactionIdSetPageStatus, q.v.
+ *
  * When we cannot immediately acquire the SLRU bank lock in exclusive mode at
  * commit time, add ourselves to a list of processes that need their XIDs
  * status update.  The first process to add itself to the list will acquire
