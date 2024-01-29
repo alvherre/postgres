@@ -15,7 +15,6 @@ SInvalWriteLock						6
 WALBufMappingLock					7
 WALWriteLock						8
 ControlFileLock						9
-# 10 was CheckpointLock
 XactSLRULock						11
 SubtransSLRULock					12
 MultiXactGenLock					13
@@ -57,3 +56,4 @@ WaitEventExtensionLock				48
 WALSummarizerLock					49
 DSMRegistryLock						50
 InjectionPointLock				51
+SerialControlLock					52

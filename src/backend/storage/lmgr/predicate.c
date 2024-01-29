@@ -920,10 +920,10 @@ SerialGetMinConflictCommitSeqNo(TransactionId xid)
 
 	Assert(TransactionIdIsValid(xid));
 
-	LWLockAcquire(SerialSLRULock, LW_SHARED);
+	LWLockAcquire(SerialControlLock, LW_SHARED);
 	headXid = serialControl->headXid;
 	tailXid = serialControl->tailXid;
-	LWLockRelease(SerialSLRULock);
+	LWLockRelease(SerialControlLock);
 
 	if (!TransactionIdIsValid(headXid))
 		return 0;
@@ -954,7 +954,7 @@ SerialGetMinConflictCommitSeqNo(TransactionId xid)
 static void
 SerialSetActiveSerXmin(TransactionId xid)
 {
-	LWLockAcquire(SerialSLRULock, LW_EXCLUSIVE);
+	LWLockAcquire(SerialControlLock, LW_EXCLUSIVE);
 
 	/*
 	 * When no sxacts are active, nothing overlaps, set the xid values to
@@ -966,7 +966,7 @@ SerialSetActiveSerXmin(TransactionId xid)
 	{
 		serialControl->tailXid = InvalidTransactionId;
 		serialControl->headXid = InvalidTransactionId;
-		LWLockRelease(SerialSLRULock);
+		LWLockRelease(SerialControlLock);
 		return;
 	}
 
@@ -984,7 +984,7 @@ SerialSetActiveSerXmin(TransactionId xid)
 		{
 			serialControl->tailXid = xid;
 		}
-		LWLockRelease(SerialSLRULock);
+		LWLockRelease(SerialControlLock);
 		return;
 	}
 
@@ -993,7 +993,7 @@ SerialSetActiveSerXmin(TransactionId xid)
 
 	serialControl->tailXid = xid;
 
-	LWLockRelease(SerialSLRULock);
+	LWLockRelease(SerialControlLock);
 }
 
 /*
@@ -1007,12 +1007,12 @@ CheckPointPredicate(void)
 {
 	int			truncateCutoffPage;
 
-	LWLockAcquire(SerialSLRULock, LW_EXCLUSIVE);
+	LWLockAcquire(SerialControlLock, LW_EXCLUSIVE);
 
 	/* Exit quickly if the SLRU is currently not in use. */
 	if (serialControl->headPage < 0)
 	{
-		LWLockRelease(SerialSLRULock);
+		LWLockRelease(SerialControlLock);
 		return;
 	}
 
@@ -1072,7 +1072,7 @@ CheckPointPredicate(void)
 		serialControl->headPage = -1;
 	}
 
-	LWLockRelease(SerialSLRULock);
+	LWLockRelease(SerialControlLock);
 
 	/* Truncate away pages that are no longer required */
 	SimpleLruTruncate(SerialSlruCtl, truncateCutoffPage);
