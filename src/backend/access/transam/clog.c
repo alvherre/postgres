@@ -304,8 +304,8 @@ TransactionIdSetPageStatus(TransactionId xid, int nsubxids,
 	lock = SimpleLruGetBankLock(XactCtl, pageno);
 
 	/*
-	 * When there is contention on the specific SLRU bank lock, we try to
-	 * group multiple updates; a single leader process will perform transaction
+	 * When there is contention on the SLRU bank lock we need, we try to group
+	 * multiple updates; a single leader process will perform transaction
 	 * status updates for multiple backends so that the number of times the
 	 * bank lock needs to be acquired is reduced.
 	 *

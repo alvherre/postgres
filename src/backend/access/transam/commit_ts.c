@@ -793,8 +793,6 @@ DeactivateCommitTs(void)
 	TransamVariables->oldestCommitTsXid = InvalidTransactionId;
 	TransamVariables->newestCommitTsXid = InvalidTransactionId;
 
-	LWLockRelease(CommitTsLock);
-
 	/*
 	 * Remove *all* files.  This is necessary so that there are no leftover
 	 * files; in the case where this feature is later enabled after running
@@ -802,10 +800,16 @@ DeactivateCommitTs(void)
 	 * (We can probably tolerate out-of-sequence files, as they are going to
 	 * be overwritten anyway when we wrap around, but it seems better to be
 	 * tidy.)
+	 *
+	 * Note that we do this with CommitTsLock acquired in exclusive mode.
+	 * This is very heavy-handed, but since this routine can only be called
+	 * in the replica and should happen very rarely, we don't worry too much
+	 * about it.  Note also that no process should be consulting this SLRU
+	 * if we have just deactivated it.
 	 */
-	SimpleLruAcquireAllBankLock(CommitTsCtl, LW_EXCLUSIVE);
 	(void) SlruScanDirectory(CommitTsCtl, SlruScanDirCbDeleteAll, NULL);
-	SimpleLruReleaseAllBankLock(CommitTsCtl);
+
+	LWLockRelease(CommitTsLock);
 }
 
 /*

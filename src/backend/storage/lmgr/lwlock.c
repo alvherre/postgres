@@ -783,7 +783,7 @@ GetLWLockIdentifier(uint32 classId, uint16 eventId)
  * in mode.
  *
  * This function will not block waiting for a lock to become free - that's the
- * callers job.
+ * caller's job.
  *
  * Returns true if the lock isn't free and we need to wait.
  */

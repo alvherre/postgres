@@ -97,8 +97,19 @@ SlruFileName(SlruCtl ctl, char *path, int64 segno)
  */
 #define MAX_WRITEALL_BUFFERS	16
 
+typedef struct SlruWriteAllData
+{
+	int			num_files;		/* # files actually open */
+	int			fd[MAX_WRITEALL_BUFFERS];	/* their FD's */
+	int64		segno[MAX_WRITEALL_BUFFERS];	/* their log seg#s */
+} SlruWriteAllData;
+
+typedef struct SlruWriteAllData *SlruWriteAll;
+
 /*
- * Macro to get the index of the lock for the given slot.
+ * Macro to get the lock index that protects the given slot.
+ *
+ * We can only have 128 bank-protecting LWLocks; but we don'
  *
  * Basically, the slru buffer pool is divided into banks of buffer and there is
  * total SLRU_MAX_BANKLOCKS number of locks to protect access to buffer in the
@@ -110,15 +121,6 @@ SlruFileName(SlruCtl ctl, char *path, int64 segno)
  */
 #define SLRU_SLOTNO_GET_BANKLOCKNO(slotno) \
 	(((slotno) / SLRU_BANK_SIZE) % SLRU_MAX_BANKLOCKS)
-
-typedef struct SlruWriteAllData
-{
-	int			num_files;		/* # files actually open */
-	int			fd[MAX_WRITEALL_BUFFERS];	/* their FD's */
-	int64		segno[MAX_WRITEALL_BUFFERS];	/* their log seg#s */
-} SlruWriteAllData;
-
-typedef struct SlruWriteAllData *SlruWriteAll;
 
 /*
  * Populate a file tag describing a segment file.  We only use the segment
@@ -170,6 +172,9 @@ Size
 SimpleLruShmemSize(int nslots, int nlsns)
 {
 	Size		sz;
+	int			bank_size = nslots / SLRU_MAX_BANK_SIZE;
+
+
 	int			nbanks = nslots / SLRU_BANK_SIZE;
 	int			nbanklocks = Min(nbanks, SLRU_MAX_BANKLOCKS);
 
@@ -226,9 +231,6 @@ SimpleLruInit(SlruCtl ctl, const char *name, int nslots, int nlsns,
 		/* Initialize locks and shared memory area */
 		char	   *ptr;
 		Size		offset;
-		int			slotno;
-		int			bankno;
-		int			banklockno;
 
 		Assert(!found);
 
@@ -269,7 +271,7 @@ SimpleLruInit(SlruCtl ctl, const char *name, int nslots, int nlsns,
 		}
 
 		ptr += BUFFERALIGN(offset);
-		for (slotno = 0; slotno < nslots; slotno++)
+		for (int slotno = 0; slotno < nslots; slotno++)
 		{
 			LWLockInitialize(&shared->buffer_locks[slotno].lock,
 							 buffer_tranche_id);
@@ -282,12 +284,12 @@ SimpleLruInit(SlruCtl ctl, const char *name, int nslots, int nlsns,
 		}
 
 		/* Initialize the bank locks. */
-		for (banklockno = 0; banklockno < nbanklocks; banklockno++)
+		for (int banklockno = 0; banklockno < nbanklocks; banklockno++)
 			LWLockInitialize(&shared->bank_locks[banklockno].lock,
 							 bank_tranche_id);
 
 		/* Initialize the bank lru counters. */
-		for (bankno = 0; bankno < nbanks; bankno++)
+		for (int bankno = 0; bankno < nbanks; bankno++)
 			shared->bank_cur_lru_count[bankno] = 0;
 
 		/* Should fit to estimated shmem size */
