@@ -131,6 +131,19 @@ typedef struct SlruCtlData
 	SlruShared	shared;
 
 	/*
+	 * Bitmask to determine bank number from page number.
+	 */
+	bits16		bank_mask;
+
+	/*
+	 * If true, use long segment filenames formed from lower 48 bits of the
+	 * segment number, e.g. pg_xact/000000001234. Otherwise, use short
+	 * filenames formed from lower 16 bits of the segment number e.g.
+	 * pg_xact/1234.
+	 */
+	bool		long_segment_names;
+
+	/*
 	 * Which sync handler function to use when handing sync requests over to
 	 * the checkpointer.  SYNC_HANDLER_NONE to disable fsync (eg pg_notify).
 	 */
@@ -149,23 +162,11 @@ typedef struct SlruCtlData
 	bool		(*PagePrecedes) (int64, int64);
 
 	/*
-	 * If true, use long segment filenames formed from lower 48 bits of the
-	 * segment number, e.g. pg_xact/000000001234. Otherwise, use short
-	 * filenames formed from lower 16 bits of the segment number e.g.
-	 * pg_xact/1234.
-	 */
-	bool		long_segment_names;
-
-	/*
 	 * Dir is set during SimpleLruInit and does not change thereafter. Since
 	 * it's always the same, it doesn't need to be in shared memory.
 	 */
 	char		Dir[64];
 
-	/*
-	 * Bitmask to determine bank number from page number.
-	 */
-	bits16		bank_mask;
 } SlruCtlData;
 
 typedef SlruCtlData *SlruCtl;
