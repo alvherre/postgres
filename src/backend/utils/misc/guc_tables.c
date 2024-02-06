@@ -2350,7 +2350,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&multixact_offsets_buffers,
-		16, 8, SLRU_MAX_ALLOWED_BUFFERS,
+		16, 16, SLRU_MAX_ALLOWED_BUFFERS,
 		check_multixact_offsets_buffers, NULL, NULL
 	},
 
@@ -2361,7 +2361,7 @@ struct config_int ConfigureNamesInt[] =
 			GUC_UNIT_BLOCKS
 		},
 		&notify_buffers,
-		16, 8, SLRU_MAX_ALLOWED_BUFFERS,
+		16, 16, SLRU_MAX_ALLOWED_BUFFERS,
 		check_notify_buffers, NULL, NULL
 	},
 

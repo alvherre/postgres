@@ -2130,15 +2130,14 @@ TrimMultiXact(void)
 	oldestMXactDB = MultiXactState->oldestMultiXactDB;
 	LWLockRelease(MultiXactGenLock);
 
+	/* Clean up offsets state */
+
 	/*
 	 * (Re-)Initialize our idea of the latest page number for offsets.
 	 */
 	pageno = MultiXactIdToOffsetPage(nextMXact);
 	pg_atomic_write_u64(&MultiXactOffsetCtl->shared->latest_page_number,
 						pageno);
-
-	/* Clean up offsets state */
-	LWLockAcquire(MultiXactOffsetSLRULock, LW_EXCLUSIVE);
 
 	/*
 	 * Zero out the remainder of the current offsets page.  See notes in
@@ -2166,8 +2165,6 @@ TrimMultiXact(void)
 		LWLockRelease(lock);
 	}
 
-	LWLockRelease(MultiXactOffsetSLRULock);
-
 	/*
 	 * And the same for members.
 	 *
@@ -2176,8 +2173,6 @@ TrimMultiXact(void)
 	pageno = MXOffsetToMemberPage(offset);
 	pg_atomic_write_u64(&MultiXactMemberCtl->shared->latest_page_number,
 						pageno);
-
-	LWLockAcquire(MultiXactMemberSLRULock, LW_EXCLUSIVE);
 
 	/*
 	 * Zero out the remainder of the current members page.  See notes in

@@ -36,7 +36,7 @@ NotifyQueueLock						27
 SerializableXactHashLock			28
 SerializableFinishedListLock		29
 SerializablePredicateListLock		30
-SerialControlLock					31
+# 31 was SerialSLRULock
 SyncRepLock							32
 BackgroundWorkerLock				33
 DynamicSharedMemoryControlLock		34

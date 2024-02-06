@@ -872,9 +872,9 @@ SerialAdd(TransactionId xid, SerCommitSeqNo minConflictCommitSeqNo)
 	lock = SimpleLruGetBankLock(SerialSlruCtl, targetPage);
 
 	/*
-	 * In this routine, we must hold both SerialControlLock and SerialSLRULock
-	 * simultaneously while making the SLRU data catch up with the new state
-	 * that we determine.
+	 * In this routine, we must hold both SerialControlLock and the SLRU
+	 * bank lock simultaneously while making the SLRU data catch up with
+	 * the new state that we determine.
 	 */
 	LWLockAcquire(SerialControlLock, LW_EXCLUSIVE);
 
@@ -910,7 +910,7 @@ SerialAdd(TransactionId xid, SerCommitSeqNo minConflictCommitSeqNo)
 	if (isNewPage)
 		serialControl->headPage = targetPage;
 
-	LWLockAcquire(SerialSLRULock, LW_EXCLUSIVE);
+	LWLockAcquire(lock, LW_EXCLUSIVE);
 
 	if (isNewPage)
 	{
@@ -928,7 +928,7 @@ SerialAdd(TransactionId xid, SerCommitSeqNo minConflictCommitSeqNo)
 	SerialValue(slotno, xid) = minConflictCommitSeqNo;
 	SerialSlruCtl->shared->page_dirty[slotno] = true;
 
-	LWLockRelease(SerialSLRULock);
+	LWLockRelease(lock);
 	LWLockRelease(SerialControlLock);
 }
 

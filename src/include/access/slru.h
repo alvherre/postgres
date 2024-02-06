@@ -18,22 +18,6 @@
 #include "storage/sync.h"
 
 /*
- * SLRU bank size for slotno hash banks.  Limit the bank size to 16 because we
- * perform sequential search within a bank (while looking for a target page or
- * while doing victim buffer search) and if we keep this size big then it may
- * affect the performance.
- */
-#define SLRU_BANK_SIZE		16
-
-/*
- * Number of bank locks to protect the in memory buffer slot access within a
- * SLRU bank.  If the number of banks are <= SLRU_MAX_BANKLOCKS then there will
- * be one lock per bank; otherwise each lock will protect multiple banks depends
- * upon the number of banks.
- */
-#define	SLRU_MAX_BANKLOCKS	128
-
-/*
  * To avoid overflowing internal arithmetic and the size_t data type, the
  * number of buffers must not exceed this number.
  */
@@ -119,6 +103,8 @@ typedef struct SlruSharedData
 	 * has lsn_groups_per_page entries per buffer slot, each containing the
 	 * highest LSN known for a contiguous group of SLRU entries on that slot's
 	 * page.
+	 *
+	 * XXX could we make the LSNs to be bank-based?
 	 */
 	XLogRecPtr *group_lsn;
 	int			lsn_groups_per_page;
@@ -177,8 +163,7 @@ typedef struct SlruCtlData
 	char		Dir[64];
 
 	/*
-	 * Mask for slotno banks, considering 1GB SLRU buffer pool size and the
-	 * SLRU_BANK_SIZE bits16 should be sufficient for the bank mask.
+	 * Bitmask to determine bank number from page number.
 	 */
 	bits16		bank_mask;
 } SlruCtlData;
@@ -194,10 +179,10 @@ typedef SlruCtlData *SlruCtl;
 static inline LWLock *
 SimpleLruGetBankLock(SlruCtl ctl, int64 pageno)
 {
-	int			banklockno;
+	int			bankno;
 
-	banklockno = (pageno & ctl->bank_mask) % SLRU_MAX_BANKLOCKS;
-	return &(ctl->shared->bank_locks[banklockno].lock);
+	bankno = pageno & ctl->bank_mask;
+	return &(ctl->shared->bank_locks[bankno].lock);
 }
 
 extern Size SimpleLruShmemSize(int nslots, int nlsns);
@@ -233,7 +218,5 @@ extern bool SlruScanDirCbReportPresence(SlruCtl ctl, char *filename,
 extern bool SlruScanDirCbDeleteAll(SlruCtl ctl, char *filename, int64 segpage,
 								   void *data);
 extern bool check_slru_buffers(const char *name, int *newval);
-extern void SimpleLruAcquireAllBankLock(SlruCtl ctl, LWLockMode mode);
-extern void SimpleLruReleaseAllBankLock(SlruCtl ctl);
 
 #endif							/* SLRU_H */
