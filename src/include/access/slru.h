@@ -70,6 +70,9 @@ typedef enum
 
 /*
  * Shared-memory state
+ *
+ * ControlLock is used to protect access to the other fields, except
+ * latest_page_number, which uses atomics; see comment in slru.c.
  */
 typedef struct SlruSharedData
 {

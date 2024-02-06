@@ -885,8 +885,10 @@ StartupCLOG(void)
 	TransactionId xid = XidFromFullTransactionId(TransamVariables->nextXid);
 	int64		pageno = TransactionIdToPage(xid);
 
-	/* Initialize our idea of the latest page number. */
-	pg_atomic_init_u64(&XactCtl->shared->latest_page_number, pageno);
+	/*
+	 * Initialize our idea of the latest page number.
+	 */
+	pg_atomic_write_u64(&XactCtl->shared->latest_page_number, pageno);
 }
 
 /*

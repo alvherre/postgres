@@ -134,6 +134,11 @@
  *	SerializableXactHashLock
  *		- Protects both PredXact and SerializableXidHash.
  *
+ *	SerialControlLock
+ *		- Protects SerialControlData members
+ *
+ *	SerialSLRULock
+ *		- Protects SerialSlruCtl
  *
  * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -829,9 +834,11 @@ SerialInit(void)
 		/*
 		 * Set control information to reflect empty SLRU.
 		 */
+		LWLockAcquire(SerialControlLock, LW_EXCLUSIVE);
 		serialControl->headPage = -1;
 		serialControl->headXid = InvalidTransactionId;
 		serialControl->tailXid = InvalidTransactionId;
+		LWLockRelease(SerialControlLock);
 	}
 }
 
@@ -864,7 +871,12 @@ SerialAdd(TransactionId xid, SerCommitSeqNo minConflictCommitSeqNo)
 	targetPage = SerialPage(xid);
 	lock = SimpleLruGetBankLock(SerialSlruCtl, targetPage);
 
-	LWLockAcquire(lock, LW_EXCLUSIVE);
+	/*
+	 * In this routine, we must hold both SerialControlLock and SerialSLRULock
+	 * simultaneously while making the SLRU data catch up with the new state
+	 * that we determine.
+	 */
+	LWLockAcquire(SerialControlLock, LW_EXCLUSIVE);
 
 	/*
 	 * If no serializable transactions are active, there shouldn't be anything
@@ -898,6 +910,8 @@ SerialAdd(TransactionId xid, SerCommitSeqNo minConflictCommitSeqNo)
 	if (isNewPage)
 		serialControl->headPage = targetPage;
 
+	LWLockAcquire(SerialSLRULock, LW_EXCLUSIVE);
+
 	if (isNewPage)
 	{
 		/* Initialize intervening pages. */
@@ -914,7 +928,8 @@ SerialAdd(TransactionId xid, SerCommitSeqNo minConflictCommitSeqNo)
 	SerialValue(slotno, xid) = minConflictCommitSeqNo;
 	SerialSlruCtl->shared->page_dirty[slotno] = true;
 
-	LWLockRelease(lock);
+	LWLockRelease(SerialSLRULock);
+	LWLockRelease(SerialControlLock);
 }
 
 /*
@@ -1086,7 +1101,11 @@ CheckPointPredicate(void)
 
 	LWLockRelease(SerialControlLock);
 
-	/* Truncate away pages that are no longer required */
+	/*
+	 * Truncate away pages that are no longer required.  Note that no
+	 * additional locking is required, because this is only called as part of
+	 * a checkpoint, and the validity limits have already been determined.
+	 */
 	SimpleLruTruncate(SerialSlruCtl, truncateCutoffPage);
 
 	/*
