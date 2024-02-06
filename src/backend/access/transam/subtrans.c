@@ -202,7 +202,8 @@ SUBTRANSShmemBuffers(void)
 {
 	/* auto-tune based on shared buffers */
 	if (subtransaction_buffers == 0)
-		return Min(1024, Max(16, NBuffers / 512));
+		return Min(1024, Max(16,
+							 NBuffers / 512 - (NBuffers / 512) % 16));
 
 	return Min(Max(16, subtransaction_buffers), SLRU_MAX_ALLOWED_BUFFERS);
 }
