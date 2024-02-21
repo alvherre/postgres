@@ -55,14 +55,6 @@ typedef enum CopyDest
 } CopyDest;
 
 /*
- * Per-format callback to send output representation of one attribute for
- * a `string`.  `use_quote` tracks if quotes are required in the output
- * representation.
- */
-typedef void (*CopyAttributeOut) (CopyToState cstate, const char *string,
-								  bool use_quote);
-
-/*
  * This struct contains all the state variables used throughout a COPY TO
  * operation.
  *
@@ -105,7 +97,6 @@ typedef struct CopyToStateData
 	MemoryContext copycontext;	/* per-copy execution context */
 
 	FmgrInfo   *out_functions;	/* lookup info for output functions */
-	CopyAttributeOut copy_attribute_out;	/* output representation callback */
 	MemoryContext rowcontext;	/* per-row evaluation context */
 	uint64		bytes_processed;	/* number of bytes processed so far */
 } CopyToStateData;
@@ -126,10 +117,7 @@ static const char BinarySignature[11] = "PGCOPY\n\377\r\n\0";
 static void EndCopy(CopyToState cstate);
 static void ClosePipeToProgram(CopyToState cstate);
 static void CopyOneRowTo(CopyToState cstate, TupleTableSlot *slot);
-
-/* Callbacks for copy_attribute_out */
-static void CopyAttributeOutText(CopyToState cstate, const char *string,
-								 bool use_quote);
+static void CopyAttributeOutText(CopyToState cstate, const char *string);
 static void CopyAttributeOutCSV(CopyToState cstate, const char *string,
 								bool use_quote);
 
@@ -445,15 +433,6 @@ BeginCopyTo(ParseState *pstate,
 	/* Extract options from the statement node tree */
 	ProcessCopyOptions(pstate, &cstate->opts, false /* is_from */ , options);
 
-	/* Set output representation callback */
-	if (!cstate->opts.binary)
-	{
-		if (cstate->opts.csv_mode)
-			cstate->copy_attribute_out = CopyAttributeOutCSV;
-		else
-			cstate->copy_attribute_out = CopyAttributeOutText;
-	}
-
 	/* Process the source/target relation or query */
 	if (rel)
 	{
@@ -633,13 +612,15 @@ BeginCopyTo(ParseState *pstate,
 		cstate->file_encoding = cstate->opts.file_encoding;
 
 	/*
-	 * Set up encoding conversion info.  Even if the file and server encodings
-	 * are the same, we must apply pg_any_to_server() to validate data in
-	 * multibyte encodings.
+	 * Set up encoding conversion info if the file and server encodings differ
+	 * (see also pg_server_to_any).
 	 */
-	cstate->need_transcoding =
-		(cstate->file_encoding != GetDatabaseEncoding() ||
-		 pg_database_encoding_max_length() > 1);
+	if (cstate->file_encoding == GetDatabaseEncoding() ||
+		cstate->file_encoding == PG_SQL_ASCII)
+		cstate->need_transcoding = false;
+	else
+		cstate->need_transcoding = true;
+
 	/* See Multibyte encoding comment above */
 	cstate->encoding_embeds_ascii = PG_ENCODING_IS_CLIENT_ONLY(cstate->file_encoding);
 
@@ -857,8 +838,10 @@ DoCopyTo(CopyToState cstate)
 
 				colname = NameStr(TupleDescAttr(tupDesc, attnum - 1)->attname);
 
-				/* Ignore quotes */
-				cstate->copy_attribute_out(cstate, colname, false);
+				if (cstate->opts.csv_mode)
+					CopyAttributeOutCSV(cstate, colname, false);
+				else
+					CopyAttributeOutText(cstate, colname);
 			}
 
 			CopySendEndOfRow(cstate);
@@ -968,9 +951,11 @@ CopyOneRowTo(CopyToState cstate, TupleTableSlot *slot)
 			{
 				string = OutputFunctionCall(&out_functions[attnum - 1],
 											value);
-
-				cstate->copy_attribute_out(cstate, string,
-										   cstate->opts.force_quote_flags[attnum - 1]);
+				if (cstate->opts.csv_mode)
+					CopyAttributeOutCSV(cstate, string,
+										cstate->opts.force_quote_flags[attnum - 1]);
+				else
+					CopyAttributeOutText(cstate, string);
 			}
 			else
 			{
@@ -1000,8 +985,7 @@ CopyOneRowTo(CopyToState cstate, TupleTableSlot *slot)
 	} while (0)
 
 static void
-CopyAttributeOutText(CopyToState cstate, const char *string,
-					 bool use_quote)
+CopyAttributeOutText(CopyToState cstate, const char *string)
 {
 	const char *ptr;
 	const char *start;

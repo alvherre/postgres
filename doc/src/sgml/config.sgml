@@ -4751,8 +4751,13 @@ ANY <replaceable class="parameter">num_sync</replaceable> ( <replaceable class="
           <varname>primary_conninfo</varname> string, or in a separate
           <filename>~/.pgpass</filename> file on the standby server (use
           <literal>replication</literal> as the database name).
-          Do not specify a database name in the
-          <varname>primary_conninfo</varname> string.
+         </para>
+         <para>
+          For replication slot synchronization (see
+          <xref linkend="logicaldecoding-replication-slots-synchronization"/>),
+          it is also necessary to specify a valid <literal>dbname</literal>
+          in the <varname>primary_conninfo</varname> string. This will only be
+          used for slot synchronization. It is ignored for streaming.
          </para>
          <para>
           This parameter can only be set in the <filename>postgresql.conf</filename>
@@ -9271,6 +9276,42 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
         <filename>postgresql.conf</filename> is not recommended because it would
         affect all sessions.
        </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="guc-transaction-timeout" xreflabel="transaction_timeout">
+      <term><varname>transaction_timeout</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>transaction_timeout</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Terminate any session that spans longer than the specified amount of
+        time in the transaction. The limit applies both to explicit transactions
+        (started with <command>BEGIN</command>) and to an implicitly started
+        transaction corresponding to a single statement.
+        If this value is specified without units, it is taken as milliseconds.
+        A value of zero (the default) disables the timeout.
+       </para>
+
+       <para>
+        If <varname>transaction_timeout</varname> is shorter or equal to
+        <varname>idle_in_transaction_session_timeout</varname> or <varname>statement_timeout</varname>
+        <varname>transaction_timeout</varname> will invalidate the longer timeout.
+       </para>
+
+       <para>
+        Setting <varname>transaction_timeout</varname> in
+        <filename>postgresql.conf</filename> is not recommended because it would
+        affect all sessions.
+       </para>
+
+       <note>
+        <para>
+         Prepared transactions are not subject to this timeout.
+        </para>
+       </note>
       </listitem>
      </varlistentry>
 

@@ -7047,6 +7047,9 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	ObjectAddress address;
 	TupleDesc	tupdesc;
 
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
+
 	/* At top level, permission check was done in ATPrepCmd, else do it */
 	if (recursing)
 		ATSimplePermissions((*cmd)->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
@@ -9095,6 +9098,10 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
 
 	/* Initialize addrs on the first invocation */
 	Assert(!recursing || addrs != NULL);
+
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
+
 	if (!recursing)
 		addrs = new_object_addresses();
 
@@ -11647,6 +11654,9 @@ ATExecAlterConstrRecurse(Constraint *cmdcon, Relation conrel, Relation tgrel,
 	Oid			conoid;
 	Oid			refrelid;
 	bool		changed = false;
+
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
 
 	currcon = (Form_pg_constraint) GETSTRUCT(contuple);
 	conoid = currcon->oid;
@@ -15747,8 +15757,6 @@ index_copy_data(Relation rel, RelFileLocator newrlocator)
 {
 	SMgrRelation dstrel;
 
-	dstrel = smgropen(newrlocator, rel->rd_backend);
-
 	/*
 	 * Since we copy the file directly without looking at the shared buffers,
 	 * we'd better first flush out any pages of the source relation that are
@@ -15764,7 +15772,7 @@ index_copy_data(Relation rel, RelFileLocator newrlocator)
 	 * NOTE: any conflict in relfilenumber value will be caught in
 	 * RelationCreateStorage().
 	 */
-	RelationCreateStorage(newrlocator, rel->rd_rel->relpersistence, true);
+	dstrel = RelationCreateStorage(newrlocator, rel->rd_rel->relpersistence, true);
 
 	/* copy main fork */
 	RelationCopyStorage(RelationGetSmgr(rel), dstrel, MAIN_FORKNUM,

@@ -72,6 +72,7 @@
 #include "postmaster/interrupt.h"
 #include "replication/decode.h"
 #include "replication/logical.h"
+#include "replication/slotsync.h"
 #include "replication/slot.h"
 #include "replication/snapbuild.h"
 #include "replication/syncrep.h"
@@ -243,7 +244,6 @@ static void WalSndShutdown(void) pg_attribute_noreturn();
 static void XLogSendPhysical(void);
 static void XLogSendLogical(void);
 static void WalSndDone(WalSndSendDataCallback send_data);
-static XLogRecPtr GetStandbyFlushRecPtr(TimeLineID *tli);
 static void IdentifySystem(void);
 static void UploadManifest(void);
 static bool HandleUploadManifestPacket(StringInfo buf, off_t *offset,
@@ -1099,7 +1099,7 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 	if (!WALRead(state,
 				 cur_page,
 				 targetPagePtr,
-				 XLOG_BLCKSZ,
+				 count,
 				 currTLI,		/* Pass the current TLI because only
 								 * WalSndSegmentOpen controls whether new TLI
 								 * is needed. */
@@ -1224,7 +1224,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 	{
 		ReplicationSlotCreate(cmd->slotname, false,
 							  cmd->temporary ? RS_TEMPORARY : RS_PERSISTENT,
-							  false, false);
+							  false, false, false);
 
 		if (reserve_wal)
 		{
@@ -1255,7 +1255,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 		 */
 		ReplicationSlotCreate(cmd->slotname, true,
 							  cmd->temporary ? RS_TEMPORARY : RS_EPHEMERAL,
-							  two_phase, failover);
+							  two_phase, failover, false);
 
 		/*
 		 * Do options check early so that we can bail before calling the
@@ -2966,6 +2966,7 @@ XLogSendPhysical(void)
 	Size		nbytes;
 	XLogSegNo	segno;
 	WALReadError errinfo;
+	Size		rbytes;
 
 	/* If requested switch the WAL sender to the stopping state. */
 	if (got_STOPPING)
@@ -3181,7 +3182,16 @@ XLogSendPhysical(void)
 	enlargeStringInfo(&output_message, nbytes);
 
 retry:
-	if (!WALRead(xlogreader,
+	/* attempt to read WAL from WAL buffers first */
+	rbytes = WALReadFromBuffers(&output_message.data[output_message.len],
+								startptr, nbytes, xlogreader->seg.ws_tli);
+	output_message.len += rbytes;
+	startptr += rbytes;
+	nbytes -= rbytes;
+
+	/* now read the remaining WAL from WAL file */
+	if (nbytes > 0 &&
+		!WALRead(xlogreader,
 				 &output_message.data[output_message.len],
 				 startptr,
 				 nbytes,
@@ -3375,14 +3385,17 @@ WalSndDone(WalSndSendDataCallback send_data)
 }
 
 /*
- * Returns the latest point in WAL that has been safely flushed to disk, and
- * can be sent to the standby. This should only be called when in recovery,
- * ie. we're streaming to a cascaded standby.
+ * Returns the latest point in WAL that has been safely flushed to disk.
+ * This should only be called when in recovery.
+ *
+ * This is called either by cascading walsender to find WAL postion to be sent
+ * to a cascaded standby or by slot synchronization function to validate remote
+ * slot's lsn before syncing it locally.
  *
  * As a side-effect, *tli is updated to the TLI of the last
  * replayed WAL record.
  */
-static XLogRecPtr
+XLogRecPtr
 GetStandbyFlushRecPtr(TimeLineID *tli)
 {
 	XLogRecPtr	replayPtr;
@@ -3390,6 +3403,8 @@ GetStandbyFlushRecPtr(TimeLineID *tli)
 	XLogRecPtr	receivePtr;
 	TimeLineID	receiveTLI;
 	XLogRecPtr	result;
+
+	Assert(am_cascading_walsender || IsSyncingReplicationSlots());
 
 	/*
 	 * We can safely send what's already been replayed. Also, if walreceiver
@@ -3461,12 +3476,8 @@ HandleWalSndInitStopping(void)
 static void
 WalSndLastCycleHandler(SIGNAL_ARGS)
 {
-	int			save_errno = errno;
-
 	got_SIGUSR2 = true;
 	SetLatch(MyLatch);
-
-	errno = save_errno;
 }
 
 /* Set up signal handlers */

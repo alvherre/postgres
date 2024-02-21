@@ -1864,11 +1864,11 @@ reset enable_nestloop;
 explain (costs off)
 select a.unique1, b.unique2
   from onek a left join onek b on a.unique1 = b.unique2
-  where b.unique2 = any (select q1 from int8_tbl c where c.q1 < b.unique1);
+  where (b.unique2, random() > 0) = any (select q1, random() > 0 from int8_tbl c where c.q1 < b.unique1);
 
 select a.unique1, b.unique2
   from onek a left join onek b on a.unique1 = b.unique2
-  where b.unique2 = any (select q1 from int8_tbl c where c.q1 < b.unique1);
+  where (b.unique2, random() > 0) = any (select q1, random() > 0 from int8_tbl c where c.q1 < b.unique1);
 
 --
 -- test full-join strength reduction
@@ -2405,6 +2405,18 @@ left join (select coalesce(y.q1, 1) from int8_tbl y
 	right join sj j1 inner join sj j2 on j1.a = j2.a
 	on true) z
 on true;
+
+-- Test processing target lists in lateral subqueries
+explain (verbose, costs off)
+SELECT t3.a FROM sj t1, sj t2,
+LATERAL (SELECT t1.a WHERE t1.a <> 1
+		 GROUP BY (t1.a) HAVING t1.a > 0 ORDER BY t1.a LIMIT 1) t3,
+LATERAL (SELECT t1.a,t3.a WHERE t1.a <> t3.a+t2.a
+		 GROUP BY (t3.a) HAVING t1.a > t3.a*t3.a+t2.a/t1.a LIMIT 2) t4,
+LATERAL (SELECT * FROM sj TABLESAMPLE bernoulli(t1.a/t2.a)
+		 REPEATABLE (t1.a+t2.a)) t5,
+LATERAL generate_series(1, t1.a + t2.a) AS t6
+WHERE t1.a = t2.a;
 
 -- Check updating of Lateral links from top-level query to the removing relation
 explain (COSTS OFF)
@@ -3038,7 +3050,7 @@ select * from (values (0), (1)) v(id),
 lateral (select * from int8_tbl t1,
          lateral (select * from
                     (select * from int8_tbl t2
-                     where q1 = any (select q2 from int8_tbl t3
+                     where (q1, random() > 0) = any (select q2, random() > 0 from int8_tbl t3
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
@@ -3047,7 +3059,7 @@ select * from (values (0), (1)) v(id),
 lateral (select * from int8_tbl t1,
          lateral (select * from
                     (select * from int8_tbl t2
-                     where q1 = any (select q2 from int8_tbl t3
+                     where (q1, random() > 0) = any (select q2, random() > 0 from int8_tbl t3
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;

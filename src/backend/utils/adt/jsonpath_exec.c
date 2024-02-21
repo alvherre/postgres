@@ -268,6 +268,8 @@ static JsonbValue *getScalar(JsonbValue *scalar, enum jbvType type);
 static JsonbValue *wrapItemsInArray(const JsonValueList *items);
 static int	compareDatetime(Datum val1, Oid typid1, Datum val2, Oid typid2,
 							bool useTz, bool *cast_error);
+static void checkTimezoneIsUsedForCast(bool useTz, const char *type1,
+									   const char *type2);
 
 /****************** User interface to JsonPath executor ********************/
 
@@ -1672,6 +1674,9 @@ executeBoolItem(JsonPathExecContext *cxt, JsonPathItem *jsp,
 	JsonPathBool res;
 	JsonPathBool res2;
 
+	/* since this function recurses, it could be driven to stack overflow */
+	check_stack_depth();
+
 	if (!canHaveNext && jspHasNext(jsp))
 		elog(ERROR, "boolean jsonpath item cannot have next item");
 
@@ -2409,6 +2414,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 													value);
 						break;
 					case TIMESTAMPTZOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "timestamptz", "date");
 						value = DirectFunctionCall1(timestamptz_date,
 													value);
 						break;
@@ -2433,6 +2440,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 					case TIMEOID:	/* Nothing to do for TIME */
 						break;
 					case TIMETZOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "timetz", "time");
 						value = DirectFunctionCall1(timetz_time,
 													value);
 						break;
@@ -2441,6 +2450,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 													value);
 						break;
 					case TIMESTAMPTZOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "timestamptz", "time");
 						value = DirectFunctionCall1(timestamptz_time,
 													value);
 						break;
@@ -2480,6 +2491,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 													 text_to_cstring(datetime)))));
 						break;
 					case TIMEOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "time", "timetz");
 						value = DirectFunctionCall1(time_timetz,
 													value);
 						break;
@@ -2531,6 +2544,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 					case TIMESTAMPOID:	/* Nothing to do for TIMESTAMP */
 						break;
 					case TIMESTAMPTZOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "timestamptz", "timestamp");
 						value = DirectFunctionCall1(timestamptz_timestamp,
 													value);
 						break;
@@ -2570,6 +2585,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 				switch (typid)
 				{
 					case DATEOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "date", "timestamptz");
 						value = DirectFunctionCall1(date_timestamptz,
 													value);
 						break;
@@ -2581,6 +2598,8 @@ executeDateTimeMethod(JsonPathExecContext *cxt, JsonPathItem *jsp,
 													 text_to_cstring(datetime)))));
 						break;
 					case TIMESTAMPOID:
+						checkTimezoneIsUsedForCast(cxt->useTz,
+												   "timestamp", "timestamptz");
 						value = DirectFunctionCall1(timestamp_timestamptz,
 													value);
 						break;

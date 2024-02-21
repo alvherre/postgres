@@ -565,7 +565,7 @@ GetOldestUnsummarizedLSN(TimeLineID *tli, bool *lsn_is_exact,
 	if (unsummarized_tli == 0)
 		ereport(ERROR,
 				errcode(ERRCODE_INTERNAL_ERROR),
-				errmsg_internal("no WAL found on timeline %d", latest_tli));
+				errmsg_internal("no WAL found on timeline %u", latest_tli));
 
 	/*
 	 * Don't try to summarize anything older than the end LSN of the newest
@@ -909,7 +909,7 @@ SummarizeWAL(TimeLineID tli, XLogRecPtr start_lsn, bool exact,
 				 * able to read a complete record.
 				 */
 				ereport(DEBUG1,
-						errmsg_internal("could not read WAL from timeline %d at %X/%X: end of WAL at %X/%X",
+						errmsg_internal("could not read WAL from timeline %u at %X/%X: end of WAL at %X/%X",
 										tli,
 										LSN_FORMAT_ARGS(xlogreader->EndRecPtr),
 										LSN_FORMAT_ARGS(private_data->read_upto)));
@@ -1064,7 +1064,7 @@ SummarizeWAL(TimeLineID tli, XLogRecPtr start_lsn, bool exact,
 
 		/* Tell the user what we did. */
 		ereport(DEBUG1,
-				errmsg("summarized WAL on TLI %d from %X/%X to %X/%X",
+				errmsg("summarized WAL on TLI %u from %X/%X to %X/%X",
 					   tli,
 					   LSN_FORMAT_ARGS(summary_start_lsn),
 					   LSN_FORMAT_ARGS(summary_end_lsn)));
@@ -1318,12 +1318,7 @@ summarizer_read_local_xlog_page(XLogReaderState *state,
 		}
 	}
 
-	/*
-	 * Even though we just determined how much of the page can be validly read
-	 * as 'count', read the whole page anyway. It's guaranteed to be
-	 * zero-padded up to the page boundary if it's incomplete.
-	 */
-	if (!WALRead(state, cur_page, targetPagePtr, XLOG_BLCKSZ,
+	if (!WALRead(state, cur_page, targetPagePtr, count,
 				 private_data->tli, &errinfo))
 		WALReadRaiseError(&errinfo);
 

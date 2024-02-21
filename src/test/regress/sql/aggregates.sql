@@ -1229,7 +1229,24 @@ EXPLAIN (VERBOSE, COSTS OFF)
 SELECT y,x,array_agg(distinct w) FROM btg WHERE y < 0 GROUP BY x,y;
 RESET enable_incremental_sort;
 
-DROP TABLE btg;
+-- Check we don't pick aggregate path key instead of grouping path key
+CREATE TABLE group_agg_pk AS SELECT
+  i % 10 AS x,
+  i % 2 AS y,
+  i % 2 AS z,
+  2 AS w,
+  i % 10 AS f
+FROM generate_series(1,100) AS i;
+ANALYZE group_agg_pk;
+SET enable_nestloop = off;
+SET enable_hashjoin = off;
+SELECT
+  c1.z, c1.w, string_agg(''::text, repeat(''::text, c1.f) ORDER BY c1.x,c1.y)
+FROM group_agg_pk c1 JOIN group_agg_pk c2 ON (c1.x = c2.f)
+GROUP BY c1.w, c1.z;
+RESET enable_nestloop;
+RESET enable_hashjoin;
+DROP TABLE group_agg_pk;
 
 -- The case, when scanning sort order correspond to aggregate sort order but
 -- can not be found in the group-by list
@@ -1245,13 +1262,12 @@ DROP TABLE agg_sort_order CASCADE;
 SET enable_hashjoin = off;
 SET enable_nestloop = off;
 explain (COSTS OFF)
-SELECT c1.relname,c1.relpages
-FROM pg_class c1 JOIN pg_class c2 ON (c1.relname=c2.relname AND c1.relpages=c2.relpages)
-GROUP BY c1.reltuples,c1.relpages,c1.relname
-ORDER BY c1.relpages, c1.relname, c1.relpages*c1.relpages;
+SELECT b1.x,b1.w FROM btg b1 JOIN btg b2 ON (b1.z=b2.z AND b1.w=b2.w)
+GROUP BY b1.x,b1.z,b1.w ORDER BY b1.z, b1.w, b1.x*b1.x;
 RESET enable_hashjoin;
 RESET enable_nestloop;
 
+DROP TABLE btg;
 RESET enable_hashagg;
 RESET max_parallel_workers;
 RESET max_parallel_workers_per_gather;
