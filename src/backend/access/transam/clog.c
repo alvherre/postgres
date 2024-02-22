@@ -443,7 +443,6 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 {
 	volatile PROC_HDR *procglobal = ProcGlobal;
 	PGPROC	   *proc = MyProc;
-	int			pgprocno = MyProcNumber;
 	uint32		nextidx;
 	uint32		wakeidx;
 	int			prevpageno;
@@ -529,7 +528,7 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 
 		if (pg_atomic_compare_exchange_u32(&procglobal->clogGroupFirst,
 										   &nextidx,
-										   (uint32) pgprocno))
+										   (uint32) MyProcNumber))
 			break;
 	}
 
@@ -564,14 +563,10 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 	}
 
 	/*
-	 * Acquire the SLRU bank lock for the first page in the group before we
-	 * close this group by setting procglobal->clogGroupFirst as
-	 * INVALID_PGPROCNO so that we do not close the new entries to the group
-	 * even before getting the lock and losing whole purpose of the group
-	 * update.
+	 * Acquire the SLRU bank lock that corresponds to the page we originally
+	 * wanted to modify.
 	 */
-	nextidx = pg_atomic_read_u32(&procglobal->clogGroupFirst);
-	prevpageno = ProcGlobal->allProcs[nextidx].clogGroupMemberPage;
+	prevpageno = ProcGlobal->allProcs[MyProcNumber].clogGroupMemberPage;
 	prevlock = SimpleLruGetBankLock(XactCtl, prevpageno);
 	LWLockAcquire(prevlock, LW_EXCLUSIVE);
 
