@@ -77,6 +77,22 @@ typedef struct ReplicationSlotOnDisk
 	ReplicationSlotPersistentData slotdata;
 } ReplicationSlotOnDisk;
 
+/*
+ * Lookup table for slot invalidation causes.
+ */
+const char *const SlotInvalidationCauses[] = {
+	[RS_INVAL_NONE] = "none",
+	[RS_INVAL_WAL_REMOVED] = "wal_removed",
+	[RS_INVAL_HORIZON] = "rows_removed",
+	[RS_INVAL_WAL_LEVEL] = "wal_level_insufficient",
+};
+
+/* Maximum number of invalidation causes */
+#define	RS_INVAL_MAX_CAUSES RS_INVAL_WAL_LEVEL
+
+StaticAssertDecl(lengthof(SlotInvalidationCauses) == (RS_INVAL_MAX_CAUSES + 1),
+				 "array length mismatch");
+
 /* size of version independent data */
 #define ReplicationSlotOnDiskConstantSize \
 	offsetof(ReplicationSlotOnDisk, slotdata)
@@ -1236,6 +1252,20 @@ restart:
 		 * concurrently being dropped by a backend connected to another DB.
 		 *
 		 * That's fairly unlikely in practice, so we'll just bail out.
+		 *
+		 * The slot sync worker holds a shared lock on the database before
+		 * operating on synced logical slots to avoid conflict with the drop
+		 * happening here. The persistent synced slots are thus safe but there
+		 * is a possibility that the slot sync worker has created a temporary
+		 * slot (which stays active even on release) and we are trying to drop
+		 * that here. In practice, the chances of hitting this scenario are
+		 * less as during slot synchronization, the temporary slot is
+		 * immediately converted to persistent and thus is safe due to the
+		 * shared lock taken on the database. So, we'll just bail out in such
+		 * a case.
+		 *
+		 * XXX: We can consider shutting down the slot sync worker before
+		 * trying to drop synced temporary slots here.
 		 */
 		if (active_pid)
 			ereport(ERROR,
@@ -2290,23 +2320,28 @@ RestoreSlotFromDisk(const char *name)
 }
 
 /*
- * Maps the pg_replication_slots.conflict_reason text value to
- * ReplicationSlotInvalidationCause enum value
+ * Maps a conflict reason for a replication slot to
+ * ReplicationSlotInvalidationCause.
  */
 ReplicationSlotInvalidationCause
-GetSlotInvalidationCause(char *conflict_reason)
+GetSlotInvalidationCause(const char *conflict_reason)
 {
+	ReplicationSlotInvalidationCause cause;
+	ReplicationSlotInvalidationCause result = RS_INVAL_NONE;
+	bool		found PG_USED_FOR_ASSERTS_ONLY = false;
+
 	Assert(conflict_reason);
 
-	if (strcmp(conflict_reason, SLOT_INVAL_WAL_REMOVED_TEXT) == 0)
-		return RS_INVAL_WAL_REMOVED;
-	else if (strcmp(conflict_reason, SLOT_INVAL_HORIZON_TEXT) == 0)
-		return RS_INVAL_HORIZON;
-	else if (strcmp(conflict_reason, SLOT_INVAL_WAL_LEVEL_TEXT) == 0)
-		return RS_INVAL_WAL_LEVEL;
-	else
-		Assert(0);
+	for (cause = RS_INVAL_NONE; cause <= RS_INVAL_MAX_CAUSES; cause++)
+	{
+		if (strcmp(SlotInvalidationCauses[cause], conflict_reason) == 0)
+		{
+			found = true;
+			result = cause;
+			break;
+		}
+	}
 
-	/* Keep compiler quiet */
-	return RS_INVAL_NONE;
+	Assert(found);
+	return result;
 }

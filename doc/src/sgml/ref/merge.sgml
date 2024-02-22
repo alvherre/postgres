@@ -104,12 +104,15 @@ DELETE
    privilege on the <replaceable class="parameter">target_table_name</replaceable>.
    If you specify a delete action, you must have the <literal>DELETE</literal>
    privilege on the <replaceable class="parameter">target_table_name</replaceable>.
-   Privileges are tested once at statement start and are checked
-   whether or not particular <literal>WHEN</literal> clauses are executed.
    You will require the <literal>SELECT</literal> privilege on any column(s)
    of the <replaceable class="parameter">data_source</replaceable> and
    <replaceable class="parameter">target_table_name</replaceable> referred to
-   in any <literal>condition</literal> or <literal>expression</literal>.
+   in any <literal>condition</literal> or <literal>expression</literal>;
+   in addition, if a <literal>DO NOTHING</literal> action is specified, you
+   will require the <literal>SELECT</literal> privilege on at least one column
+   of <replaceable class="parameter">target_table_name</replaceable>.
+   Privileges are tested once at statement start and are checked
+   whether or not particular <literal>WHEN</literal> clauses are executed.
   </para>
 
   <para>
