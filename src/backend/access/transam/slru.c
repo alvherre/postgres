@@ -629,6 +629,7 @@ SlruInternalWritePage(SlruCtl ctl, int slotno, SlruWriteAll fdata)
 	int			bankno = SlotGetBankNumber(slotno);
 	bool		ok;
 
+	Assert(shared->page_status[slotno] != SLRU_PAGE_EMPTY);
 	Assert(LWLockHeldByMeInMode(SimpleLruGetBankLock(ctl, pageno), LW_EXCLUSIVE));
 
 	/* If a write is in progress, wait for it to finish */
@@ -1327,6 +1328,9 @@ SimpleLruWriteAll(SlruCtl ctl, bool allow_redirtied)
 			LWLockAcquire(&shared->bank_locks[curbank].lock, LW_EXCLUSIVE);
 			prevbank = curbank;
 		}
+
+		if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
+			continue;
 
 		SlruInternalWritePage(ctl, slotno, &fdata);
 
