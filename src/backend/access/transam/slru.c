@@ -1,28 +1,38 @@
 /*-------------------------------------------------------------------------
  *
  * slru.c
- *		Simple LRU buffering for transaction status logfiles
+ *		Simple LRU buffering for wrap-around-able permanent metadata
  *
- * We use a simple least-recently-used scheme to manage a pool of page
- * buffers.  Under ordinary circumstances we expect that write
- * traffic will occur mostly to the latest page (and to the just-prior
- * page, soon after a page transition).  Read traffic will probably touch
- * a larger span of pages, but in any case a fairly small number of page
- * buffers should be sufficient.  So, we just search the buffers using plain
- * linear search; there's no need for a hashtable or anything fancy.
- * The management algorithm is straight LRU except that we will never swap
- * out the latest page (since we know it's going to be hit again eventually).
+ * This module is used to maintain various pieces of transaction status
+ * indexed by TransactionId (such as commit status, parent transaction ID,
+ * commit timestamp), as well as storage for multixacts, serializable
+ * isolation locks and NOTIFY traffic.  Extensions can define their own
+ * SLRUs, too.
  *
- * We use a control LWLock to protect the shared data structures, plus
- * per-buffer LWLocks that synchronize I/O for each buffer.  The control lock
- * must be held to examine or modify any shared state.  A process that is
- * reading in or writing out a page buffer does not hold the control lock,
- * only the per-buffer lock for the buffer it is working on.  One exception
- * is latest_page_number, which is read and written using atomic ops.
+ * Under ordinary circumstances we expect that write traffic will occur
+ * mostly to the latest page (and to the just-prior page, soon after a
+ * page transition).  Read traffic will probably touch a larger span of
+ * pages, but a relatively small number of buffers should be sufficient.
  *
- * "Holding the control lock" means exclusive lock in all cases except for
- * SimpleLruReadPage_ReadOnly(); see comments for SlruRecentlyUsed() for
- * the implications of that.
+ * We use a simple least-recently-used scheme to manage a pool of shared
+ * page buffers, split in banks by the lowest bits of the page number, and
+ * the management algorithm only processes the bank to which the desired
+ * page belongs, so a linear search is sufficient; there's no need for a
+ * hashtable or anything fancy.  The algorithm is straight LRU except that
+ * we will never swap out the latest page (since we know it's going to be
+ * hit again eventually).
+ *
+ * We use per-bank control LWLocks to protect the shared data structures,
+ * plus per-buffer LWLocks that synchronize I/O for each buffer.  The
+ * bank's control lock must be held to examine or modify any of the bank's
+ * shared state.  A process that is reading in or writing out a page
+ * buffer does not hold the control lock, only the per-buffer lock for the
+ * buffer it is working on.  One exception is latest_page_number, which is
+ * read and written using atomic ops.
+ *
+ * "Holding the bank control lock" means exclusive lock in all cases
+ * except for SimpleLruReadPage_ReadOnly(); see comments for
+ * SlruRecentlyUsed() for the implications of that.
  *
  * When initiating I/O on a buffer, we acquire the per-buffer lock exclusively
  * before releasing the control lock.  The per-buffer lock is released after
@@ -308,18 +318,36 @@ SimpleLruInit(SlruCtl ctl, const char *name, int nslots, int nlsns,
 }
 
 /*
+ * Helper function for GUC check_hook to check whether slru buffers are in
+ * multiples of SLRU_BANK_SIZE.
+ */
+bool
+check_slru_buffers(const char *name, int *newval)
+{
+	/* Valid values are multiples of SLRU_BANK_SIZE */
+	if (*newval % SLRU_BANK_SIZE == 0)
+		return true;
+
+	GUC_check_errdetail("\"%s\" must be a multiple of %d", name,
+						SLRU_BANK_SIZE);
+	return false;
+}
+
+/*
  * Initialize (or reinitialize) a page to zeroes.
  *
  * The page is not actually written, just set up in shared memory.
  * The slot number of the new page is returned.
  *
- * Control lock must be held at entry, and will be held at exit.
+ * Bank lock must be held at entry, and will be held at exit.
  */
 int
 SimpleLruZeroPage(SlruCtl ctl, int64 pageno)
 {
 	SlruShared	shared = ctl->shared;
 	int			slotno;
+
+	Assert(LWLockHeldByMeInMode(SimpleLruGetBankLock(ctl, pageno), LW_EXCLUSIVE));
 
 	/* Find a suitable buffer slot for the page */
 	slotno = SlruSelectLRUPage(ctl, pageno);
@@ -381,7 +409,7 @@ SimpleLruZeroLSNs(SlruCtl ctl, int slotno)
  * guarantee that new I/O hasn't been started before we return, though.
  * In fact the slot might not even contain the same page anymore.)
  *
- * Control lock must be held at entry, and will be held at exit.
+ * Bank lock must be held at entry, and will be held at exit.
  */
 static void
 SimpleLruWaitIO(SlruCtl ctl, int slotno)
@@ -444,8 +472,7 @@ SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok,
 {
 	SlruShared	shared = ctl->shared;
 
-	/* Caller must hold the bank lock for the input page. */
-	Assert(LWLockHeldByMe(SimpleLruGetBankLock(ctl, pageno)));
+	Assert(LWLockHeldByMeInMode(SimpleLruGetBankLock(ctl, pageno), LW_EXCLUSIVE));
 
 	/* Outer loop handles restart if we must wait for someone else's I/O */
 	for (;;)
@@ -505,7 +532,7 @@ SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok,
 		/* Set the LSNs for this newly read-in page to zero */
 		SimpleLruZeroLSNs(ctl, slotno);
 
-		/* Re-acquire control lock and update page state */
+		/* Re-acquire bank control lock and update page state */
 		LWLockAcquire(&shared->bank_locks[bankno].lock, LW_EXCLUSIVE);
 
 		Assert(shared->page_number[slotno] == pageno &&
@@ -540,7 +567,7 @@ SimpleLruReadPage(SlruCtl ctl, int64 pageno, bool write_ok,
  * Return value is the shared-buffer slot number now holding the page.
  * The buffer's LRU access info is updated.
  *
- * Control lock must NOT be held at entry, but will be held at exit.
+ * Bank control lock must NOT be held at entry, but will be held at exit.
  * It is unspecified whether the lock will be shared or exclusive.
  */
 int
@@ -592,7 +619,7 @@ SimpleLruReadPage_ReadOnly(SlruCtl ctl, int64 pageno, TransactionId xid)
  * the write).  However, we *do* attempt a fresh write even if the page
  * is already being written; this is for checkpoints.
  *
- * Control lock must be held at entry, and will be held at exit.
+ * Bank lock must be held at entry, and will be held at exit.
  */
 static void
 SlruInternalWritePage(SlruCtl ctl, int slotno, SlruWriteAll fdata)
@@ -601,6 +628,8 @@ SlruInternalWritePage(SlruCtl ctl, int slotno, SlruWriteAll fdata)
 	int64		pageno = shared->page_number[slotno];
 	int			bankno = SlotGetBankNumber(slotno);
 	bool		ok;
+
+	Assert(LWLockHeldByMeInMode(SimpleLruGetBankLock(ctl, pageno), LW_EXCLUSIVE));
 
 	/* If a write is in progress, wait for it to finish */
 	while (shared->page_status[slotno] == SLRU_PAGE_WRITE_IN_PROGRESS &&
@@ -628,7 +657,7 @@ SlruInternalWritePage(SlruCtl ctl, int slotno, SlruWriteAll fdata)
 	/* Acquire per-buffer lock (cannot deadlock, see notes at top) */
 	LWLockAcquire(&shared->buffer_locks[slotno].lock, LW_EXCLUSIVE);
 
-	/* Release control lock while doing I/O */
+	/* Release bank lock while doing I/O */
 	LWLockRelease(&shared->bank_locks[bankno].lock);
 
 	/* Do the write */
@@ -643,7 +672,7 @@ SlruInternalWritePage(SlruCtl ctl, int slotno, SlruWriteAll fdata)
 			CloseTransientFile(fdata->fd[i]);
 	}
 
-	/* Re-acquire control lock and update page state */
+	/* Re-acquire bank lock and update page state */
 	LWLockAcquire(&shared->bank_locks[bankno].lock, LW_EXCLUSIVE);
 
 	Assert(shared->page_number[slotno] == pageno &&
@@ -1056,6 +1085,40 @@ SlruReportIOError(SlruCtl ctl, int64 pageno, TransactionId xid)
 			elog(ERROR, "unrecognized SimpleLru error cause: %d",
 				 (int) slru_errcause);
 			break;
+	}
+}
+
+/*
+ * Mark a buffer slot "most recently used".
+ */
+static inline void
+SlruRecentlyUsed(SlruShared shared, int slotno)
+{
+	int			bankno = SlotGetBankNumber(slotno);
+	int			new_lru_count = shared->bank_cur_lru_count[bankno];
+
+	/*
+	 * The reason for the if-test is that there are often many consecutive
+	 * accesses to the same page (particularly the latest page).  By
+	 * suppressing useless increments of bank_cur_lru_count, we reduce the
+	 * probability that old pages' counts will "wrap around" and make them
+	 * appear recently used.
+	 *
+	 * We allow this code to be executed concurrently by multiple processes
+	 * within SimpleLruReadPage_ReadOnly().  As long as int reads and writes
+	 * are atomic, this should not cause any completely-bogus values to enter
+	 * the computation.  However, it is possible for either bank_cur_lru_count
+	 * or individual page_lru_count entries to be "reset" to lower values than
+	 * they should have, in case a process is delayed while it executes this
+	 * function.  With care in SlruSelectLRUPage(), this does little harm, and
+	 * in any case the absolute worst possible consequence is a nonoptimal
+	 * choice of page to evict.  The gain from allowing concurrent reads of
+	 * SLRU pages seems worth it.
+	 */
+	if (new_lru_count != shared->page_lru_count[slotno])
+	{
+		shared->bank_cur_lru_count[bankno] = ++new_lru_count;
+		shared->page_lru_count[slotno] = new_lru_count;
 	}
 }
 
@@ -1759,51 +1822,4 @@ SlruSyncFileTag(SlruCtl ctl, const FileTag *ftag, char *path)
 
 	errno = save_errno;
 	return result;
-}
-
-/*
- * Function to mark a buffer slot "most recently used".
- *
- * The reason for the if-test is that there are often many consecutive
- * accesses to the same page (particularly the latest page).  By suppressing
- * useless increments of bank_cur_lru_count, we reduce the probability that old
- * pages' counts will "wrap around" and make them appear recently used.
- *
- * We allow this code to be executed concurrently by multiple processes within
- * SimpleLruReadPage_ReadOnly().  As long as int reads and writes are atomic,
- * this should not cause any completely-bogus values to enter the computation.
- * However, it is possible for either bank_cur_lru_count or individual
- * page_lru_count entries to be "reset" to lower values than they should have,
- * in case a process is delayed while it executes this function.  With care in
- * SlruSelectLRUPage(), this does little harm, and in any case the absolute
- * worst possible consequence is a nonoptimal choice of page to evict.  The
- * gain from allowing concurrent reads of SLRU pages seems worth it.
- */
-static inline void
-SlruRecentlyUsed(SlruShared shared, int slotno)
-{
-	int			bankno = SlotGetBankNumber(slotno);
-	int			new_lru_count = shared->bank_cur_lru_count[bankno];
-
-	if (new_lru_count != shared->page_lru_count[slotno])
-	{
-		shared->bank_cur_lru_count[bankno] = ++new_lru_count;
-		shared->page_lru_count[slotno] = new_lru_count;
-	}
-}
-
-/*
- * Helper function for GUC check_hook to check whether slru buffers are in
- * multiples of SLRU_BANK_SIZE.
- */
-bool
-check_slru_buffers(const char *name, int *newval)
-{
-	/* Valid values are multiples of SLRU_BANK_SIZE */
-	if (*newval % SLRU_BANK_SIZE == 0)
-		return true;
-
-	GUC_check_errdetail("\"%s\" must be a multiple of %d", name,
-						SLRU_BANK_SIZE);
-	return false;
 }

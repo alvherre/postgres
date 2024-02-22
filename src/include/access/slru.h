@@ -99,12 +99,10 @@ typedef struct SlruSharedData
 	/*
 	 * Optional array of WAL flush LSNs associated with entries in the SLRU
 	 * pages.  If not zero/NULL, we must flush WAL before writing pages (true
-	 * for pg_xact, false for multixact, pg_subtrans, pg_notify).  group_lsn[]
-	 * has lsn_groups_per_page entries per buffer slot, each containing the
+	 * for pg_xact, false for everything else).  group_lsn[] has
+	 * lsn_groups_per_page entries per buffer slot, each containing the
 	 * highest LSN known for a contiguous group of SLRU entries on that slot's
 	 * page.
-	 *
-	 * XXX could we make the LSNs to be bank-based?
 	 */
 	XLogRecPtr *group_lsn;
 	int			lsn_groups_per_page;

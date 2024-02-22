@@ -3,12 +3,13 @@
  * clog.c
  *		PostgreSQL transaction-commit-log manager
  *
- * This module replaces the old "pg_log" access code, which treated pg_log
- * essentially like a relation, in that it went through the regular buffer
- * manager.  The problem with that was that there wasn't any good way to
- * recycle storage space for transactions so old that they'll never be
- * looked up again.  Now we use specialized access code so that the commit
- * log can be broken into relatively small, independent segments.
+ * This module stores two bits per transaction regarding its commit/abort
+ * status; the status for four transactions fit in a byte.
+ *
+ * This would be a pretty simple abstraction on top of slru.c, except that
+ * for performance reasons we allow multiple transactions that are
+ * committing concurrently to form a queue, so that a single process can
+ * update the status for all of them within a single lock acquisition run.
  *
  * XLOG interactions: this module generates an XLOG record whenever a new
  * CLOG page is initialized to zeroes.  Other writes of CLOG come from
