@@ -462,39 +462,27 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 	proc->clogGroupMemberLsn = lsn;
 
 	/*
-	 * The underlying SLRU is using bank-wise lock so it is possible that here
-	 * we might get requesters who are contending on different SLRU-bank
-	 * locks. But in the group, we try to only add the requesters who want to
-	 * update the same page i.e. they would be requesting for the same
-	 * SLRU-bank lock as well.  The main reason for now allowing requesters of
-	 * different pages together is 1) Once the leader acquires the lock they
-	 * don't need to fetch multiple pages and do multiple I/O under the same
-	 * lock 2) The leader need not switch the SLRU-bank lock if the different
-	 * pages are from different SLRU banks 3) And the most important reason is
-	 * that most of the time the contention will occur in high concurrent OLTP
-	 * workload is going on and at that time most of the transactions would be
-	 * generated during the same time and most of them would fall in same clog
-	 * page as each page can hold status of 32k transactions.  However, there
-	 * is an exception where in some extreme conditions we might get different
-	 * page requests added in the same group but we have handled that by
-	 * switching the bank lock, although that is not the most performant way
-	 * that's not the common case either so we are fine with that.
+	 * We put ourselves in the queue by writing MyProcNumber to
+	 * ProcGlobal->clogGroupFirst.  However, if there's already a process
+	 * listed there, we compare our pageno with that of that process; if it
+	 * differs, we cannot participate in the group, so we return for caller to
+	 * update pg_xact in the normal way.
 	 *
-	 * Also to be noted that unless the leader of the current group does not
-	 * get the lock we don't clear the 'procglobal->clogGroupFirst' that means
-	 * concurrently if we get the requesters for different SLRU pages then
-	 * those will have to go for the normal update instead of group update and
-	 * that's fine as that is not the common case.  As soon as the leader of
-	 * the current group gets the lock for the required bank that time we
-	 * clear this value and now other requesters (which might want to update a
-	 * different page and that might fall into the different bank as well) are
-	 * allowed to form a new group as the first group is now detached.  So if
-	 * the new group has a request for a different SLRU-bank lock then the
-	 * group leader of this group might also get the lock while the first
-	 * group is performing the update and these two groups can perform the
-	 * group update concurrently but it is completely safe as these two
-	 * leaders are operating on completely different SLRU pages and they both
-	 * are holding their respective SLRU locks.
+	 * If we're not the first process in the list, we must follow the leader.
+	 * We do this by storing the data we want updated in our PGPROC entry where
+	 * the leader can find it, then going to sleep.
+	 *
+	 * If no process is already in the list, we're the leader; our first step
+	 * is to "close out the group" by resetting the list pointer from
+	 * ProcGlobal->clogGroupFirst (this lets other processes set up other
+	 * groups later); then we lock the SLRU bank corresponding to our group's
+	 * page, do the SLRU updates, release the SLRU bank lock, and wake up the
+	 * sleeping processes.
+	 *
+	 * If another group starts to update a page in a different SLRU bank, they
+	 * can proceed concurrently, since the bank lock they're going to use is
+	 * different from ours.  If another group starts to update a page in the
+	 * same bank as ours, they wait until we release the lock.
 	 */
 	nextidx = pg_atomic_read_u32(&procglobal->clogGroupFirst);
 
@@ -507,10 +495,11 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 		 * There is a race condition here, which is that after doing the below
 		 * check and before adding this proc's clog update to a group, the
 		 * group leader might have already finished the group update for this
-		 * page and becomes group leader of another group. This will lead to a
-		 * situation where a single group can have different clog page
-		 * updates.  This isn't likely and will still work, just maybe a bit
-		 * less efficiently.
+		 * page and becomes group leader of another group, updating a different
+		 * page.  This will lead to a situation where a single group can have
+		 * different clog page updates.  This isn't likely and will still work,
+		 * just less efficiently -- we handle this case by switching to a
+		 * different bank lock in the loop below.
 		 */
 		if (nextidx != INVALID_PGPROCNO &&
 			GetPGProcByNumber(nextidx)->clogGroupMemberPage != proc->clogGroupMemberPage)
@@ -574,6 +563,9 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 	 * Now that we've got the lock, clear the list of processes waiting for
 	 * group XID status update, saving a pointer to the head of the list.
 	 * Trying to pop elements one at a time could lead to an ABA problem.
+	 *
+	 * At this point, any processes trying to do this would create a separate
+	 * group.
 	 */
 	nextidx = pg_atomic_exchange_u32(&procglobal->clogGroupFirst,
 									 INVALID_PGPROCNO);
@@ -588,21 +580,15 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 		int			thispageno = nextproc->clogGroupMemberPage;
 
 		/*
-		 * If the SLRU bank lock for the current page is not the same as that
-		 * of the last page then we need to release the lock on the previous
-		 * bank and acquire the lock on the bank for the page we are going to
-		 * update now.
+		 * If the page to update belongs to a different bank than the previous
+		 * one, exchange bank lock to the new one.  This should be quite rare,
+		 * as described above.
 		 *
-		 * Although on the best effort basis we try that all the requests
-		 * within a group are for the same clog page there are some
-		 * possibilities that there are request for more than one page in the
-		 * same group (for details refer to the comment in the previous while
-		 * loop).  That scenario might not be very performant because while
-		 * switching the lock the group leader might need to wait on the new
-		 * lock if the pages are from different SLRU bank but it is safe
-		 * because a) we are releasing the old lock before acquiring the new
-		 * lock so there is should not be any deadlock situation b) and, we
-		 * are always modifying the page under the correct SLRU lock.
+		 * (We could try to optimize this by waking up the processes for which
+		 * we have already updated the status while we exchange the lock, but
+		 * the code doesn't do that at present.  I think it'd require
+		 * additional bookkeeping, making the common path slower in order to
+		 * improve an infrequent case.)
 		 */
 		if (thispageno != prevpageno)
 		{
@@ -642,6 +628,10 @@ TransactionGroupUpdateXidStatus(TransactionId xid, XidStatus status,
 	 * Now that we've released the lock, go back and wake everybody up.  We
 	 * don't do this under the lock so as to keep lock hold times to a
 	 * minimum.
+	 *
+	 * (Perhaps we could do this in two passes, the first setting clogGroupNext
+	 * to invalid while saving the semaphores to an array, then a single write
+	 * barrier, then another pass unlocking the semaphores.)
 	 */
 	while (wakeidx != INVALID_PGPROCNO)
 	{
