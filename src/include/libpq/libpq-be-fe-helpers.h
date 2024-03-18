@@ -44,6 +44,8 @@
 #include "miscadmin.h"
 #include "storage/fd.h"
 #include "storage/latch.h"
+#include "utils/timestamp.h"
+#include "utils/wait_event.h"
 
 
 static inline void libpqsrv_connect_prepare(void);
@@ -364,5 +366,87 @@ libpqsrv_get_result(PGconn *conn, uint32 wait_event_info)
 	/* Now we can collect and return the next PGresult */
 	return PQgetResult(conn);
 }
+
+/*
+ * Submit a cancel request to the given connection, waiting only until
+ * the given time.
+ *
+ * We sleep interruptibly until we receive confirmation that the cancel
+ * request has been accepted, and if it is, return NULL; if the timeout
+ * lapses without that, or the request fails for whatever reason, return
+ * the error message.
+ */
+static char *
+libpqsrv_cancel(PGconn *conn, TimestampTz endtime)
+{
+	char	   *error = NULL;
+	PGcancelConn *cancel_conn = PQcancelCreate(conn);
+
+	if (!PQcancelStart(cancel_conn))
+	{
+		PG_TRY();
+		{
+			error = pchomp(PQcancelErrorMessage(cancel_conn));
+		}
+		PG_FINALLY();
+		{
+			PQcancelFinish(cancel_conn);
+		}
+		PG_END_TRY();
+		return error;
+	}
+
+	/* In what follows, do not leak any PGcancelConn on an error. */
+	PG_TRY();
+	{
+		while (true)
+		{
+			PostgresPollingStatusType pollres = PQcancelPoll(cancel_conn);
+			TimestampTz now = GetCurrentTimestamp();
+			long		cur_timeout;
+			int			waitEvents = WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH;
+
+			if (pollres == PGRES_POLLING_OK)
+				break;
+
+			/* If timeout has expired, give up, else get sleep time. */
+			cur_timeout = TimestampDifferenceMilliseconds(now, endtime);
+			if (cur_timeout <= 0)
+			{
+				error = "timed out";
+				break;
+			}
+
+			switch (pollres)
+			{
+				case PGRES_POLLING_READING:
+					waitEvents |= WL_SOCKET_READABLE;
+					break;
+				case PGRES_POLLING_WRITING:
+					waitEvents |= WL_SOCKET_WRITEABLE;
+					break;
+				default:
+					error = pchomp(PQcancelErrorMessage(cancel_conn));
+					goto exit;
+			}
+
+			/* Sleep until there's something to do */
+			WaitLatchOrSocket(MyLatch, waitEvents, PQcancelSocket(cancel_conn),
+							  cur_timeout, PG_WAIT_EXTENSION);
+			ResetLatch(MyLatch);
+
+			CHECK_FOR_INTERRUPTS();
+		}
+exit:	;
+	}
+	PG_FINALLY();
+	{
+		PQcancelFinish(cancel_conn);
+	}
+	PG_END_TRY();
+
+	return error;
+}
+
 
 #endif							/* LIBPQ_BE_FE_HELPERS_H */
