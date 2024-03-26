@@ -1332,16 +1332,14 @@ pgfdw_cancel_query(PGconn *conn)
 static bool
 pgfdw_cancel_query_begin(PGconn *conn, TimestampTz endtime)
 {
-	char	   *error = libpqsrv_cancel(conn, endtime);
+	char	   *errormsg = libpqsrv_cancel(conn, endtime);
 
-	if (error)
-	{
+	if (errormsg != NULL)
 		ereport(WARNING,
-				(errcode(ERRCODE_CONNECTION_FAILURE),
-				 errmsg("could not send cancel request: %s", error)));
-		return false;
-	}
-	return true;
+				errcode(ERRCODE_CONNECTION_FAILURE),
+				errmsg("could not send cancel request: %s", errormsg));
+
+	return errormsg == NULL;
 }
 
 static bool

@@ -372,48 +372,65 @@ libpqsrv_get_result(PGconn *conn, uint32 wait_event_info)
  * the given time.
  *
  * We sleep interruptibly until we receive confirmation that the cancel
- * request has been accepted, and if it is, return NULL; if the timeout
- * lapses without that, or the request fails for whatever reason, return
- * the error message.
+ * request has been accepted, and if it is, return NULL; if the cancel
+ * request fails, return an error message string (which is not to be
+ * freed).
+ *
+ * For other problems (to wit: OOM when strdup'ing an error message from
+ * libpq), this function can ereport(ERROR).
  */
 static char *
 libpqsrv_cancel(PGconn *conn, TimestampTz endtime)
 {
+	PGcancelConn *cancel_conn;
+	static char *prverror = NULL;
 	char	   *error = NULL;
-	PGcancelConn *cancel_conn = PQcancelCreate(conn);
 
-	if (!PQcancelStart(cancel_conn))
+	/*
+	 * Most of the error strings we return are statically allocated so they
+	 * don't need freeing, but there's a couple of cases where we cannot keep
+	 * that promise.  To avoid long-term leaks, we keep a static pointer to
+	 * the last one we returned, and free it here next time around.
+	 */
+	if (prverror != NULL)
 	{
-		PG_TRY();
-		{
-			error = pchomp(PQcancelErrorMessage(cancel_conn));
-		}
-		PG_FINALLY();
-		{
-			PQcancelFinish(cancel_conn);
-		}
-		PG_END_TRY();
-		return error;
+		pfree(prverror);
+		prverror = NULL;
 	}
 
-	/* In what follows, do not leak any PGcancelConn on an error. */
+	cancel_conn = PQcancelCreate(conn);
+	if (cancel_conn == NULL)
+		return _("out of memory");
+
+	/* In what follows, do not leak any PGcancelConn on any errors. */
+
 	PG_TRY();
 	{
-		while (true)
+		if (!PQcancelStart(cancel_conn))
 		{
-			PostgresPollingStatusType pollres = PQcancelPoll(cancel_conn);
-			TimestampTz now = GetCurrentTimestamp();
+			error = pchomp(PQcancelErrorMessage(cancel_conn));
+			/* save pchomp output so we can free it next time */
+			prverror = error;
+			goto exit;
+		}
+
+		for (;;)
+		{
+			PostgresPollingStatusType pollres;
+			TimestampTz now;
 			long		cur_timeout;
 			int			waitEvents = WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH;
 
+			pollres = PQcancelPoll(cancel_conn);
 			if (pollres == PGRES_POLLING_OK)
-				break;
+				break;			/* success! */
 
 			/* If timeout has expired, give up, else get sleep time. */
+			now = GetCurrentTimestamp();
 			cur_timeout = TimestampDifferenceMilliseconds(now, endtime);
 			if (cur_timeout <= 0)
 			{
-				error = "timed out";
+				error = _("cancel request timed out");
 				break;
 			}
 
@@ -426,13 +443,16 @@ libpqsrv_cancel(PGconn *conn, TimestampTz endtime)
 					waitEvents |= WL_SOCKET_WRITEABLE;
 					break;
 				default:
+					/* save pchomp output so we can free it next time */
 					error = pchomp(PQcancelErrorMessage(cancel_conn));
+					prverror = error;
 					goto exit;
 			}
 
 			/* Sleep until there's something to do */
 			WaitLatchOrSocket(MyLatch, waitEvents, PQcancelSocket(cancel_conn),
-							  cur_timeout, PG_WAIT_EXTENSION);
+							  cur_timeout, PG_WAIT_CLIENT);
+
 			ResetLatch(MyLatch);
 
 			CHECK_FOR_INTERRUPTS();
@@ -447,6 +467,5 @@ exit:	;
 
 	return error;
 }
-
 
 #endif							/* LIBPQ_BE_FE_HELPERS_H */

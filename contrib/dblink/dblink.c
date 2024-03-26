@@ -1355,7 +1355,7 @@ dblink_cancel_query(PG_FUNCTION_ARGS)
 	endtime = TimestampTzPlusMilliseconds(GetCurrentTimestamp(),
 										  30000);
 	msg = libpqsrv_cancel(conn, endtime);
-	if (!msg)
+	if (msg == NULL)
 		msg = "OK";
 
 	PG_RETURN_TEXT_P(cstring_to_text(msg));
