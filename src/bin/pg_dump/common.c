@@ -85,7 +85,8 @@ static catalogid_hash *catalogIdHash = NULL;
 static void flagInhTables(Archive *fout, TableInfo *tblinfo, int numTables,
 						  InhInfo *inhinfo, int numInherits);
 static void flagInhIndexes(Archive *fout, TableInfo *tblinfo, int numTables);
-static void flagInhAttrs(Archive *fout, TableInfo *tblinfo, int numTables);
+static void flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo,
+						 int numTables);
 static int	strInArray(const char *pattern, char **arr, int arr_size);
 static IndxInfo *findIndexByOid(Oid oid);
 
@@ -229,7 +230,7 @@ getSchemaData(Archive *fout, int *numTablesPtr)
 	getTableAttrs(fout, tblinfo, numTables);
 
 	pg_log_info("flagging inherited columns in subtables");
-	flagInhAttrs(fout, tblinfo, numTables);
+	flagInhAttrs(fout, fout->dopt, tblinfo, numTables);
 
 	pg_log_info("reading partitioning data");
 	getPartitioningInfo(fout);
@@ -477,7 +478,8 @@ flagInhIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
  * What we need to do here is:
  *
  * - Detect child columns that inherit NOT NULL bits from their parents, so
- *   that we needn't specify that again for the child.
+ *   that we needn't specify that again for the child. (Versions >= 17 no
+ *   longer need this.)
  *
  * - Detect child columns that have DEFAULT NULL when their parents had some
  *   non-null default.  In this case, we make up a dummy AttrDefInfo object so
@@ -497,9 +499,8 @@ flagInhIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
  * modifies tblinfo
  */
 static void
-flagInhAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
+flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables)
 {
-	DumpOptions *dopt = fout->dopt;
 	int			i,
 				j,
 				k;
@@ -561,7 +562,8 @@ flagInhAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				{
 					AttrDefInfo *parentDef = parent->attrdefs[inhAttrInd];
 
-					foundNotNull |= parent->notnull[inhAttrInd];
+					foundNotNull |= (parent->notnull_constrs[inhAttrInd] != NULL &&
+									 !parent->notnull_noinh[inhAttrInd]);
 					foundDefault |= (parentDef != NULL &&
 									 strcmp(parentDef->adef_expr, "NULL") != 0 &&
 									 !parent->attgenerated[inhAttrInd]);
@@ -579,8 +581,9 @@ flagInhAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 				}
 			}
 
-			/* Remember if we found inherited NOT NULL */
-			tbinfo->inhNotNull[j] = foundNotNull;
+			/* In versions < 17, remember if we found inherited NOT NULL */
+			if (fout->remoteVersion < 170000)
+				tbinfo->notnull_inh[j] = foundNotNull;
 
 			/*
 			 * Manufacture a DEFAULT NULL clause if necessary.  This breaks
