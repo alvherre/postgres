@@ -580,7 +580,19 @@ pg_atomic_sub_fetch_u64(volatile pg_atomic_uint64 *ptr, int64 sub_)
 static inline uint64
 pg_atomic_monotonic_advance_u64(volatile pg_atomic_uint64 *ptr, uint64 target_)
 {
+	/*
+	 * The target variable for pg_atomic_compare_exchange_u64 must have
+	 * suitable alignment, which is acquired naturally on most platforms, but
+	 * not on 32-bit ones; persuade the compiler in that case, but fail if we
+	 * cannot.
+	 */
+#if MAXIMUM_ALIGNOF >= 8
 	uint64		currval;
+#elif defined(pg_attribute_aligned) && !defined(PG_HAVE_ATOMIC_U64_SIMULATION)
+	pg_attribute_aligned(8)	uint64		currval;
+#else
+#error "Must have pg_attribute aligned or simulated atomics"
+#endif
 
 #ifndef PG_HAVE_ATOMIC_U64_SIMULATION
 	AssertPointerAlignment(ptr, 8);
