@@ -7860,7 +7860,6 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	Relation	constr_rel;
 	ScanKeyData skey;
 	SysScanDesc conscan;
-	Form_pg_attribute attTup;
 	AttrNumber	attnum;
 	ObjectAddress address;
 	Constraint *constraint;
@@ -7899,9 +7898,6 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 				(errcode(ERRCODE_UNDEFINED_COLUMN),
 				 errmsg("column \"%s\" of relation \"%s\" does not exist",
 						colName, RelationGetRelationName(rel))));
-
-	attTup = (Form_pg_attribute) GETSTRUCT(tuple);
-	attnum = attTup->attnum;
 
 	/* Prevent them from altering a system attribute */
 	if (attnum <= 0)
