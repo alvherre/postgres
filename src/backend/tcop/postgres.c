@@ -79,6 +79,7 @@
 #include "utils/snapmgr.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
+#include "utils/varlena.h"
 
 /* ----------------
  *		global variables
@@ -102,6 +103,9 @@ int			PostAuthDelay = 0;
 
 /* Time between checks that the client is still connected. */
 int			client_connection_check_interval = 0;
+
+/* flags for non-system relation kinds to restrict use */
+int			restrict_nonsystem_relation_kind;
 
 /* ----------------
  *		private typedefs etc
@@ -622,8 +626,10 @@ pg_parse_query(const char *query_string)
 	if (log_parser_stats)
 		ShowUsage("PARSER STATISTICS");
 
-#ifdef COPY_PARSE_PLAN_TREES
+#ifdef DEBUG_NODE_TESTS_ENABLED
+
 	/* Optional debugging check: pass raw parsetrees through copyObject() */
+	if (Debug_copy_parse_plan_trees)
 	{
 		List	   *new_list = copyObject(raw_parsetree_list);
 
@@ -633,13 +639,12 @@ pg_parse_query(const char *query_string)
 		else
 			raw_parsetree_list = new_list;
 	}
-#endif
 
 	/*
 	 * Optional debugging check: pass raw parsetrees through
 	 * outfuncs/readfuncs
 	 */
-#ifdef WRITE_READ_PARSE_PLAN_TREES
+	if (Debug_write_read_parse_plan_trees)
 	{
 		char	   *str = nodeToStringWithLocations(raw_parsetree_list);
 		List	   *new_list = stringToNodeWithLocations(str);
@@ -651,7 +656,8 @@ pg_parse_query(const char *query_string)
 		else
 			raw_parsetree_list = new_list;
 	}
-#endif
+
+#endif							/* DEBUG_NODE_TESTS_ENABLED */
 
 	TRACE_POSTGRESQL_QUERY_PARSE_DONE(query_string);
 
@@ -826,8 +832,10 @@ pg_rewrite_query(Query *query)
 	if (log_parser_stats)
 		ShowUsage("REWRITER STATISTICS");
 
-#ifdef COPY_PARSE_PLAN_TREES
+#ifdef DEBUG_NODE_TESTS_ENABLED
+
 	/* Optional debugging check: pass querytree through copyObject() */
+	if (Debug_copy_parse_plan_trees)
 	{
 		List	   *new_list;
 
@@ -838,10 +846,9 @@ pg_rewrite_query(Query *query)
 		else
 			querytree_list = new_list;
 	}
-#endif
 
-#ifdef WRITE_READ_PARSE_PLAN_TREES
 	/* Optional debugging check: pass querytree through outfuncs/readfuncs */
+	if (Debug_write_read_parse_plan_trees)
 	{
 		List	   *new_list = NIL;
 		ListCell   *lc;
@@ -868,7 +875,8 @@ pg_rewrite_query(Query *query)
 		else
 			querytree_list = new_list;
 	}
-#endif
+
+#endif							/* DEBUG_NODE_TESTS_ENABLED */
 
 	if (Debug_print_rewritten)
 		elog_node_display(LOG, "rewritten parse tree", querytree_list,
@@ -906,8 +914,10 @@ pg_plan_query(Query *querytree, const char *query_string, int cursorOptions,
 	if (log_planner_stats)
 		ShowUsage("PLANNER STATISTICS");
 
-#ifdef COPY_PARSE_PLAN_TREES
+#ifdef DEBUG_NODE_TESTS_ENABLED
+
 	/* Optional debugging check: pass plan tree through copyObject() */
+	if (Debug_copy_parse_plan_trees)
 	{
 		PlannedStmt *new_plan = copyObject(plan);
 
@@ -923,10 +933,9 @@ pg_plan_query(Query *querytree, const char *query_string, int cursorOptions,
 #endif
 			plan = new_plan;
 	}
-#endif
 
-#ifdef WRITE_READ_PARSE_PLAN_TREES
 	/* Optional debugging check: pass plan tree through outfuncs/readfuncs */
+	if (Debug_write_read_parse_plan_trees)
 	{
 		char	   *str;
 		PlannedStmt *new_plan;
@@ -947,7 +956,8 @@ pg_plan_query(Query *querytree, const char *query_string, int cursorOptions,
 #endif
 			plan = new_plan;
 	}
-#endif
+
+#endif							/* DEBUG_NODE_TESTS_ENABLED */
 
 	/*
 	 * Print plan if debugging.
@@ -2651,8 +2661,7 @@ exec_describe_statement_message(const char *stmt_name)
 	/*
 	 * First describe the parameters...
 	 */
-	pq_beginmessage_reuse(&row_description_buf, 't');	/* parameter description
-														 * message type */
+	pq_beginmessage_reuse(&row_description_buf, PqMsg_ParameterDescription);
 	pq_sendint16(&row_description_buf, psrc->num_params);
 
 	for (int i = 0; i < psrc->num_params; i++)
@@ -3668,6 +3677,66 @@ assign_transaction_timeout(int newval, void *extra)
 	}
 }
 
+/*
+ * GUC check_hook for restrict_nonsystem_relation_kind
+ */
+bool
+check_restrict_nonsystem_relation_kind(char **newval, void **extra, GucSource source)
+{
+	char	   *rawstring;
+	List	   *elemlist;
+	ListCell   *l;
+	int			flags = 0;
+
+	/* Need a modifiable copy of string */
+	rawstring = pstrdup(*newval);
+
+	if (!SplitIdentifierString(rawstring, ',', &elemlist))
+	{
+		/* syntax error in list */
+		GUC_check_errdetail("List syntax is invalid.");
+		pfree(rawstring);
+		list_free(elemlist);
+		return false;
+	}
+
+	foreach(l, elemlist)
+	{
+		char	   *tok = (char *) lfirst(l);
+
+		if (pg_strcasecmp(tok, "view") == 0)
+			flags |= RESTRICT_RELKIND_VIEW;
+		else if (pg_strcasecmp(tok, "foreign-table") == 0)
+			flags |= RESTRICT_RELKIND_FOREIGN_TABLE;
+		else
+		{
+			GUC_check_errdetail("Unrecognized key word: \"%s\".", tok);
+			pfree(rawstring);
+			list_free(elemlist);
+			return false;
+		}
+	}
+
+	pfree(rawstring);
+	list_free(elemlist);
+
+	/* Save the flags in *extra, for use by the assign function */
+	*extra = guc_malloc(ERROR, sizeof(int));
+	*((int *) *extra) = flags;
+
+	return true;
+}
+
+/*
+ * GUC assign_hook for restrict_nonsystem_relation_kind
+ */
+void
+assign_restrict_nonsystem_relation_kind(const char *newval, void *extra)
+{
+	int		   *flags = (int *) extra;
+
+	restrict_nonsystem_relation_kind = *flags;
+}
 
 /*
  * set_debug_options --- apply "-d N" command line option
@@ -4161,7 +4230,7 @@ PostgresMain(const char *dbname, const char *username)
 	Assert(dbname != NULL);
 	Assert(username != NULL);
 
-	SetProcessingMode(InitProcessing);
+	Assert(GetProcessingMode() == InitProcessing);
 
 	/*
 	 * Set up signal handlers.  (InitPostmasterChild or InitStandaloneProcess
@@ -4226,6 +4295,22 @@ PostgresMain(const char *dbname, const char *username)
 	sigprocmask(SIG_SETMASK, &UnBlockSig, NULL);
 
 	/*
+	 * Generate a random cancel key, if this is a backend serving a
+	 * connection. InitPostgres() will advertise it in shared memory.
+	 */
+	Assert(!MyCancelKeyValid);
+	if (whereToSendOutput == DestRemote)
+	{
+		if (!pg_strong_random(&MyCancelKey, sizeof(int32)))
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("could not generate random cancel key")));
+		}
+		MyCancelKeyValid = true;
+	}
+
+	/*
 	 * General initialization.
 	 *
 	 * NOTE: if you are tempted to add code in this vicinity, consider putting
@@ -4277,6 +4362,7 @@ PostgresMain(const char *dbname, const char *username)
 	{
 		StringInfoData buf;
 
+		Assert(MyCancelKeyValid);
 		pq_beginmessage(&buf, PqMsg_BackendKeyData);
 		pq_sendint32(&buf, (int32) MyProcPid);
 		pq_sendint32(&buf, (int32) MyCancelKey);
@@ -4418,7 +4504,7 @@ PostgresMain(const char *dbname, const char *username)
 		 * Now return to normal top-level context and clear ErrorContext for
 		 * next time.
 		 */
-		MemoryContextSwitchTo(TopMemoryContext);
+		MemoryContextSwitchTo(MessageContext);
 		FlushErrorState();
 
 		/*

@@ -100,6 +100,7 @@
 #include "utils/fmgroids.h"
 #include "utils/fmgrprotos.h"
 #include "utils/guc_hooks.h"
+#include "utils/injection_point.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
@@ -380,7 +381,7 @@ AutoVacLauncherMain(char *startup_data, size_t startup_data_len)
 	if (PostAuthDelay)
 		pg_usleep(PostAuthDelay * 1000000L);
 
-	SetProcessingMode(InitProcessing);
+	Assert(GetProcessingMode() == InitProcessing);
 
 	/*
 	 * Set up signal handlers.  We operate on databases much like a regular
@@ -1373,7 +1374,7 @@ AutoVacWorkerMain(char *startup_data, size_t startup_data_len)
 	MyBackendType = B_AUTOVAC_WORKER;
 	init_ps_display(NULL);
 
-	SetProcessingMode(InitProcessing);
+	Assert(GetProcessingMode() == InitProcessing);
 
 	/*
 	 * Set up signal handlers.  We operate on databases much like a regular
@@ -1901,6 +1902,12 @@ do_autovacuum(void)
 
 	/* Start a transaction so our commands have one to play into. */
 	StartTransactionCommand();
+
+	/*
+	 * This injection point is put in a transaction block to work with a wait
+	 * that uses a condition variable.
+	 */
+	INJECTION_POINT("autovacuum-worker-start");
 
 	/*
 	 * Compute the multixact age for which freezing is urgent.  This is
@@ -3332,12 +3339,12 @@ check_autovacuum_work_mem(int *newval, void **extra, GucSource source)
 		return true;
 
 	/*
-	 * We clamp manually-set values to at least 1MB.  Since
+	 * We clamp manually-set values to at least 64kB.  Since
 	 * maintenance_work_mem is always set to at least this value, do the same
 	 * here.
 	 */
-	if (*newval < 1024)
-		*newval = 1024;
+	if (*newval < 64)
+		*newval = 64;
 
 	return true;
 }

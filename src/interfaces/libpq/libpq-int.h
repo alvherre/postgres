@@ -331,6 +331,18 @@ typedef enum
 	PGQUERY_CLOSE				/* Close Statement or Portal */
 } PGQueryClass;
 
+
+/*
+ * valid values for pg_conn->current_auth_response.  These are just for
+ * libpq internal use: since authentication response types all use the
+ * protocol byte 'p', fe-trace.c needs a way to distinguish them in order
+ * to print them correctly.
+ */
+#define AUTH_RESPONSE_GSS			'G'
+#define AUTH_RESPONSE_PASSWORD		'P'
+#define AUTH_RESPONSE_SASL_INITIAL	'I'
+#define AUTH_RESPONSE_SASL			'S'
+
 /*
  * An entry in the pending command queue.
  */
@@ -490,7 +502,9 @@ struct pg_conn
 										 * codes */
 	bool		client_finished_auth;	/* have we finished our half of the
 										 * authentication exchange? */
-
+	char		current_auth_response;	/* used by pqTraceOutputMessage to
+										 * know which auth response we're
+										 * sending */
 
 	/* Transient state needed while establishing connection */
 	PGTargetServerType target_server_type;	/* desired session properties */
@@ -739,6 +753,7 @@ extern PGresult *pqFunctionCall3(PGconn *conn, Oid fnid,
   */
 extern int	pqCheckOutBufferSpace(size_t bytes_needed, PGconn *conn);
 extern int	pqCheckInBufferSpace(size_t bytes_needed, PGconn *conn);
+extern void pqParseDone(PGconn *conn, int newInStart);
 extern int	pqGetc(char *result, PGconn *conn);
 extern int	pqPutc(char c, PGconn *conn);
 extern int	pqGets(PQExpBuffer buf, PGconn *conn);
@@ -875,6 +890,8 @@ extern ssize_t pg_GSS_read(PGconn *conn, void *ptr, size_t len);
 extern void pqTraceOutputMessage(PGconn *conn, const char *message,
 								 bool toServer);
 extern void pqTraceOutputNoTypeByteMessage(PGconn *conn, const char *message);
+extern void pqTraceOutputCharResponse(PGconn *conn, const char *responseType,
+									  char response);
 
 /* === miscellaneous macros === */
 

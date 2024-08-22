@@ -185,7 +185,7 @@ typedef struct ComputeXidHorizonsResult
 	FullTransactionId latest_completed;
 
 	/*
-	 * The same for procArray->replication_slot_xmin and.
+	 * The same for procArray->replication_slot_xmin and
 	 * procArray->replication_slot_catalog_xmin.
 	 */
 	TransactionId slot_xmin;
@@ -1106,7 +1106,7 @@ ProcArrayApplyRecoveryInfo(RunningTransactions running)
 		 * If the snapshot isn't overflowed or if its empty we can reset our
 		 * pending state and use this snapshot instead.
 		 */
-		if (!running->subxid_overflow || running->xcnt == 0)
+		if (running->subxid_status != SUBXIDS_MISSING || running->xcnt == 0)
 		{
 			/*
 			 * If we have already collected known assigned xids, we need to
@@ -1258,7 +1258,7 @@ ProcArrayApplyRecoveryInfo(RunningTransactions running)
 	 * missing, so conservatively assume the last one is latestObservedXid.
 	 * ----------
 	 */
-	if (running->subxid_overflow)
+	if (running->subxid_status == SUBXIDS_MISSING)
 	{
 		standbyState = STANDBY_SNAPSHOT_PENDING;
 
@@ -1270,6 +1270,18 @@ ProcArrayApplyRecoveryInfo(RunningTransactions running)
 		standbyState = STANDBY_SNAPSHOT_READY;
 
 		standbySnapshotPendingXmin = InvalidTransactionId;
+
+		/*
+		 * If the 'xids' array didn't include all subtransactions, we have to
+		 * mark any snapshots taken as overflowed.
+		 */
+		if (running->subxid_status == SUBXIDS_IN_SUBTRANS)
+			procArray->lastOverflowedXid = latestObservedXid;
+		else
+		{
+			Assert(running->subxid_status == SUBXIDS_IN_ARRAY);
+			procArray->lastOverflowedXid = InvalidTransactionId;
+		}
 	}
 
 	/*
@@ -2741,8 +2753,6 @@ GetRunningTransactionData(void)
 	 */
 	for (index = 0; index < arrayP->numProcs; index++)
 	{
-		int			pgprocno = arrayP->pgprocnos[index];
-		PGPROC	   *proc = &allProcs[pgprocno];
 		TransactionId xid;
 
 		/* Fetch xid just once - see GetNewTransactionId */
@@ -2764,11 +2774,18 @@ GetRunningTransactionData(void)
 			oldestRunningXid = xid;
 
 		/*
-		 * Also, update the oldest running xid within the current database.
+		 * Also, update the oldest running xid within the current database. As
+		 * fetching pgprocno and PGPROC could cause cache misses, we do cheap
+		 * TransactionId comparison first.
 		 */
-		if (proc->databaseId == MyDatabaseId &&
-			TransactionIdPrecedes(xid, oldestRunningXid))
-			oldestDatabaseRunningXid = xid;
+		if (TransactionIdPrecedes(xid, oldestDatabaseRunningXid))
+		{
+			int			pgprocno = arrayP->pgprocnos[index];
+			PGPROC	   *proc = &allProcs[pgprocno];
+
+			if (proc->databaseId == MyDatabaseId)
+				oldestDatabaseRunningXid = xid;
+		}
 
 		if (ProcGlobal->subxidStates[index].overflowed)
 			suboverflowed = true;
@@ -2833,7 +2850,7 @@ GetRunningTransactionData(void)
 
 	CurrentRunningXacts->xcnt = count - subcount;
 	CurrentRunningXacts->subxcnt = subcount;
-	CurrentRunningXacts->subxid_overflow = suboverflowed;
+	CurrentRunningXacts->subxid_status = suboverflowed ? SUBXIDS_IN_SUBTRANS : SUBXIDS_IN_ARRAY;
 	CurrentRunningXacts->nextXid = XidFromFullTransactionId(TransamVariables->nextXid);
 	CurrentRunningXacts->oldestRunningXid = oldestRunningXid;
 	CurrentRunningXacts->oldestDatabaseRunningXid = oldestDatabaseRunningXid;

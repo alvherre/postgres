@@ -60,7 +60,7 @@ static JsonParseErrorType do_array_element_start(void *state, bool isnull);
 static JsonParseErrorType do_array_element_end(void *state, bool isnull);
 static JsonParseErrorType do_scalar(void *state, char *token, JsonTokenType tokentype);
 
-JsonSemAction sem = {
+static JsonSemAction sem = {
 	.object_start = do_object_start,
 	.object_end = do_object_end,
 	.object_field_start = do_object_field_start,
@@ -84,7 +84,7 @@ main(int argc, char **argv)
 	size_t		chunk_size = DEFAULT_CHUNK_SIZE;
 	struct stat statbuf;
 	off_t		bytes_left;
-	JsonSemAction *testsem = &nullSemAction;
+	const JsonSemAction *testsem = &nullSemAction;
 	char	   *testfile;
 	int			c;
 	bool		need_strings = false;
@@ -124,7 +124,7 @@ main(int argc, char **argv)
 	makeJsonLexContextIncremental(&lex, PG_UTF8, need_strings);
 	initStringInfo(&json);
 
-	if ((json_file = fopen(testfile, "r")) == NULL)
+	if ((json_file = fopen(testfile, PG_BINARY_R)) == NULL)
 		pg_fatal("error opening input: %m");
 
 	if (fstat(fileno(json_file), &statbuf) != 0)

@@ -3493,11 +3493,17 @@ keep_going:						/* We will come back to here until there is
 					}
 					if (SSLok == 'S')
 					{
+						if (conn->Pfdebug)
+							pqTraceOutputCharResponse(conn, "SSLResponse",
+													  SSLok);
 						/* mark byte consumed */
 						conn->inStart = conn->inCursor;
 					}
 					else if (SSLok == 'N')
 					{
+						if (conn->Pfdebug)
+							pqTraceOutputCharResponse(conn, "SSLResponse",
+													  SSLok);
 						/* mark byte consumed */
 						conn->inStart = conn->inCursor;
 
@@ -3521,6 +3527,12 @@ keep_going:						/* We will come back to here until there is
 						 * byte here.
 						 */
 						conn->status = CONNECTION_AWAITING_RESPONSE;
+
+						/*
+						 * Don't fall back to a plaintext connection after
+						 * reading the error.
+						 */
+						conn->failed_enc_methods |= conn->allowed_enc_methods & (~conn->current_enc_method);
 						goto keep_going;
 					}
 					else
@@ -3564,8 +3576,8 @@ keep_going:						/* We will come back to here until there is
 				if (pollres == PGRES_POLLING_FAILED)
 				{
 					/*
-					 * Failed direct ssl connection, possibly try a new
-					 * connection with postgres negotiation
+					 * SSL handshake failed.  We will retry with a plaintext
+					 * connection, if permitted by sslmode.
 					 */
 					CONNECTION_FAILED();
 				}
@@ -3612,6 +3624,13 @@ keep_going:						/* We will come back to here until there is
 						 * into AWAITING_RESPONSE state and let the code there
 						 * deal with it.  Note we have *not* consumed the "E"
 						 * byte here.
+						 *
+						 * Note that unlike on an error response to
+						 * SSLRequest, we allow falling back to SSL or
+						 * plaintext connection here.  GSS support was
+						 * introduced in PostgreSQL version 12, so an error
+						 * response might mean that we are connecting to a
+						 * pre-v12 server.
 						 */
 						conn->status = CONNECTION_AWAITING_RESPONSE;
 						goto keep_going;
@@ -3622,6 +3641,10 @@ keep_going:						/* We will come back to here until there is
 
 					if (gss_ok == 'N')
 					{
+						if (conn->Pfdebug)
+							pqTraceOutputCharResponse(conn, "GSSENCResponse",
+													  gss_ok);
+
 						/*
 						 * The connection is still valid, so if it's OK to
 						 * continue without GSS, we can proceed using this
@@ -3635,6 +3658,10 @@ keep_going:						/* We will come back to here until there is
 												gss_ok);
 						goto error_return;
 					}
+
+					if (conn->Pfdebug)
+						pqTraceOutputCharResponse(conn, "GSSENCResponse",
+												  gss_ok);
 				}
 
 				/* Begin or continue GSSAPI negotiation */
@@ -3659,6 +3686,10 @@ keep_going:						/* We will come back to here until there is
 				}
 				else if (pollres == PGRES_POLLING_FAILED)
 				{
+					/*
+					 * GSS handshake failed.  We will retry with an SSL or
+					 * plaintext connection, if permitted by the options.
+					 */
 					CONNECTION_FAILED();
 				}
 				/* Else, return POLLING_READING or POLLING_WRITING status */
@@ -3766,7 +3797,7 @@ keep_going:						/* We will come back to here until there is
 						return PGRES_POLLING_READING;
 					}
 					/* OK, we read the message; mark data consumed */
-					conn->inStart = conn->inCursor;
+					pqParseDone(conn, conn->inCursor);
 
 					/*
 					 * Before 7.2, the postmaster didn't always end its
@@ -3816,7 +3847,7 @@ keep_going:						/* We will come back to here until there is
 						goto error_return;
 					}
 					/* OK, we read the message; mark data consumed */
-					conn->inStart = conn->inCursor;
+					pqParseDone(conn, conn->inCursor);
 
 					/*
 					 * If error is "cannot connect now", try the next host if
@@ -3845,7 +3876,7 @@ keep_going:						/* We will come back to here until there is
 						goto error_return;
 					}
 					/* OK, we read the message; mark data consumed */
-					conn->inStart = conn->inCursor;
+					pqParseDone(conn, conn->inCursor);
 					goto error_return;
 				}
 
@@ -3870,7 +3901,11 @@ keep_going:						/* We will come back to here until there is
 				 */
 				res = pg_fe_sendauth(areq, msgLength, conn);
 
-				/* OK, we have processed the message; mark data consumed */
+				/*
+				 * OK, we have processed the message; mark data consumed.  We
+				 * don't call pqParseDone here because we already traced this
+				 * message inside pg_fe_sendauth.
+				 */
 				conn->inStart = conn->inCursor;
 
 				if (res != STATUS_OK)
@@ -7421,7 +7456,9 @@ passwordFromFile(const char *hostname, const char *port, const char *dbname,
 				 const char *username, const char *pgpassfile)
 {
 	FILE	   *fp;
+#ifndef WIN32
 	struct stat stat_buf;
+#endif
 	PQExpBufferData buf;
 
 	if (dbname == NULL || dbname[0] == '\0')
@@ -7446,10 +7483,14 @@ passwordFromFile(const char *hostname, const char *port, const char *dbname,
 		port = DEF_PGPORT_STR;
 
 	/* If password file cannot be opened, ignore it. */
-	if (stat(pgpassfile, &stat_buf) != 0)
+	fp = fopen(pgpassfile, "r");
+	if (fp == NULL)
 		return NULL;
 
 #ifndef WIN32
+	if (fstat(fileno(fp), &stat_buf) != 0)
+		return NULL;
+
 	if (!S_ISREG(stat_buf.st_mode))
 	{
 		fprintf(stderr,
@@ -7473,10 +7514,6 @@ passwordFromFile(const char *hostname, const char *port, const char *dbname,
 	 * file.
 	 */
 #endif
-
-	fp = fopen(pgpassfile, "r");
-	if (fp == NULL)
-		return NULL;
 
 	/* Use an expansible buffer to accommodate any reasonable line length */
 	initPQExpBuffer(&buf);

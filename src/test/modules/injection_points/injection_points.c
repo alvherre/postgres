@@ -18,6 +18,7 @@
 #include "postgres.h"
 
 #include "fmgr.h"
+#include "injection_stats.h"
 #include "miscadmin.h"
 #include "nodes/pg_list.h"
 #include "nodes/value.h"
@@ -170,6 +171,9 @@ injection_points_cleanup(int code, Datum arg)
 		char	   *name = strVal(lfirst(lc));
 
 		(void) InjectionPointDetach(name);
+
+		/* Remove stats entry */
+		pgstat_drop_inj(name);
 	}
 }
 
@@ -182,6 +186,8 @@ injection_error(const char *name, const void *private_data)
 	if (!injection_point_allowed(condition))
 		return;
 
+	pgstat_report_inj(name);
+
 	elog(ERROR, "error triggered for injection point %s", name);
 }
 
@@ -192,6 +198,8 @@ injection_notice(const char *name, const void *private_data)
 
 	if (!injection_point_allowed(condition))
 		return;
+
+	pgstat_report_inj(name);
 
 	elog(NOTICE, "notice triggered for injection point %s", name);
 }
@@ -211,12 +219,14 @@ injection_wait(const char *name, const void *private_data)
 	if (!injection_point_allowed(condition))
 		return;
 
+	pgstat_report_inj(name);
+
 	/*
 	 * Use the injection point name for this custom wait event.  Note that
 	 * this custom wait event name is not released, but we don't care much for
 	 * testing as this should be short-lived.
 	 */
-	injection_wait_event = WaitEventExtensionNew(name);
+	injection_wait_event = WaitEventInjectionPointNew(name);
 
 	/*
 	 * Find a free slot to wait for, and register this injection point's name.
@@ -287,6 +297,7 @@ injection_points_attach(PG_FUNCTION_ARGS)
 		condition.pid = MyProcPid;
 	}
 
+	pgstat_report_inj_fixed(1, 0, 0, 0, 0);
 	InjectionPointAttach(name, "injection_points", function, &condition,
 						 sizeof(InjectionPointCondition));
 
@@ -299,6 +310,28 @@ injection_points_attach(PG_FUNCTION_ARGS)
 		inj_list_local = lappend(inj_list_local, makeString(pstrdup(name)));
 		MemoryContextSwitchTo(oldctx);
 	}
+
+	/* Add entry for stats */
+	pgstat_create_inj(name);
+
+	PG_RETURN_VOID();
+}
+
+/*
+ * SQL function for loading an injection point.
+ */
+PG_FUNCTION_INFO_V1(injection_points_load);
+Datum
+injection_points_load(PG_FUNCTION_ARGS)
+{
+	char	   *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+
+	if (inj_state == NULL)
+		injection_init_shmem();
+
+	pgstat_report_inj_fixed(0, 0, 0, 0, 1);
+	INJECTION_POINT_LOAD(name);
+
 	PG_RETURN_VOID();
 }
 
@@ -311,7 +344,23 @@ injection_points_run(PG_FUNCTION_ARGS)
 {
 	char	   *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
 
+	pgstat_report_inj_fixed(0, 0, 1, 0, 0);
 	INJECTION_POINT(name);
+
+	PG_RETURN_VOID();
+}
+
+/*
+ * SQL function for triggering an injection point from cache.
+ */
+PG_FUNCTION_INFO_V1(injection_points_cached);
+Datum
+injection_points_cached(PG_FUNCTION_ARGS)
+{
+	char	   *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+
+	pgstat_report_inj_fixed(0, 0, 0, 1, 0);
+	INJECTION_POINT_CACHED(name);
 
 	PG_RETURN_VOID();
 }
@@ -387,6 +436,7 @@ injection_points_detach(PG_FUNCTION_ARGS)
 {
 	char	   *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
 
+	pgstat_report_inj_fixed(0, 1, 0, 0, 0);
 	if (!InjectionPointDetach(name))
 		elog(ERROR, "could not detach injection point \"%s\"", name);
 
@@ -400,5 +450,19 @@ injection_points_detach(PG_FUNCTION_ARGS)
 		MemoryContextSwitchTo(oldctx);
 	}
 
+	/* Remove stats entry */
+	pgstat_drop_inj(name);
+
 	PG_RETURN_VOID();
+}
+
+
+void
+_PG_init(void)
+{
+	if (!process_shared_preload_libraries_in_progress)
+		return;
+
+	pgstat_register_inj();
+	pgstat_register_inj_fixed();
 }

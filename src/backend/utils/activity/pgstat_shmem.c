@@ -80,7 +80,7 @@ static const dshash_parameters dsh_params = {
  * compares to their copy of pgStatSharedRefAge on a regular basis.
  */
 static pgstat_entry_ref_hash_hash *pgStatEntryRefHash = NULL;
-static int	pgStatSharedRefAge = 0; /* cache age of pgStatShmLookupCache */
+static int	pgStatSharedRefAge = 0; /* cache age of pgStatLocal.shmem */
 
 /*
  * Memory contexts containing the pgStatEntryRefHash table and the
@@ -130,6 +130,21 @@ StatsShmemSize(void)
 
 	sz = MAXALIGN(sizeof(PgStat_ShmemControl));
 	sz = add_size(sz, pgstat_dsa_init_size());
+
+	/* Add shared memory for all the custom fixed-numbered statistics */
+	for (PgStat_Kind kind = PGSTAT_KIND_CUSTOM_MIN; kind <= PGSTAT_KIND_CUSTOM_MAX; kind++)
+	{
+		const PgStat_KindInfo *kind_info = pgstat_get_kind_info(kind);
+
+		if (!kind_info)
+			continue;
+		if (!kind_info->fixed_amount)
+			continue;
+
+		Assert(kind_info->shared_size != 0);
+
+		sz += MAXALIGN(kind_info->shared_size);
+	}
 
 	return sz;
 }
@@ -196,17 +211,28 @@ StatsShmemInit(void)
 
 		pg_atomic_init_u64(&ctl->gc_request_count, 1);
 
-
 		/* initialize fixed-numbered stats */
-		LWLockInitialize(&ctl->archiver.lock, LWTRANCHE_PGSTATS_DATA);
-		LWLockInitialize(&ctl->bgwriter.lock, LWTRANCHE_PGSTATS_DATA);
-		LWLockInitialize(&ctl->checkpointer.lock, LWTRANCHE_PGSTATS_DATA);
-		LWLockInitialize(&ctl->slru.lock, LWTRANCHE_PGSTATS_DATA);
-		LWLockInitialize(&ctl->wal.lock, LWTRANCHE_PGSTATS_DATA);
+		for (PgStat_Kind kind = PGSTAT_KIND_MIN; kind <= PGSTAT_KIND_MAX; kind++)
+		{
+			const PgStat_KindInfo *kind_info = pgstat_get_kind_info(kind);
+			char	   *ptr;
 
-		for (int i = 0; i < BACKEND_NUM_TYPES; i++)
-			LWLockInitialize(&ctl->io.locks[i],
-							 LWTRANCHE_PGSTATS_DATA);
+			if (!kind_info || !kind_info->fixed_amount)
+				continue;
+
+			if (pgstat_is_kind_builtin(kind))
+				ptr = ((char *) ctl) + kind_info->shared_ctl_off;
+			else
+			{
+				int			idx = kind - PGSTAT_KIND_CUSTOM_MIN;
+
+				Assert(kind_info->shared_size != 0);
+				ctl->custom_data[idx] = ShmemAlloc(kind_info->shared_size);
+				ptr = ctl->custom_data[idx];
+			}
+
+			kind_info->init_shmem_cb(ptr);
+		}
 	}
 	else
 	{
@@ -246,6 +272,14 @@ pgstat_detach_shmem(void)
 	pgStatLocal.shared_hash = NULL;
 
 	dsa_detach(pgStatLocal.dsa);
+
+	/*
+	 * dsa_detach() does not decrement the DSA reference count as no segment
+	 * was provided to dsa_attach_in_place(), causing no cleanup callbacks to
+	 * be registered.  Hence, release it manually now.
+	 */
+	dsa_release_in_place(pgStatLocal.shmem->raw_dsa_area);
+
 	pgStatLocal.dsa = NULL;
 }
 
@@ -853,7 +887,7 @@ pgstat_drop_database_and_contents(Oid dboid)
 
 	/*
 	 * If some of the stats data could not be freed, signal the reference
-	 * holders to run garbage collection of their cached pgStatShmLookupCache.
+	 * holders to run garbage collection of their cached pgStatLocal.shmem.
 	 */
 	if (not_freed_count > 0)
 		pgstat_request_entry_refs_gc();

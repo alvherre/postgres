@@ -1217,12 +1217,11 @@ text_position_setup(text *t1, text *t2, Oid collid, TextPositionState *state)
 {
 	int			len1 = VARSIZE_ANY_EXHDR(t1);
 	int			len2 = VARSIZE_ANY_EXHDR(t2);
-	pg_locale_t mylocale = 0;
+	pg_locale_t mylocale;
 
 	check_collation_set(collid);
 
-	if (!lc_collate_is_c(collid))
-		mylocale = pg_newlocale_from_collation(collid);
+	mylocale = pg_newlocale_from_collation(collid);
 
 	if (!pg_locale_deterministic(mylocale))
 		ereport(ERROR,
@@ -1619,18 +1618,14 @@ Datum
 texteq(PG_FUNCTION_ARGS)
 {
 	Oid			collid = PG_GET_COLLATION();
-	bool		locale_is_c = false;
 	pg_locale_t mylocale = 0;
 	bool		result;
 
 	check_collation_set(collid);
 
-	if (lc_collate_is_c(collid))
-		locale_is_c = true;
-	else
-		mylocale = pg_newlocale_from_collation(collid);
+	mylocale = pg_newlocale_from_collation(collid);
 
-	if (locale_is_c || pg_locale_deterministic(mylocale))
+	if (pg_locale_deterministic(mylocale))
 	{
 		Datum		arg1 = PG_GETARG_DATUM(0);
 		Datum		arg2 = PG_GETARG_DATUM(1);
@@ -1678,18 +1673,14 @@ Datum
 textne(PG_FUNCTION_ARGS)
 {
 	Oid			collid = PG_GET_COLLATION();
-	bool		locale_is_c = false;
-	pg_locale_t mylocale = 0;
+	pg_locale_t mylocale;
 	bool		result;
 
 	check_collation_set(collid);
 
-	if (lc_collate_is_c(collid))
-		locale_is_c = true;
-	else
-		mylocale = pg_newlocale_from_collation(collid);
+	mylocale = pg_newlocale_from_collation(collid);
 
-	if (locale_is_c || pg_locale_deterministic(mylocale))
+	if (pg_locale_deterministic(mylocale))
 	{
 		Datum		arg1 = PG_GETARG_DATUM(0);
 		Datum		arg2 = PG_GETARG_DATUM(1);
@@ -1793,15 +1784,14 @@ text_starts_with(PG_FUNCTION_ARGS)
 	Datum		arg1 = PG_GETARG_DATUM(0);
 	Datum		arg2 = PG_GETARG_DATUM(1);
 	Oid			collid = PG_GET_COLLATION();
-	pg_locale_t mylocale = 0;
+	pg_locale_t mylocale;
 	bool		result;
 	Size		len1,
 				len2;
 
 	check_collation_set(collid);
 
-	if (!lc_collate_is_c(collid))
-		mylocale = pg_newlocale_from_collation(collid);
+	mylocale = pg_newlocale_from_collation(collid);
 
 	if (!pg_locale_deterministic(mylocale))
 		ereport(ERROR,
@@ -1927,25 +1917,25 @@ varstr_sortsupport(SortSupport ssup, Oid typid, Oid collid)
 		}
 		else
 			ssup->comparator = varlenafastcmp_locale;
-	}
 
-	/*
-	 * Unfortunately, it seems that abbreviation for non-C collations is
-	 * broken on many common platforms; see pg_strxfrm_enabled().
-	 *
-	 * Even apart from the risk of broken locales, it's possible that there
-	 * are platforms where the use of abbreviated keys should be disabled at
-	 * compile time.  Having only 4 byte datums could make worst-case
-	 * performance drastically more likely, for example.  Moreover, macOS's
-	 * strxfrm() implementation is known to not effectively concentrate a
-	 * significant amount of entropy from the original string in earlier
-	 * transformed blobs.  It's possible that other supported platforms are
-	 * similarly encumbered.  So, if we ever get past disabling this
-	 * categorically, we may still want or need to disable it for particular
-	 * platforms.
-	 */
-	if (!collate_c && !pg_strxfrm_enabled(locale))
-		abbreviate = false;
+		/*
+		 * Unfortunately, it seems that abbreviation for non-C collations is
+		 * broken on many common platforms; see pg_strxfrm_enabled().
+		 *
+		 * Even apart from the risk of broken locales, it's possible that there
+		 * are platforms where the use of abbreviated keys should be disabled at
+		 * compile time.  Having only 4 byte datums could make worst-case
+		 * performance drastically more likely, for example.  Moreover, macOS's
+		 * strxfrm() implementation is known to not effectively concentrate a
+		 * significant amount of entropy from the original string in earlier
+		 * transformed blobs.  It's possible that other supported platforms are
+		 * similarly encumbered.  So, if we ever get past disabling this
+		 * categorically, we may still want or need to disable it for particular
+		 * platforms.
+		 */
+		if (!pg_strxfrm_enabled(locale))
+			abbreviate = false;
+	}
 
 	/*
 	 * If we're using abbreviated keys, or if we're using a locale-aware
@@ -2465,7 +2455,6 @@ varstr_abbrev_abort(int memtupcount, SortSupport ssup)
 	 * time there are differences within full key strings not captured in
 	 * abbreviations.
 	 */
-#ifdef TRACE_SORT
 	if (trace_sort)
 	{
 		double		norm_abbrev_card = abbrev_distinct / (double) memtupcount;
@@ -2475,7 +2464,6 @@ varstr_abbrev_abort(int memtupcount, SortSupport ssup)
 			 memtupcount, abbrev_distinct, key_distinct, norm_abbrev_card,
 			 sss->prop_card);
 	}
-#endif
 
 	/*
 	 * If the number of distinct abbreviated keys approximately matches the
@@ -2537,12 +2525,10 @@ varstr_abbrev_abort(int memtupcount, SortSupport ssup)
 	 * of moderately high to high abbreviated cardinality.  There is little to
 	 * lose but much to gain, which our strategy reflects.
 	 */
-#ifdef TRACE_SORT
 	if (trace_sort)
 		elog(LOG, "varstr_abbrev: aborted abbreviation at %d "
 			 "(abbrev_distinct: %f, key_distinct: %f, prop_card: %f)",
 			 memtupcount, abbrev_distinct, key_distinct, sss->prop_card);
-#endif
 
 	return true;
 }

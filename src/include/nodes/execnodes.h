@@ -465,8 +465,8 @@ typedef struct ResultRelInfo
 	IndexInfo **ri_IndexRelationInfo;
 
 	/*
-	 * For UPDATE/DELETE result relations, the attribute number of the row
-	 * identity junk attribute in the source plan's output tuples
+	 * For UPDATE/DELETE/MERGE result relations, the attribute number of the
+	 * row identity junk attribute in the source plan's output tuples
 	 */
 	AttrNumber	ri_RowIdAttNo;
 
@@ -524,7 +524,9 @@ typedef struct ResultRelInfo
 	/* array of constraint-checking expr states */
 	ExprState **ri_ConstraintExprs;
 
-	/* arrays of stored generated columns expr states, for INSERT and UPDATE */
+	/*
+	 * Arrays of stored generated columns ExprStates for INSERT/UPDATE/MERGE.
+	 */
 	ExprState **ri_GeneratedExprsI;
 	ExprState **ri_GeneratedExprsU;
 
@@ -961,7 +963,6 @@ typedef struct SubPlanState
 	struct PlanState *planstate;	/* subselect plan's state tree */
 	struct PlanState *parent;	/* parent plan node's state tree */
 	ExprState  *testexpr;		/* state of combining expression */
-	List	   *args;			/* states of argument expression(s) */
 	HeapTuple	curTuple;		/* copy of most recent tuple from subplan */
 	Datum		curArray;		/* most recent array from ARRAY() subplan */
 	/* these are used when hashing the subselect's output: */
@@ -1052,9 +1053,8 @@ typedef struct JsonExprState
 
 	/*
 	 * Address of the step to coerce the result value of jsonpath evaluation
-	 * to the RETURNING type using JsonExpr.coercion_expr.  -1 if no coercion
-	 * is necessary or if either JsonExpr.use_io_coercion or
-	 * JsonExpr.use_json_coercion is true.
+	 * to the RETURNING type.  -1 if no coercion if JsonExpr.use_io_coercion
+	 * is true.
 	 */
 	int			jump_eval_coercion;
 
@@ -1748,6 +1748,19 @@ typedef struct BitmapIndexScanState
 } BitmapIndexScanState;
 
 /* ----------------
+ *	 BitmapHeapScanInstrumentation information
+ *
+ *		exact_pages		   total number of exact pages retrieved
+ *		lossy_pages		   total number of lossy pages retrieved
+ * ----------------
+ */
+typedef struct BitmapHeapScanInstrumentation
+{
+	uint64		exact_pages;
+	uint64		lossy_pages;
+} BitmapHeapScanInstrumentation;
+
+/* ----------------
  *	 SharedBitmapState information
  *
  *		BM_INITIAL		TIDBitmap creation is not yet started, so first worker
@@ -1791,6 +1804,20 @@ typedef struct ParallelBitmapHeapState
 } ParallelBitmapHeapState;
 
 /* ----------------
+ *	 Instrumentation data for a parallel bitmap heap scan.
+ *
+ * A shared memory struct that each parallel worker copies its
+ * BitmapHeapScanInstrumentation information into at executor shutdown to
+ * allow the leader to display the information in EXPLAIN ANALYZE.
+ * ----------------
+ */
+typedef struct SharedBitmapHeapInstrumentation
+{
+	int			num_workers;
+	BitmapHeapScanInstrumentation sinstrument[FLEXIBLE_ARRAY_MEMBER];
+} SharedBitmapHeapInstrumentation;
+
+/* ----------------
  *	 BitmapHeapScanState information
  *
  *		bitmapqualorig	   execution state for bitmapqualorig expressions
@@ -1798,8 +1825,7 @@ typedef struct ParallelBitmapHeapState
  *		tbmiterator		   iterator for scanning current pages
  *		tbmres			   current-page data
  *		pvmbuffer		   buffer for visibility-map lookups of prefetched pages
- *		exact_pages		   total number of exact pages retrieved
- *		lossy_pages		   total number of lossy pages retrieved
+ *		stats			   execution statistics
  *		prefetch_iterator  iterator for prefetching ahead of current page
  *		prefetch_pages	   # pages prefetch iterator is ahead of current
  *		prefetch_target    current target prefetch distance
@@ -1808,6 +1834,7 @@ typedef struct ParallelBitmapHeapState
  *		shared_tbmiterator	   shared iterator
  *		shared_prefetch_iterator shared iterator for prefetching
  *		pstate			   shared state for parallel bitmap scan
+ *		sinstrument		   statistics for parallel workers
  * ----------------
  */
 typedef struct BitmapHeapScanState
@@ -1818,8 +1845,7 @@ typedef struct BitmapHeapScanState
 	TBMIterator *tbmiterator;
 	TBMIterateResult *tbmres;
 	Buffer		pvmbuffer;
-	long		exact_pages;
-	long		lossy_pages;
+	BitmapHeapScanInstrumentation stats;
 	TBMIterator *prefetch_iterator;
 	int			prefetch_pages;
 	int			prefetch_target;
@@ -1828,6 +1854,7 @@ typedef struct BitmapHeapScanState
 	TBMSharedIterator *shared_tbmiterator;
 	TBMSharedIterator *shared_prefetch_iterator;
 	ParallelBitmapHeapState *pstate;
+	SharedBitmapHeapInstrumentation *sinstrument;
 } BitmapHeapScanState;
 
 /* ----------------
@@ -2157,8 +2184,7 @@ typedef struct MergeJoinState
  *	 HashJoinState information
  *
  *		hashclauses				original form of the hashjoin condition
- *		hj_OuterHashKeys		the outer hash keys in the hashjoin condition
- *		hj_HashOperators		the join operators in the hashjoin condition
+ *		hj_OuterHash			ExprState for hashing outer keys
  *		hj_HashTable			hash table for the hashjoin
  *								(NULL if table not built yet)
  *		hj_CurHashValue			hash value for current outer tuple
@@ -2188,9 +2214,7 @@ typedef struct HashJoinState
 {
 	JoinState	js;				/* its first field is NodeTag */
 	ExprState  *hashclauses;
-	List	   *hj_OuterHashKeys;	/* list of ExprState nodes */
-	List	   *hj_HashOperators;	/* list of operator OIDs */
-	List	   *hj_Collations;
+	ExprState  *hj_OuterHash;
 	HashJoinTable hj_HashTable;
 	uint32		hj_CurHashValue;
 	int			hj_CurBucketNo;
@@ -2743,7 +2767,10 @@ typedef struct HashState
 {
 	PlanState	ps;				/* its first field is NodeTag */
 	HashJoinTable hashtable;	/* hash table for the hashjoin */
-	List	   *hashkeys;		/* list of ExprState nodes */
+	ExprState  *hash_expr;		/* ExprState to get hash value */
+
+	FmgrInfo   *skew_hashfunction;	/* lookup data for skew hash function */
+	Oid			skew_collation; /* collation to call skew_hashfunction with */
 
 	/*
 	 * In a parallelized hash join, the leader retains a pointer to the

@@ -25,6 +25,7 @@
 #include "access/xlogprefetcher.h"
 #include "access/xlogrecovery.h"
 #include "commands/async.h"
+#include "commands/waitlsn.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/autovacuum.h"
@@ -94,7 +95,6 @@ CalculateShmemSize(int *num_semaphores)
 
 	/* Compute number of semaphores we'll need */
 	numSemas = ProcGlobalSemas();
-	numSemas += SpinlockSemas();
 
 	/* Return the number of semaphores if requested by the caller */
 	if (num_semaphores)
@@ -111,7 +111,6 @@ CalculateShmemSize(int *num_semaphores)
 	 */
 	size = 100000;
 	size = add_size(size, PGSemaphoreShmemSize(numSemas));
-	size = add_size(size, SpinlockSemaSize());
 	size = add_size(size, hash_estimate_size(SHMEM_INDEX_SIZE,
 											 sizeof(ShmemIndexEnt)));
 	size = add_size(size, dsm_estimate_size());
@@ -149,12 +148,10 @@ CalculateShmemSize(int *num_semaphores)
 	size = add_size(size, SyncScanShmemSize());
 	size = add_size(size, AsyncShmemSize());
 	size = add_size(size, StatsShmemSize());
-	size = add_size(size, WaitEventExtensionShmemSize());
+	size = add_size(size, WaitEventCustomShmemSize());
 	size = add_size(size, InjectionPointShmemSize());
 	size = add_size(size, SlotSyncShmemSize());
-#ifdef EXEC_BACKEND
-	size = add_size(size, ShmemBackendArraySize());
-#endif
+	size = add_size(size, WaitLSNShmemSize());
 
 	/* include additional requested shmem from preload libraries */
 	size = add_size(size, total_addin_request);
@@ -229,28 +226,12 @@ CreateSharedMemoryAndSemaphores(void)
 	PGReserveSemaphores(numSemas);
 
 	/*
-	 * If spinlocks are disabled, initialize emulation layer (which depends on
-	 * semaphores, so the order is important here).
-	 */
-#ifndef HAVE_SPINLOCKS
-	SpinlockSemaInit();
-#endif
-
-	/*
 	 * Set up shared memory allocation mechanism
 	 */
 	InitShmemAllocation();
 
 	/* Initialize subsystems */
 	CreateOrAttachShmemStructs();
-
-#ifdef EXEC_BACKEND
-
-	/*
-	 * Alloc the win32 shared backend array
-	 */
-	ShmemBackendArrayAllocation();
-#endif
 
 	/* Initialize dynamic shared memory facilities. */
 	dsm_postmaster_startup(shim);
@@ -355,8 +336,9 @@ CreateOrAttachShmemStructs(void)
 	SyncScanShmemInit();
 	AsyncShmemInit();
 	StatsShmemInit();
-	WaitEventExtensionShmemInit();
+	WaitEventCustomShmemInit();
 	InjectionPointShmemInit();
+	WaitLSNShmemInit();
 }
 
 /*
@@ -372,11 +354,12 @@ InitializeShmemGUCs(void)
 	Size		size_b;
 	Size		size_mb;
 	Size		hp_size;
+	int			num_semas;
 
 	/*
 	 * Calculate the shared memory size and round up to the nearest megabyte.
 	 */
-	size_b = CalculateShmemSize(NULL);
+	size_b = CalculateShmemSize(&num_semas);
 	size_mb = add_size(size_b, (1024 * 1024) - 1) / (1024 * 1024);
 	sprintf(buf, "%zu", size_mb);
 	SetConfigOption("shared_memory_size", buf,
@@ -395,4 +378,7 @@ InitializeShmemGUCs(void)
 		SetConfigOption("shared_memory_size_in_huge_pages", buf,
 						PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 	}
+
+	sprintf(buf, "%d", num_semas);
+	SetConfigOption("num_os_semaphores", buf, PGC_INTERNAL, PGC_S_DYNAMIC_DEFAULT);
 }

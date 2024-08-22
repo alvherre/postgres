@@ -52,6 +52,7 @@ extern PGDLLIMPORT int postmaster_alive_fds[2];
 
 extern PGDLLIMPORT const char *progname;
 
+extern PGDLLIMPORT bool redirection_done;
 extern PGDLLIMPORT bool LoadedSSL;
 
 extern void PostmasterMain(int argc, char *argv[]) pg_attribute_noreturn();
@@ -62,15 +63,8 @@ extern int	MaxLivePostmasterChildren(void);
 
 extern bool PostmasterMarkPIDForWorkerNotify(int);
 
-extern void processCancelRequest(int backendPID, int32 cancelAuthCode);
-
-#ifdef EXEC_BACKEND
-extern Size ShmemBackendArraySize(void);
-extern void ShmemBackendArrayAllocation(void);
-
 #ifdef WIN32
 extern void pgwin32_register_deadchild_callback(HANDLE procHandle, DWORD procId);
-#endif
 #endif
 
 /* defined in globals.c */

@@ -83,7 +83,7 @@ extern void check_index_predicates(PlannerInfo *root, RelOptInfo *rel);
  * tidpath.c
  *	  routines to generate tid paths
  */
-extern void create_tidscan_paths(PlannerInfo *root, RelOptInfo *rel);
+extern bool create_tidscan_paths(PlannerInfo *root, RelOptInfo *rel);
 
 /*
  * joinpath.c
@@ -158,7 +158,8 @@ extern List *generate_join_implied_equalities_for_ecs(PlannerInfo *root,
 													  Relids join_relids,
 													  Relids outer_relids,
 													  RelOptInfo *inner_rel);
-extern bool exprs_known_equal(PlannerInfo *root, Node *item1, Node *item2);
+extern bool exprs_known_equal(PlannerInfo *root, Node *item1, Node *item2,
+							  Oid opfamily);
 extern EquivalenceClass *match_eclasses_to_foreign_key_col(PlannerInfo *root,
 														   ForeignKeyOptInfo *fkinfo,
 														   int colno);

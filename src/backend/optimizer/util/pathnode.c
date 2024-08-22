@@ -1423,11 +1423,16 @@ create_merge_append_path(PlannerInfo *root,
 	Cost		input_total_cost;
 	ListCell   *l;
 
+	/*
+	 * We don't currently support parameterized MergeAppend paths, as
+	 * explained in the comments for generate_orderedappend_paths.
+	 */
+	Assert(bms_is_empty(rel->lateral_relids) && bms_is_empty(required_outer));
+
 	pathnode->path.pathtype = T_MergeAppend;
 	pathnode->path.parent = rel;
 	pathnode->path.pathtarget = rel->reltarget;
-	pathnode->path.param_info = get_appendrel_parampathinfo(rel,
-															required_outer);
+	pathnode->path.param_info = NULL;
 	pathnode->path.parallel_aware = false;
 	pathnode->path.parallel_safe = rel->consider_parallel;
 	pathnode->path.parallel_workers = 0;
@@ -1452,6 +1457,9 @@ create_merge_append_path(PlannerInfo *root,
 	foreach(l, subpaths)
 	{
 		Path	   *subpath = (Path *) lfirst(l);
+
+		/* All child paths should be unparameterized */
+		Assert(bms_is_empty(PATH_REQ_OUTER(subpath)));
 
 		pathnode->path.rows += subpath->rows;
 		pathnode->path.parallel_safe = pathnode->path.parallel_safe &&
@@ -1480,9 +1488,6 @@ create_merge_append_path(PlannerInfo *root,
 			input_startup_cost += sort_path.startup_cost;
 			input_total_cost += sort_path.total_cost;
 		}
-
-		/* All child paths must have same parameterization */
-		Assert(bms_equal(PATH_REQ_OUTER(subpath), required_outer));
 	}
 
 	/*
@@ -1889,6 +1894,16 @@ create_gather_merge_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
 	Assert(subpath->parallel_safe);
 	Assert(pathkeys);
 
+	/*
+	 * The subpath should guarantee that it is adequately ordered either by
+	 * adding an explicit sort node or by using presorted input.  We cannot
+	 * add an explicit Sort node for the subpath in createplan.c on additional
+	 * pathkeys, because we can't guarantee the sort would be safe.  For
+	 * example, expressions may be volatile or otherwise parallel unsafe.
+	 */
+	if (!pathkeys_contained_in(pathkeys, subpath->pathkeys))
+		elog(ERROR, "gather merge input not sufficiently sorted");
+
 	pathnode->path.pathtype = T_GatherMerge;
 	pathnode->path.parent = rel;
 	pathnode->path.param_info = get_baserel_parampathinfo(root, rel,
@@ -1899,31 +1914,9 @@ create_gather_merge_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath,
 	pathnode->num_workers = subpath->parallel_workers;
 	pathnode->path.pathkeys = pathkeys;
 	pathnode->path.pathtarget = target ? target : rel->reltarget;
-	pathnode->path.rows += subpath->rows;
 
-	if (pathkeys_contained_in(pathkeys, subpath->pathkeys))
-	{
-		/* Subpath is adequately ordered, we won't need to sort it */
-		input_startup_cost += subpath->startup_cost;
-		input_total_cost += subpath->total_cost;
-	}
-	else
-	{
-		/* We'll need to insert a Sort node, so include cost for that */
-		Path		sort_path;	/* dummy for result of cost_sort */
-
-		cost_sort(&sort_path,
-				  root,
-				  pathkeys,
-				  subpath->total_cost,
-				  subpath->rows,
-				  subpath->pathtarget->width,
-				  0.0,
-				  work_mem,
-				  -1);
-		input_startup_cost += sort_path.startup_cost;
-		input_total_cost += sort_path.total_cost;
-	}
+	input_startup_cost += subpath->startup_cost;
+	input_total_cost += subpath->total_cost;
 
 	cost_gather_merge(pathnode, root, rel, pathnode->path.param_info,
 					  input_startup_cost, input_total_cost, rows);

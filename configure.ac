@@ -17,7 +17,7 @@ dnl Read the Autoconf manual for details.
 dnl
 m4_pattern_forbid(^PGAC_)dnl to catch undefined macros
 
-AC_INIT([PostgreSQL], [17beta2], [pgsql-bugs@lists.postgresql.org], [], [https://www.postgresql.org/])
+AC_INIT([PostgreSQL], [18devel], [pgsql-bugs@lists.postgresql.org], [], [https://www.postgresql.org/])
 
 m4_if(m4_defn([m4_PACKAGE_VERSION]), [2.69], [], [m4_fatal([Autoconf version 2.69 is required.
 Untested combinations of 'autoconf' and PostgreSQL versions are not
@@ -185,18 +185,6 @@ fi
 PGAC_ARG_BOOL(enable, rpath, yes,
               [do not embed shared library search path in executables])
 AC_SUBST(enable_rpath)
-
-#
-# Spinlocks
-#
-PGAC_ARG_BOOL(enable, spinlocks, yes,
-              [do not use spinlocks])
-
-#
-# Atomic operations
-#
-PGAC_ARG_BOOL(enable, atomics, yes,
-              [do not use atomic operations])
 
 #
 # --enable-debug adds -g to compiler flags
@@ -530,6 +518,15 @@ if test "$GCC" = yes -a "$ICC" = no; then
   # This was included in -Wall/-Wformat in older GCC versions
   PGAC_PROG_CC_CFLAGS_OPT([-Wformat-security])
   PGAC_PROG_CXX_CFLAGS_OPT([-Wformat-security])
+  # gcc 14+, clang for a while
+  # (Supported in C++ by clang but not gcc.  For consistency, omit in C++.)
+  save_CFLAGS=$CFLAGS
+  PGAC_PROG_CC_CFLAGS_OPT([-Wmissing-variable-declarations])
+  PERMIT_MISSING_VARIABLE_DECLARATIONS=
+  if test x"$save_CFLAGS" != x"$CFLAGS"; then
+    PERMIT_MISSING_VARIABLE_DECLARATIONS=-Wno-missing-variable-declarations
+  fi
+  AC_SUBST(PERMIT_MISSING_VARIABLE_DECLARATIONS)
   # Disable strict-aliasing rules; needed for gcc 3.3+
   PGAC_PROG_CC_CFLAGS_OPT([-fno-strict-aliasing])
   PGAC_PROG_CXX_CFLAGS_OPT([-fno-strict-aliasing])
@@ -832,11 +829,7 @@ AC_MSG_RESULT([$with_icu])
 AC_SUBST(with_icu)
 
 if test "$with_icu" = yes; then
-  PKG_CHECK_MODULES(ICU, icu-uc icu-i18n, [],
-    [AC_MSG_ERROR([ICU library not found
-If you have ICU already installed, see config.log for details on the
-failure.  It is possible the compiler isn't looking in the proper directory.
-Use --without-icu to disable ICU support.])])
+  PKG_CHECK_MODULES(ICU, icu-uc icu-i18n)
 fi
 
 #
@@ -1296,20 +1289,6 @@ failure.  It is possible the compiler isn't looking in the proper directory.
 Use --without-zlib to disable zlib support.])])
 fi
 
-if test "$enable_spinlocks" = yes; then
-  AC_DEFINE(HAVE_SPINLOCKS, 1, [Define to 1 if you have spinlocks.])
-else
-  AC_MSG_WARN([
-*** Not using spinlocks will cause poor performance.])
-fi
-
-if test "$enable_atomics" = yes; then
-  AC_DEFINE(HAVE_ATOMICS, 1, [Define to 1 if you want to use atomics if available.])
-else
-  AC_MSG_WARN([
-*** Not using atomic operations will cause poor performance.])
-fi
-
 if test "$with_gssapi" = yes ; then
   if test "$PORTNAME" != "win32"; then
     AC_SEARCH_LIBS(gss_store_cred_into, [gssapi_krb5 gss 'gssapi -lkrb5 -lcrypto'], [],
@@ -1358,7 +1337,7 @@ if test "$with_ssl" = openssl ; then
   # function was removed.
   AC_CHECK_FUNCS([CRYPTO_lock])
   # Function introduced in OpenSSL 1.1.1.
-  AC_CHECK_FUNCS([X509_get_signature_info])
+  AC_CHECK_FUNCS([X509_get_signature_info SSL_CTX_set_num_tickets])
   AC_DEFINE([USE_OPENSSL], 1, [Define to 1 to build with OpenSSL support. (--with-ssl=openssl)])
 elif test "$with_ssl" != no ; then
   AC_MSG_ERROR([--with-ssl must specify openssl])
@@ -1464,7 +1443,6 @@ AC_CHECK_HEADERS(m4_normalize([
 	execinfo.h
 	getopt.h
 	ifaddrs.h
-	langinfo.h
 	mbarrier.h
 	sys/epoll.h
 	sys/event.h
@@ -1795,7 +1773,7 @@ AC_CHECK_DECLS(posix_fadvise, [], [], [#include <fcntl.h>])
 ]) # fi
 
 AC_CHECK_DECLS(fdatasync, [], [], [#include <unistd.h>])
-AC_CHECK_DECLS([strlcat, strlcpy, strnlen])
+AC_CHECK_DECLS([strlcat, strlcpy, strnlen, strsep])
 
 # We can't use AC_CHECK_FUNCS to detect these functions, because it
 # won't handle deployment target restrictions on macOS
@@ -1814,6 +1792,7 @@ AC_REPLACE_FUNCS(m4_normalize([
 	strlcat
 	strlcpy
 	strnlen
+	strsep
 ]))
 
 AC_REPLACE_FUNCS(pthread_barrier_wait)
@@ -2423,7 +2402,13 @@ fi
 # For linkers that understand --export-dynamic, add that to the LDFLAGS_EX_BE
 # (backend specific ldflags). One some platforms this will always fail (e.g.,
 # windows), but on others it depends on the choice of linker (e.g., solaris).
+# macOS uses -export_dynamic instead.  (On macOS, the option is only
+# needed when also using -flto, but we add it anyway since it's
+# harmless.)
 PGAC_PROG_CC_LD_VARFLAGS_OPT(LDFLAGS_EX_BE, [-Wl,--export-dynamic], $link_test_func)
+if test x"$LDFLAGS_EX_BE" = x""; then
+  PGAC_PROG_CC_LD_VARFLAGS_OPT(LDFLAGS_EX_BE, [-Wl,-export_dynamic], $link_test_func)
+fi
 AC_SUBST(LDFLAGS_EX_BE)
 
 # Create compiler version string
