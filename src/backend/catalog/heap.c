@@ -2826,11 +2826,6 @@ list_cookedconstr_attnum_cmp(const ListCell *p1, const ListCell *p2)
  * not-null constraint.  If a user-specified name clashes with another
  * user-specified name, an error is raised.
  *
- * Note that inherited constraints have two shapes: those coming from another
- * not-null constraint in the parent, which have a name already, and those
- * coming from a primary key in the parent, which don't.  Any name specified
- * in a parent is disregarded in case of a conflict.
- *
  * Returns a list of AttrNumber for columns that need to have the attnotnull
  * flag set.
  */
@@ -2959,12 +2954,12 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
 		Assert(cooked->contype == CONSTR_NOTNULL);
+		Assert(cooked->name);
 
 		/*
-		 * Preserve the first non-conflicting constraint name we come across,
-		 * if any
+		 * Preserve the first non-conflicting constraint name we come across.
 		 */
-		if (conname == NULL && cooked->name)
+		if (conname == NULL)
 			conname = cooked->name;
 
 		for (int restpos = outerpos + 1; restpos < list_length(old_notnulls);)
@@ -2972,9 +2967,10 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 			CookedConstraint *other;
 
 			other = (CookedConstraint *) list_nth(old_notnulls, restpos);
+			Assert(other->name);
 			if (other->attnum == cooked->attnum)
 			{
-				if (conname == NULL && other->name)
+				if (conname == NULL)
 					conname = other->name;
 
 				add_inhcount++;
