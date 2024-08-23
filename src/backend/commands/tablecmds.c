@@ -639,8 +639,6 @@ static void ComputePartitionAttrs(ParseState *pstate, Relation rel, List *partPa
 static void CreateInheritance(Relation child_rel, Relation parent_rel, bool ispartition);
 static void RemoveInheritance(Relation child_rel, Relation parent_rel,
 							  bool expect_detached);
-static void ATInheritAdjustNotNulls(Relation parent_rel, Relation child_rel,
-									int inhcount);
 static ObjectAddress ATExecAttachPartition(List **wqueue, Relation rel,
 										   PartitionCmd *cmd,
 										   AlterTableUtilityContext *context);
@@ -7857,9 +7855,6 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 				 LOCKMODE lockmode)
 {
 	HeapTuple	tuple;
-	Relation	constr_rel;
-	ScanKeyData skey;
-	SysScanDesc conscan;
 	AttrNumber	attnum;
 	ObjectAddress address;
 	Constraint *constraint;
@@ -7907,27 +7902,12 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 						colName)));
 
 	/* See if there's already a constraint */
-	constr_rel = table_open(ConstraintRelationId, RowExclusiveLock);
-	ScanKeyInit(&skey,
-				Anum_pg_constraint_conrelid,
-				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(RelationGetRelid(rel)));
-	conscan = systable_beginscan(constr_rel, ConstraintRelidTypidNameIndexId, true,
-								 NULL, 1, &skey);
-
-	while (HeapTupleIsValid(tuple = systable_getnext(conscan)))
+	tuple = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
+	if (HeapTupleIsValid(tuple))
 	{
-		Form_pg_constraint conForm = (Form_pg_constraint) GETSTRUCT(tuple);
+		Form_pg_constraint conForm;
 		bool		changed = false;
-		HeapTuple	copytup;
 
-		if (conForm->contype != CONSTRAINT_NOTNULL)
-			continue;
-
-		if (extractNotNullColumn(tuple) != attnum)
-			continue;
-
-		copytup = heap_copytuple(tuple);
 		conForm = (Form_pg_constraint) GETSTRUCT(copytup);
 
 		/*
@@ -7958,21 +7938,20 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 
 		if (changed)
 		{
+			Relation	constr_rel;
+
+			constr_rel = table_open(ConstraintRelationId, RowExclusiveLock);
+
 			CatalogTupleUpdate(constr_rel, &copytup->t_self, copytup);
 			ObjectAddressSet(address, ConstraintRelationId, conForm->oid);
+			table_close(constr_rel, RowExclusiveLock);
 		}
-
-		systable_endscan(conscan);
-		table_close(constr_rel, RowExclusiveLock);
 
 		if (changed)
 			return address;
 		else
 			return InvalidObjectAddress;
 	}
-
-	systable_endscan(conscan);
-	table_close(constr_rel, RowExclusiveLock);
 
 	/*
 	 * If we're asked not to recurse, and children exist, raise an error for
@@ -8037,16 +8016,13 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	if (recurse)
 	{
 		List	   *children;
-		ListCell   *lc;
 
 		children = find_inheritance_children(RelationGetRelid(rel),
 											 lockmode);
 
-		foreach(lc, children)
+		foreach_oid(childoid, children)
 		{
-			Relation	childrel;
-
-			childrel = table_open(lfirst_oid(lc), NoLock);
+			Relation	childrel = table_open(childoid, NoLock);
 
 			ATExecSetNotNull(wqueue, childrel,
 							 conName, colName, recurse, true,
@@ -8064,6 +8040,8 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
  *
  * This doesn't exist in the grammar; it's used when creating a
  * primary key and the column is not already marked attnotnull.
+ *
+ * XXX verify whether still needed
  */
 static ObjectAddress
 ATExecSetAttNotNull(List **wqueue, Relation rel,
@@ -12872,9 +12850,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	List	   *children;
 	bool		is_no_inherit_constraint = false;
 	char	   *constrName;
-	List	   *unconstrained_cols = NIL;
+	AttrNumber	attnum_notnull = InvalidAttrNumber;
 	char	   *colname = NULL;
-	bool		dropping_pk = false;
 
 	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
 		return InvalidObjectAddress;
@@ -12925,44 +12902,50 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						constrName, RelationGetRelationName(rel))));
 
 	/*
-	 * See if we have a not-null constraint or a PRIMARY KEY.  If so, we have
-	 * more checks and actions below, so obtain the list of columns that are
-	 * constrained by the constraint being dropped.
+	 * Disallow dropping a NOT NULL constraint underneath a primary key, a
+	 * replica identity index, or a generated identity column.
 	 */
 	if (con->contype == CONSTRAINT_NOTNULL)
 	{
-		AttrNumber	colnum;
+		AttrNumber	attnum = extractNotNullColumn(constraintTup);
+		Bitmapset	*pkattrs;
+		Bitmapset	*irattrs;
+		HeapTuple	atttup;
 
-		colnum = extractNotNullColumn(constraintTup);
-		unconstrained_cols = list_make1_int(colnum);
-		colname = NameStr(TupleDescAttr(RelationGetDescr(rel),
-										colnum - 1)->attname);
-	}
-	else if (con->contype == CONSTRAINT_PRIMARY)
-	{
-		Datum		adatum;
-		ArrayType  *arr;
-		int			numkeys;
-		bool		isNull;
-		int16	   *attnums;
+		/* save column name for recursion step */
+		colname = get_attname(RelationGetRelid(rel), attnum, false);
 
-		dropping_pk = true;
+		/* Disallow if it's in the primary key */
+		pkattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_PRIMARY_KEY);
+		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
+						  pkattrs))
+			ereport(ERROR,
+					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					errmsg("column \"%s\" is in the primary key",
+						   get_attname(RelationGetRelid(rel), attnum, false)));
 
-		adatum = heap_getattr(constraintTup, Anum_pg_constraint_conkey,
-							  RelationGetDescr(conrel), &isNull);
-		if (isNull)
-			elog(ERROR, "null conkey for constraint %u", con->oid);
-		arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
-		numkeys = ARR_DIMS(arr)[0];
-		if (ARR_NDIM(arr) != 1 ||
-			numkeys < 0 ||
-			ARR_HASNULL(arr) ||
-			ARR_ELEMTYPE(arr) != INT2OID)
-			elog(ERROR, "conkey is not a 1-D smallint array");
-		attnums = (int16 *) ARR_DATA_PTR(arr);
+		/* Disallow if it's in the replica identity */
+		irattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_IDENTITY_KEY);
+		if (bms_is_member(attnum_notnull - FirstLowInvalidHeapAttributeNumber,
+						  irattrs))
+			ereport(ERROR,
+					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					errmsg("column \"%s\" is in index used as replica identity",
+						   get_attname(RelationGetRelid(rel), attnum, false)));
 
-		for (int i = 0; i < numkeys; i++)
-			unconstrained_cols = lappend_int(unconstrained_cols, attnums[i]);
+		/* Disallow if it's a GENERATED AS IDENTITY column */
+		atttup = SearchSysCacheAttNum(RelationGetRelid(rel), attnum);
+		if (!HeapTupleIsValid(atttup))
+			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
+				 attnum, RelationGetRelid(rel));
+		if (((Form_pg_attribute) GETSTRUCT(atttup))->attidentity != '\0')
+			ereport(ERROR,
+					errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+					errmsg("column \"%s\" of relation \"%s\" is an identity column",
+						   get_attname(RelationGetRelid(rel), attnum,
+									   false),
+						   RelationGetRelationName(rel)));
+		ReleaseSysCache(atttup);
 	}
 
 	is_no_inherit_constraint = con->connoinherit;
@@ -12990,87 +12973,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	 */
 	ObjectAddressSet(conobj, ConstraintRelationId, con->oid);
 	performDeletion(&conobj, behavior, 0);
-
-	/*
-	 * If this was a NOT NULL or the primary key, verify that we still have
-	 * constraints to support GENERATED AS IDENTITY or the replica identity.
-	 */
-	if (unconstrained_cols != NIL)
-	{
-		Relation	attrel;
-		Bitmapset  *pkcols;
-		Bitmapset  *ircols;
-
-		/* Make implicit attnotnull changes visible */
-		CommandCounterIncrement();
-
-		attrel = table_open(AttributeRelationId, RowExclusiveLock);
-
-		/*
-		 * We want to test columns for their presence in the primary key, but
-		 * only if we're not dropping it.
-		 */
-		pkcols = dropping_pk ? NULL :
-			RelationGetIndexAttrBitmap(rel,
-									   INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		ircols = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_IDENTITY_KEY);
-
-		foreach_int(attnum, unconstrained_cols)
-		{
-			HeapTuple	atttup;
-			HeapTuple	contup;
-			Form_pg_attribute attForm;
-			char		attidentity;
-
-			/*
-			 * Obtain pg_attribute tuple and verify conditions on it.
-			 */
-			atttup = SearchSysCacheAttNum(RelationGetRelid(rel), attnum);
-			if (!HeapTupleIsValid(atttup))
-				elog(ERROR, "cache lookup failed for attribute %d of relation %u",
-					 attnum, RelationGetRelid(rel));
-			attForm = (Form_pg_attribute) GETSTRUCT(atttup);
-			attidentity = attForm->attidentity;
-			ReleaseSysCache(atttup);
-
-			/*
-			 * Since the above deletion has been made visible, we can now
-			 * search for any remaining constraints on this column (or these
-			 * columns, in the case we're dropping a multicol primary key.)
-			 * Then, verify whether any further NOT NULL or primary key
-			 * exists: if none and this is a generated identity column or the
-			 * replica identity, abort the whole thing.
-			 */
-			contup = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
-			if (contup ||
-				bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
-							  pkcols))
-				continue;
-
-			/*
-			 * It's not valid to drop the not-null constraint for a GENERATED
-			 * AS IDENTITY column.
-			 */
-			if (attidentity != '\0')
-				ereport(ERROR,
-						errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						errmsg("column \"%s\" of relation \"%s\" is an identity column",
-							   get_attname(RelationGetRelid(rel), attnum,
-										   false),
-							   RelationGetRelationName(rel)));
-
-			/*
-			 * It's not valid to drop the not-null constraint for a column in
-			 * the replica identity index, either. (FULL is not affected.)
-			 */
-			if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, ircols))
-				ereport(ERROR,
-						errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-						errmsg("column \"%s\" is in index used as replica identity",
-							   get_attname(RelationGetRelid(rel), attnum, false)));
-		}
-		table_close(attrel, RowExclusiveLock);
-	}
 
 	/*
 	 * For partitioned tables, non-CHECK, non-NOT-NULL inherited constraints
@@ -13216,68 +13118,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		heap_freetuple(tuple);
 
 		table_close(childrel, NoLock);
-	}
-
-	/*
-	 * In addition, when dropping a primary key from a legacy-inheritance
-	 * parent table, we must recurse to children to mark the corresponding NOT
-	 * NULL constraint as no longer inherited, or drop it if this its last
-	 * reference.
-	 */
-	if (con->contype == CONSTRAINT_PRIMARY &&
-		rel->rd_rel->relkind == RELKIND_RELATION &&
-		rel->rd_rel->relhassubclass)
-	{
-		List	   *colnames = NIL;
-		List	   *pkready = NIL;
-
-		/*
-		 * Because primary keys are always marked as NO INHERIT, we don't have
-		 * a list of children yet, so obtain one now.
-		 */
-		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
-
-		/*
-		 * Find out the list of column names to process.  Fortunately, we
-		 * already have the list of column numbers.
-		 */
-		foreach_int(attnum, unconstrained_cols)
-		{
-			colnames = lappend(colnames, get_attname(RelationGetRelid(rel),
-													 attnum, false));
-		}
-
-		foreach_oid(childrelid, children)
-		{
-			Relation	childrel;
-
-			if (list_member_oid(pkready, childrelid))
-				continue;		/* child already processed */
-
-			/* find_inheritance_children already got lock */
-			childrel = table_open(childrelid, NoLock);
-			CheckAlterTableIsSafe(childrel);
-
-			foreach_ptr(char, colName, colnames)
-			{
-				HeapTuple	contup;
-
-				contup = findNotNullConstraint(childrelid, colName);
-				if (contup == NULL)
-					elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\", relation \"%s\"",
-						 colName, RelationGetRelationName(childrel));
-
-				dropconstraint_internal(childrel, contup,
-										DROP_RESTRICT, true, true,
-										false, &pkready,
-										lockmode);
-				pkready = NIL;
-			}
-
-			table_close(childrel, NoLock);
-
-			pkready = lappend_oid(pkready, childrelid);
-		}
 	}
 
 	table_close(conrel, RowExclusiveLock);
@@ -16222,13 +16062,6 @@ ATExecAddInherit(Relation child_rel, RangeVar *parent, LOCKMODE lockmode)
 	/* OK to create inheritance */
 	CreateInheritance(child_rel, parent_rel, false);
 
-	/*
-	 * If parent_rel has a primary key, then child_rel has not-null
-	 * constraints that make these columns as non nullable.  Make those
-	 * constraints as inherited.
-	 */
-	ATInheritAdjustNotNulls(parent_rel, child_rel, 1);
-
 	ObjectAddressSet(address, RelationRelationId,
 					 RelationGetRelid(parent_rel));
 
@@ -16711,13 +16544,6 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 	RemoveInheritance(rel, parent_rel, false);
 
 	/*
-	 * If parent_rel has a primary key, then child_rel has not-null
-	 * constraints that make these columns as non nullable.  Mark those
-	 * constraints as no longer inherited by this parent.
-	 */
-	ATInheritAdjustNotNulls(parent_rel, rel, -1);
-
-	/*
 	 * If the parent has a primary key, then we decrement counts for all NOT
 	 * NULL constraints
 	 */
@@ -17005,54 +16831,6 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	InvokeObjectPostAlterHookArg(InheritsRelationId,
 								 RelationGetRelid(child_rel), 0,
 								 RelationGetRelid(parent_rel), false);
-}
-
-/*
- * Adjust coninhcount of not-null constraints upwards or downwards when a
- * table is marked as inheriting or no longer doing so a table with a primary
- * key.
- *
- * Note: these constraints are not dropped, even if their inhcount goes to zero
- * and conislocal is false.  Instead we mark the constraints as locally defined.
- * This is seen as more useful behavior, with no downsides.  The user can always
- * drop them afterwards.
- */
-static void
-ATInheritAdjustNotNulls(Relation parent_rel, Relation child_rel, int inhcount)
-{
-	Bitmapset  *pkattnos;
-
-	/* Quick exit when parent has no PK */
-	if (!parent_rel->rd_rel->relhasindex)
-		return;
-
-	pkattnos = RelationGetIndexAttrBitmap(parent_rel,
-										  INDEX_ATTR_BITMAP_PRIMARY_KEY);
-	if (pkattnos != NULL)
-	{
-		Bitmapset  *childattnums = NULL;
-		AttrMap    *attmap;
-		int			i;
-
-		attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
-									   RelationGetDescr(child_rel), true);
-
-		i = -1;
-		while ((i = bms_next_member(pkattnos, i)) >= 0)
-		{
-			childattnums = bms_add_member(childattnums,
-										  attmap->attnums[i + FirstLowInvalidHeapAttributeNumber - 1]);
-		}
-
-		/*
-		 * CCI is needed in case there's a NOT NULL PRIMARY KEY column in the
-		 * parent: the relevant not-null constraint in the child already had
-		 * its inhcount modified earlier.
-		 */
-		CommandCounterIncrement();
-		AdjustNotNullInheritance(RelationGetRelid(child_rel), childattnums,
-								 inhcount);
-	}
 }
 
 /*

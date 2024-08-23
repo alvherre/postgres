@@ -565,6 +565,7 @@ ChooseConstraintName(const char *name1, const char *name2,
 /*
  * Find and return a copy of the pg_constraint tuple that implements a
  * validated not-null constraint for the given column of the given relation.
+ * If no such constraint exists, return NULL.
  *
  * XXX This would be easier if we had pg_attribute.notnullconstr with the OID
  * of the constraint that implements the not-null constraint for that column.
@@ -939,7 +940,7 @@ RemoveConstraintById(Oid conId)
 	HeapTuple	tup;
 	Form_pg_constraint con;
 	bool		dropping_pk = false;
-	List	   *unconstrained_cols = NIL;
+	AttrNumber	unconstrained_col = InvalidAttrNumber;
 
 	conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
 
@@ -995,33 +996,7 @@ RemoveConstraintById(Oid conId)
 		}
 		else if (con->contype == CONSTRAINT_NOTNULL)
 		{
-			unconstrained_cols = list_make1_int(extractNotNullColumn(tup));
-		}
-		else if (con->contype == CONSTRAINT_PRIMARY)
-		{
-			Datum		adatum;
-			ArrayType  *arr;
-			int			numkeys;
-			bool		isNull;
-			int16	   *attnums;
-
-			dropping_pk = true;
-
-			adatum = heap_getattr(tup, Anum_pg_constraint_conkey,
-								  RelationGetDescr(conDesc), &isNull);
-			if (isNull)
-				elog(ERROR, "null conkey for constraint %u", con->oid);
-			arr = DatumGetArrayTypeP(adatum);	/* ensure not toasted */
-			numkeys = ARR_DIMS(arr)[0];
-			if (ARR_NDIM(arr) != 1 ||
-				numkeys < 0 ||
-				ARR_HASNULL(arr) ||
-				ARR_ELEMTYPE(arr) != INT2OID)
-				elog(ERROR, "conkey is not a 1-D smallint array");
-			attnums = (int16 *) ARR_DATA_PTR(arr);
-
-			for (int i = 0; i < numkeys; i++)
-				unconstrained_cols = lappend_int(unconstrained_cols, attnums[i]);
+			unconstrained_col = extractNotNullColumn(tup);
 		}
 
 		/* Keep lock on constraint's rel until end of xact */
@@ -1043,83 +1018,30 @@ RemoveConstraintById(Oid conId)
 	CatalogTupleDelete(conDesc, &tup->t_self);
 
 	/*
-	 * If this was a NOT NULL or the primary key, the constrained columns must
-	 * have had pg_attribute.attnotnull set.  See if we need to reset it, and
-	 * do so.
+	 * If this was a NOT NULL, the constrained column must have had
+	 * pg_attribute.attnotnull set.  Reset it now.
 	 */
-	if (unconstrained_cols != NIL)
+	if (unconstrained_col != InvalidAttrNumber)
 	{
-		Relation	tablerel;
 		Relation	attrel;
-		Bitmapset  *pkcols;
-		ListCell   *lc;
+		HeapTuple	atttup;
+		Form_pg_attribute attForm;
 
-		/* Make the above deletion visible */
-		CommandCounterIncrement();
-
-		tablerel = table_open(con->conrelid, NoLock);	/* already have lock */
 		attrel = table_open(AttributeRelationId, RowExclusiveLock);
+		atttup = SearchSysCacheCopyAttNum(con->conrelid, unconstrained_col);
+		if (!HeapTupleIsValid(atttup))
+			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
+				 unconstrained_col, con->conrelid);
+		attForm = (Form_pg_attribute) GETSTRUCT(atttup);
 
-		/*
-		 * We want to test columns for their presence in the primary key, but
-		 * only if we're not dropping it.
-		 */
-		pkcols = dropping_pk ? NULL :
-			RelationGetIndexAttrBitmap(tablerel,
-									   INDEX_ATTR_BITMAP_PRIMARY_KEY);
-
-		foreach(lc, unconstrained_cols)
+		/* Reset attnotnull */
+		if (attForm->attnotnull)
 		{
-			AttrNumber	attnum = lfirst_int(lc);
-			HeapTuple	atttup;
-			HeapTuple	contup;
-			Bitmapset  *ircols;
-			Form_pg_attribute attForm;
-
-			/*
-			 * Obtain pg_attribute tuple and verify conditions on it.  We use
-			 * a copy we can scribble on.
-			 */
-			atttup = SearchSysCacheCopyAttNum(con->conrelid, attnum);
-			if (!HeapTupleIsValid(atttup))
-				elog(ERROR, "cache lookup failed for attribute %d of relation %u",
-					 attnum, con->conrelid);
-			attForm = (Form_pg_attribute) GETSTRUCT(atttup);
-
-			/*
-			 * Since the above deletion has been made visible, we can now
-			 * search for any remaining constraints setting this column as
-			 * not-nullable; if we find any, no need to reset attnotnull.
-			 */
-			if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
-							  pkcols))
-				continue;
-			contup = findNotNullConstraintAttnum(con->conrelid, attnum);
-			if (contup)
-				continue;
-
-			/*
-			 * Also no reset if the column is in the replica identity or it's
-			 * a generated column
-			 */
-			if (attForm->attidentity != '\0')
-				continue;
-			ircols = RelationGetIndexAttrBitmap(tablerel,
-												INDEX_ATTR_BITMAP_IDENTITY_KEY);
-			if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
-							  ircols))
-				continue;
-
-			/* Reset attnotnull */
-			if (attForm->attnotnull)
-			{
-				attForm->attnotnull = false;
-				CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
-			}
+			attForm->attnotnull = false;
+			CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
 		}
 
 		table_close(attrel, RowExclusiveLock);
-		table_close(tablerel, NoLock);
 	}
 
 	/* Clean up */
