@@ -351,7 +351,6 @@ typedef struct _tableInfo
 									 * empty string, unnamed constraint
 									 * (pre-v17) */
 	bool	   *notnull_noinh;	/* NOT NULL is NO INHERIT */
-	bool	   *notnull_throwaway;	/* drop the NOT NULL constraint later */
 	bool	   *notnull_inh;	/* true if NOT NULL has no local definition */
 	struct _attrDefInfo **attrdefs; /* DEFAULT expressions */
 	struct _constraintInfo *checkexprs; /* CHECK constraints */

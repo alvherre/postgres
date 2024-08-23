@@ -346,9 +346,9 @@ static void makeTableDataInfo(DumpOptions *dopt, TableInfo *tbinfo);
 static void buildMatViewRefreshDependencies(Archive *fout);
 static void getTableDataFKConstraints(void);
 static void determineNotNullFlags(Archive *fout, PGresult *res, int r,
-								  TableInfo *tbinfo, int j, int *notnullcount,
+								  TableInfo *tbinfo, int j,
 								  int i_notnull_name, int i_notnull_noinherit,
-								  int i_notnull_is_pk, int i_notnull_inh);
+								  int i_notnull_inh);
 static char *format_function_arguments(const FuncInfo *finfo, const char *funcargs,
 									   bool is_agg);
 static char *format_function_signature(Archive *fout,
@@ -8733,7 +8733,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	int			i_attislocal;
 	int			i_notnull_name;
 	int			i_notnull_noinherit;
-	int			i_notnull_is_pk;
 	int			i_notnull_inh;
 	int			i_attoptions;
 	int			i_attcollation;
@@ -8823,36 +8822,16 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 *
 	 * We track in notnull_inh whether the constraint was defined directly in
 	 * this table or via an ancestor, for binary upgrade.
-	 *
-	 * Lastly, we need to know if the PK for the table involves each column;
-	 * for columns that are there we need a NOT NULL marking even if there's
-	 * no explicit constraint, to avoid the table having to be scanned for
-	 * NULLs after the data is loaded when the PK is created, later in the
-	 * dump; for this case we add throwaway constraints that are dropped once
-	 * the PK is created.
-	 *
-	 * Another complication arises from columns that have attnotnull set, but
-	 * for which no corresponding not-null nor PK constraint exists.  This can
-	 * happen if, for example, a primary key is dropped indirectly -- say,
-	 * because one of its columns is dropped.  This is an irregular condition,
-	 * so we don't work hard to preserve it, and instead act as though an
-	 * unnamed not-null constraint exists.
 	 */
 	if (fout->remoteVersion >= 170000)
 		appendPQExpBufferStr(q,
-							 "CASE WHEN co.conname IS NOT NULL THEN co.conname "
-							 "  WHEN a.attnotnull AND copk.conname IS NULL THEN '' ELSE NULL END AS notnull_name,\n"
-							 "CASE WHEN co.conname IS NOT NULL THEN co.connoinherit "
-							 "  WHEN a.attnotnull THEN false ELSE NULL END AS notnull_noinherit,\n"
-							 "copk.conname IS NOT NULL as notnull_is_pk,\n"
-							 "CASE WHEN co.conname IS NOT NULL THEN "
-							 "  coalesce(NOT co.conislocal, true) "
-							 "ELSE false END as notnull_inh,\n");
+							 "co.conname AS notnull_name,\n"
+							 "co.connoinherit AS notnull_noinherit,\n"
+							 "NOT co.conislocal AS notnull_inh,\n");
 	else
 		appendPQExpBufferStr(q,
 							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END AS notnull_name,\n"
 							 "false AS notnull_noinherit,\n"
-							 "copk.conname IS NOT NULL AS notnull_is_pk,\n"
 							 "NOT a.attislocal AS notnull_inh,\n");
 
 	if (fout->remoteVersion >= 140000)
@@ -8905,10 +8884,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 							 "co.conkey = array[a.attnum])\n");
 
 	appendPQExpBufferStr(q,
-						 "LEFT JOIN pg_catalog.pg_constraint copk ON "
-						 "(copk.conrelid = src.tbloid\n"
-						 "   AND copk.contype = 'p' AND "
-						 "copk.conkey @> array[a.attnum])\n"
 						 "WHERE a.attnum > 0::pg_catalog.int2\n"
 						 "ORDER BY a.attrelid, a.attnum");
 
@@ -8931,7 +8906,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	i_attislocal = PQfnumber(res, "attislocal");
 	i_notnull_name = PQfnumber(res, "notnull_name");
 	i_notnull_noinherit = PQfnumber(res, "notnull_noinherit");
-	i_notnull_is_pk = PQfnumber(res, "notnull_is_pk");
 	i_notnull_inh = PQfnumber(res, "notnull_inh");
 	i_attoptions = PQfnumber(res, "attoptions");
 	i_attcollation = PQfnumber(res, "attcollation");
@@ -8955,7 +8929,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		TableInfo  *tbinfo = NULL;
 		int			numatts;
 		bool		hasdefaults;
-		int			notnullcount;
 
 		/* Count rows for this table */
 		for (numatts = 1; numatts < ntups - r; numatts++)
@@ -8980,8 +8953,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			pg_fatal("unexpected column data for table \"%s\"",
 					 tbinfo->dobj.name);
 
-		notnullcount = 0;
-
 		/* Save data for this table */
 		tbinfo->numatts = numatts;
 		tbinfo->attnames = (char **) pg_malloc(numatts * sizeof(char *));
@@ -9002,7 +8973,6 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		tbinfo->attmissingval = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnull_constrs = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnull_noinh = (bool *) pg_malloc(numatts * sizeof(bool));
-		tbinfo->notnull_throwaway = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->notnull_inh = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->attrdefs = (AttrDefInfo **) pg_malloc(numatts * sizeof(AttrDefInfo *));
 		hasdefaults = false;
@@ -9030,9 +9000,9 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 
 			/* Handle not-null constraint name and flags */
 			determineNotNullFlags(fout, res, r,
-								  tbinfo, j, &notnullcount,
+								  tbinfo, j,
 								  i_notnull_name, i_notnull_noinherit,
-								  i_notnull_is_pk, i_notnull_inh);
+								  i_notnull_inh);
 
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, r, i_attoptions));
 			tbinfo->attcollation[j] = atooid(PQgetvalue(res, r, i_attcollation));
@@ -9329,7 +9299,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
  *
  * Result row 'r' is for tbinfo's attribute 'j'.
  *
- * There are four possibilities:
+ * There are three possibilities:
  * 1) the column has no not-null constraints. In that case, ->notnull_constrs
  *    (the constraint name) remains NULL.
  * 2) The column has a regular constraint with no name (this is the case when
@@ -9339,15 +9309,8 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
  *    notnull_constrs carries that name and dumpTableSchema will print
  *    "CONSTRAINT the_name NOT NULL".  However, if the name is the default
  *    (table_column_not_null), there's no need to print that name in the dump,
- *    so notnull_consts is set to the empty string and it behaves as the case
+ *    so notnull_constrs is set to the empty string and it behaves as the case
  *    above.
- * 4) The column does not have a not-null constraint, but the primary key
- *    covers the column. In this case we use a "throwaway" not-null constraint,
- *    and we add commands to drop that constraint as soon as the primary key
- *    is created.  (This is done so that the ALTER TABLE .. ADD PRIMARY KEY
- *    doesn't have to scan the table looking for nulls, which improves restore
- *    times.  Therefore we don't do it for partitioned tables, since no data
- *    is loaded and therefore no difference exists during PK creation.)
  *
  * In a child table that inherits from a parent already containing NOT NULL
  * constraints and the columns in the child don't have their own NOT NULL
@@ -9363,21 +9326,14 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
  * to do the right thing in all but the trivial case.  However, the downside
  * of getting it wrong is simply that the name is printed rather than
  * suppressed, so it's not a big deal.
- *
- * getTableAttrs must have set *notnullcount to zero the first time it sees
- * each individual table and not touch it afterwards; we use it to assign
- * names to throwaway constraints.
  */
 static void
 determineNotNullFlags(Archive *fout, PGresult *res, int r,
-					  TableInfo *tbinfo, int j, int *notnullcount,
+					  TableInfo *tbinfo, int j,
 					  int i_notnull_name, int i_notnull_noinherit,
-					  int i_notnull_is_pk, int i_notnull_inh)
+					  int i_notnull_inh)
 {
 	DumpOptions *dopt = fout->dopt;
-	bool		use_named_notnull = false;
-	bool		use_unnamed_notnull = false;
-	bool		use_throwaway_notnull = false;
 
 	/*
 	 * We set ->notnull_inh straight from the query here, but flagInhAttrs can
@@ -9391,29 +9347,10 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 		 * < 17 doesn't have not-null names, so an unnamed constraint
 		 * is sufficient for most cases.
 		 */
-#if 0
-		if (!PQgetisnull(res, r, i_notnull_name) &&
-			dopt->binary_upgrade &&
-			!tbinfo->ispartition &&
-			tbinfo->notnull_inh[j])
-		{
-			fprintf(stderr, "-- first case hit: column %s\n", PQgetvalue(res, r, 2));
-			use_unnamed_notnull = true;
-		}
+		if (!PQgetisnull(res, r, i_notnull_name))
+			tbinfo->notnull_constrs[j] = "";
 		else
-#endif
-			if (PQgetvalue(res, r, i_notnull_is_pk)[0] == 't')
-		{
-			/*
-			 * We want this flag to be set for columns of a primary key in
-			 * which data is going to be loaded by the dump we produce; thus a
-			 * partitioned table doesn't need it.
-			 */
-			if (tbinfo->relkind != RELKIND_PARTITIONED_TABLE)
-				use_throwaway_notnull = true;
-		}
-		else if (!PQgetisnull(res, r, i_notnull_name))
-			use_unnamed_notnull = true;
+			tbinfo->notnull_constrs[j] = NULL;
 	}
 	else
 	{
@@ -9427,7 +9364,6 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 				!tbinfo->ispartition &&
 				tbinfo->notnull_inh[j])
 			{
-				use_named_notnull = true;
 				tbinfo->notnull_constrs[j] =
 					pstrdup(PQgetvalue(res, r, i_notnull_name));
 			}
@@ -9440,55 +9376,20 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 										tbinfo->attnames[j]);
 				if (strcmp(default_name,
 						   PQgetvalue(res, r, i_notnull_name)) == 0)
-					use_unnamed_notnull = true;
+					tbinfo->notnull_constrs[j] = "";
 				else
 				{
-					use_named_notnull = true;
 					tbinfo->notnull_constrs[j] =
 						pstrdup(PQgetvalue(res, r, i_notnull_name));
 				}
 			}
 		}
-		else if (PQgetvalue(res, r, i_notnull_is_pk)[0] == 't')
-		{
-			/* see above */
-			if (tbinfo->relkind != RELKIND_PARTITIONED_TABLE)
-				use_throwaway_notnull = true;
-		}
+		else
+			tbinfo->notnull_constrs[j] = NULL;
 	}
 
-	if (use_unnamed_notnull)
-	{
-		tbinfo->notnull_constrs[j] = "";
-		tbinfo->notnull_throwaway[j] = false;
-	}
-	else if (use_named_notnull)
-	{
-		/* The name itself has already been determined */
-		tbinfo->notnull_throwaway[j] = false;
-	}
-	else if (use_throwaway_notnull)
-	{
-		/*
-		 * Give this constraint a throwaway name.
-		 */
-		tbinfo->notnull_constrs[j] =
-			psprintf("pgdump_throwaway_notnull_%d", (*notnullcount)++);
-		tbinfo->notnull_throwaway[j] = true;
-		tbinfo->notnull_inh[j] = false;
-	}
-	else
-	{
-		tbinfo->notnull_constrs[j] = NULL;
-		tbinfo->notnull_throwaway[j] = false;
-	}
-
-	/*
-	 * Throwaway constraints must always be NO INHERIT; otherwise do what the
-	 * catalog says.
-	 */
-	tbinfo->notnull_noinh[j] = use_throwaway_notnull ||
-		PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
+	/* Lastly, set NO INHERIT */
+	tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
 }
 
 /*
@@ -16530,7 +16431,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 				 * conislocal.  The inhcount is fixed later.
 				 */
 				if (tbinfo->notnull_constrs[j] != NULL &&
-					!tbinfo->notnull_throwaway[j] &&
 					tbinfo->notnull_inh[j] &&
 					!tbinfo->ispartition)
 				{
@@ -17449,19 +17349,6 @@ dumpConstraint(Archive *fout, const ConstraintInfo *coninfo)
 		 * only have ALTER TABLE syntax for.  Keep this in sync with the
 		 * similar code in dumpIndex!
 		 */
-
-		/*
-		 * Drop any not-null constraints that were added to support the PK,
-		 * but leave them alone if they have a definition coming from their
-		 * parent.
-		 */
-		if (coninfo->contype == 'p')
-			for (int i = 0; i < tbinfo->numatts; i++)
-				if (tbinfo->notnull_throwaway[i] &&
-					!tbinfo->notnull_inh[i])
-					appendPQExpBuffer(q, "\nALTER TABLE ONLY %s DROP CONSTRAINT %s;",
-									  fmtQualifiedDumpable(tbinfo),
-									  tbinfo->notnull_constrs[i]);
 
 		/* If the index is clustered, we need to record that. */
 		if (indxinfo->indisclustered)
