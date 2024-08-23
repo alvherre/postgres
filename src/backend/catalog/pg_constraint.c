@@ -708,18 +708,15 @@ extractNotNullColumn(HeapTuple constrTup)
  * AdjustNotNullInheritance1
  *		Adjust inheritance count for a single not-null constraint
  *
- * If no not-null constraint is found for the column, return 0.
+ * If no not-null constraint is found for the column, return false.
  * Caller can create one.
  * If the constraint does exist and it's inheritable, adjust its
- * inheritance count (and possibly islocal status) and return 1.
+ * inheritance count (and possibly islocal status) and return true.
  * No further action needs to be taken.
- * If the constraint exists but is marked NO INHERIT, adjust it as above
- * and reset connoinherit to false, and return -1.  Caller is
- * responsible for adding the same constraint to the children, if any.
  */
-int
+bool
 AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
-						  bool is_no_inherit, bool allow_noinherit_change)
+						  bool is_no_inherit)
 {
 	HeapTuple	tup;
 
@@ -739,38 +736,14 @@ AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
 		 * If we're asked for a NO INHERIT constraint and this relation
 		 * already has an inheritable one, throw an error.
 		 */
-		if (is_no_inherit && !conform->connoinherit)
+		if (is_no_inherit != conform->connoinherit)
 			ereport(ERROR,
 					errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					errmsg("cannot change NO INHERIT status of NOT NULL constraint \"%s\" on relation \"%s\"",
 						   NameStr(conform->conname), get_rel_name(relid)));
 
-		/*
-		 * If the constraint already exists in this relation but it's marked
-		 * NO INHERIT, we can just remove that flag (provided caller allows
-		 * such a change), and instruct caller to recurse to add the
-		 * constraint to children.
-		 */
-		if (!is_no_inherit && conform->connoinherit)
-		{
-			if (!allow_noinherit_change)
-				ereport(ERROR,
-						errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-						errmsg("cannot change NO INHERIT status of NOT NULL constraint \"%s\" on relation \"%s\"",
-							   NameStr(conform->conname), get_rel_name(relid)));
-
-			conform->connoinherit = false;
-			retval = -1;		/* caller must add constraint on child rels */
-		}
-
 		if (count > 0)
 			conform->coninhcount += count;
-
-		/* sanity check */
-		if (conform->coninhcount < 0)
-			elog(ERROR, "invalid inhcount %d for constraint \"%s\" on relation \"%s\"",
-				 conform->coninhcount, NameStr(conform->conname),
-				 get_rel_name(relid));
 
 		/*
 		 * If the constraint is no longer inherited, mark it local.  It's

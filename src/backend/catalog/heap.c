@@ -2550,48 +2550,11 @@ AddRelationNewConstraints(Relation rel,
 
 			/*
 			 * If the column already has an inheritable not-null constraint,
-			 * we need only adjust its coninhcount and we're done.  In certain
-			 * cases (see below), if the constraint is there but marked NO
-			 * INHERIT, then we mark it as no longer such and coninhcount
-			 * updated, plus we must also recurse to the children (if any) to
-			 * add the constraint there.
-			 *
-			 * We only allow the inheritability status to change during binary
-			 * upgrade (where it's used to add the not-null constraints for
-			 * children of tables with primary keys), or when we're recursing
-			 * processing a table down an inheritance hierarchy; directly
-			 * allowing a constraint to change from NO INHERIT to INHERIT
-			 * during ALTER TABLE ADD CONSTRAINT would be far too surprising
-			 * behavior.
+			 * we need only adjust its coninhcount and we're done.
 			 */
-			existing = AdjustNotNullInheritance1(RelationGetRelid(rel), colnum,
-												 cdef->inhcount, cdef->is_no_inherit,
-												 IsBinaryUpgrade || allow_merge);
-			if (existing == 1)
-				continue;		/* all done! */
-			else if (existing == -1)
-			{
-				List	   *children;
-
-				children = find_inheritance_children(RelationGetRelid(rel), NoLock);
-				foreach_oid(childoid, children)
-				{
-					Relation	childrel = table_open(childoid, NoLock);
-
-					AddRelationNewConstraints(childrel,
-											  NIL,
-											  list_make1(copyObject(cdef)),
-											  allow_merge,
-											  is_local,
-											  is_internal,
-											  queryString);
-					/* these constraints are not in the return list -- good? */
-
-					table_close(childrel, NoLock);
-				}
-
+			if (AdjustNotNullInheritance1(RelationGetRelid(rel), colnum,
+										  cdef->inhcount, cdef->is_no_inherit))
 				continue;
-			}
 
 			/*
 			 * If a constraint name is specified, check that it isn't already
