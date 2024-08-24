@@ -7905,10 +7905,8 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	tuple = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
 	if (HeapTupleIsValid(tuple))
 	{
-		Form_pg_constraint conForm;
+		Form_pg_constraint conForm = (Form_pg_constraint) GETSTRUCT(tuple);
 		bool		changed = false;
-
-		conForm = (Form_pg_constraint) GETSTRUCT(copytup);
 
 		/*
 		 * Don't let a NO INHERIT constraint be changed into inherit.
@@ -7942,7 +7940,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 
 			constr_rel = table_open(ConstraintRelationId, RowExclusiveLock);
 
-			CatalogTupleUpdate(constr_rel, &copytup->t_self, copytup);
+			CatalogTupleUpdate(constr_rel, &tuple->t_self, tuple);
 			ObjectAddressSet(address, ConstraintRelationId, conForm->oid);
 			table_close(constr_rel, RowExclusiveLock);
 		}
