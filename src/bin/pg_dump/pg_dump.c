@@ -8873,11 +8873,11 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 					  tbloids->data);
 
 	/*
-	 * In versions 17 and up, we need pg_constraint for explicit NOT NULL
+	 * In versions 18 and up, we need pg_constraint for explicit NOT NULL
 	 * entries.  Also, we need to know if the NOT NULL for each column is
 	 * backing a primary key.
 	 */
-	if (fout->remoteVersion >= 170000)
+	if (fout->remoteVersion >= 180000)
 		appendPQExpBufferStr(q,
 							 " LEFT JOIN pg_catalog.pg_constraint co ON "
 							 "(a.attrelid = co.conrelid\n"
@@ -9304,7 +9304,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
  * 1) the column has no not-null constraints. In that case, ->notnull_constrs
  *    (the constraint name) remains NULL.
  * 2) The column has a regular constraint with no name (this is the case when
- *    constraints come from pre-17 servers).  In this case, ->notnull_constrs
+ *    constraints come from pre-18 servers).  In this case, ->notnull_constrs
  *    is set to the empty string; dumpTableSchema will print just "NOT NULL".
  * 3) The column has a regular constraint with a known name; in that case
  *    notnull_constrs carries that name and dumpTableSchema will print
@@ -9318,7 +9318,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
  * declarations, we suppress printing constraints in the child: the
  * constraints are acquired at the point where the child is attached to the
  * parent.  This is tracked in ->notnull_inh (which is set in flagInhAttrs for
- * servers pre-17).
+ * servers pre-18).
  *
  * Any of these constraints might have the NO INHERIT bit.  If so we set
  * ->notnull_noinh and NO INHERIT will be printed by dumpTableSchema.
@@ -9342,10 +9342,10 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 	 */
 	tbinfo->notnull_inh[j] = PQgetvalue(res, r, i_notnull_inh)[0] == 't';
 
-	if (fout->remoteVersion < 170000)
+	if (fout->remoteVersion < 180000)
 	{
 		/*
-		 * < 17 doesn't have not-null names, so an unnamed constraint
+		 * < 18 doesn't have not-null names, so an unnamed constraint
 		 * is sufficient for most cases.
 		 */
 		if (!PQgetisnull(res, r, i_notnull_name))

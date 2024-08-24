@@ -455,7 +455,7 @@ flagInhIndexes(Archive *fout, TableInfo tblinfo[], int numTables)
  * What we need to do here is:
  *
  * - Detect child columns that inherit NOT NULL bits from their parents, so
- *   that we needn't specify that again for the child. (Versions >= 17 no
+ *   that we needn't specify that again for the child. (Versions >= 18 no
  *   longer need this.)
  *
  * - Detect child columns that have DEFAULT NULL when their parents had some
@@ -558,8 +558,8 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				}
 			}
 
-			/* In versions < 17, remember if we found inherited NOT NULL */
-			if (fout->remoteVersion < 170000)
+			/* In versions < 18, remember if we found inherited NOT NULL */
+			if (fout->remoteVersion < 180000)
 				tbinfo->notnull_inh[j] = foundNotNull;
 
 			/*
