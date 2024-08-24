@@ -8813,17 +8813,18 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 						 "), E',\n    ') AS attfdwoptions,\n");
 
 	/*
-	 * Find out any NOT NULL markings for each column.  In 17 and up we read
+	 * Find out any NOT NULL markings for each column.  In 18 and up we read
 	 * pg_constraint to obtain the constraint name.  notnull_noinherit is set
-	 * according to the NO INHERIT property.  For versions prior to 17, we
+	 * according to the NO INHERIT property.  For versions prior to 18, we
 	 * store an empty string as the name when a constraint is marked as
 	 * attnotnull (this cues dumpTableSchema to print the NOT NULL clause
 	 * without a name); also, such cases are never NO INHERIT.
 	 *
 	 * We track in notnull_inh whether the constraint was defined directly in
-	 * this table or via an ancestor, for binary upgrade.
+	 * this table or via an ancestor, for binary upgrade.  flagInhAttrs might
+	 * modify this later for servers older than 18.
 	 */
-	if (fout->remoteVersion >= 170000)
+	if (fout->remoteVersion >= 180000)
 		appendPQExpBufferStr(q,
 							 "co.conname AS notnull_name,\n"
 							 "co.connoinherit AS notnull_noinherit,\n"
