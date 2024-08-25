@@ -2721,6 +2721,24 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 						if (strcmp(key, inhname) == 0)
 						{
 							found = true;
+
+							if (!inhattr->attnotnull)
+							{
+								Constraint *nnconstr;
+
+								nnconstr = makeNode(Constraint);
+								nnconstr->contype = CONSTR_NOTNULL;
+								nnconstr->conname = NULL;	/* XXX use PK name? */
+								nnconstr->inhcount = 0;
+								nnconstr->deferrable = false;
+								nnconstr->initdeferred = false;
+								nnconstr->location = -1;
+								nnconstr->keys = list_make1(makeString(inhname));
+								nnconstr->skip_validation = false;
+								nnconstr->initially_valid = true;
+
+								cxt->nnconstraints = lappend(cxt->nnconstraints, nnconstr);
+							}
 							break;
 						}
 					}
