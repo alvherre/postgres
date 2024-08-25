@@ -12816,7 +12816,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	List	   *children;
 	bool		is_no_inherit_constraint = false;
 	char	   *constrName;
-	AttrNumber	attnum_notnull = InvalidAttrNumber;
 	char	   *colname = NULL;
 
 	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
