@@ -9345,8 +9345,8 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 	if (fout->remoteVersion < 180000)
 	{
 		/*
-		 * < 18 doesn't have not-null names, so an unnamed constraint
-		 * is sufficient for most cases.
+		 * < 18 doesn't have not-null names, so an unnamed constraint is
+		 * sufficient for most cases.
 		 */
 		if (!PQgetisnull(res, r, i_notnull_name))
 			tbinfo->notnull_constrs[j] = "";
