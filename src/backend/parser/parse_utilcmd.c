@@ -1234,9 +1234,9 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	 * statistics, since we don't yet know what column numbers the copied
 	 * columns will have in the finished table.  If any of those options are
 	 * specified, add the LIKE clause to cxt->likeclauses so that
-	 * expandTableLikeClause will be called after we do know that; in addition,
-	 * do that if there are any NOT NULL constraints, because those must be
-	 * propagated even if not explicitly requested.
+	 * expandTableLikeClause will be called after we do know that; in
+	 * addition, do that if there are any NOT NULL constraints, because those
+	 * must be propagated even if not explicitly requested.
 	 *
 	 * In order for this to work, we remember the relation OID so that
 	 * expandTableLikeClause is certain to open the same table.
