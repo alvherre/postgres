@@ -912,7 +912,6 @@ RemoveConstraintById(Oid conId)
 	Relation	conDesc;
 	HeapTuple	tup;
 	Form_pg_constraint con;
-	bool		dropping_pk = false;
 	AttrNumber	unconstrained_col = InvalidAttrNumber;
 
 	conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
