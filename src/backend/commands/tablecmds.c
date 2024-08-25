@@ -12873,8 +12873,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	if (con->contype == CONSTRAINT_NOTNULL)
 	{
 		AttrNumber	attnum = extractNotNullColumn(constraintTup);
-		Bitmapset	*pkattrs;
-		Bitmapset	*irattrs;
+		Bitmapset  *pkattrs;
+		Bitmapset  *irattrs;
 		HeapTuple	atttup;
 
 		/* save column name for recursion step */
