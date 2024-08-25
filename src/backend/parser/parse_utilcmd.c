@@ -2660,14 +2660,11 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 			{
 				/*
 				 * column is defined in the new table.  For PRIMARY KEY, we
-				 * can apply the not-null constraint cheaply here ... unless
-				 * the column is marked is_from_type, in which case marking it
-				 * here would be ineffective (see MergeAttributes).  Note that
-				 * this isn't effective in ALTER TABLE either, unless the
-				 * column is being added in the same command.
+				 * can apply the not-null constraint cheaply here.  Note that
+				 * this isn't effective in ALTER TABLE, unless the column is
+				 * being added in the same command.
 				 */
 				if (constraint->contype == CONSTR_PRIMARY &&
-					!column->is_from_type &&
 					!column->is_not_null)
 				{
 					Constraint *notnull;
