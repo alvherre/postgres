@@ -2540,13 +2540,14 @@ AddRelationNewConstraints(Relation rel,
 			CookedConstraint *nncooked;
 			AttrNumber	colnum;
 			char	   *nnname;
-			int			existing;
 
 			/* Determine which column to modify */
 			colnum = get_attnum(RelationGetRelid(rel), strVal(linitial(cdef->keys)));
 			if (colnum == InvalidAttrNumber)	/* shouldn't happen */
-				elog(ERROR, "cache lookup failed for attribute \"%s\" of relation %u",
-					 strVal(linitial(cdef->keys)), RelationGetRelid(rel));
+				ereport(ERROR,
+						errcode(ERRCODE_UNDEFINED_COLUMN),
+						errmsg("column \"%s\" of relation \"%s\" does not exist",
+							   strVal(linitial(cdef->keys)), RelationGetRelationName(rel)));
 
 			/*
 			 * If the column already has an inheritable not-null constraint,
