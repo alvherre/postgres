@@ -2583,7 +2583,6 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 		List	   *nnconstrs;
 		ListCell   *lc1;
 		ListCell   *lc2;
-		Bitmapset  *pkattrs;
 		Bitmapset  *nncols = NULL;
 
 		/* caller already got lock */
@@ -2673,18 +2672,12 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 		inherited_defaults = cols_with_defaults = NIL;
 
 		/*
-		 * All columns that are part of the parent's primary key need to be
-		 * NOT NULL; if partition just the attnotnull bit, otherwise a full
-		 * constraint (if they don't have one already).  Also, we request
-		 * attnotnull on columns that have a not-null constraint that's not
-		 * marked NO INHERIT.
+		 * Request attnotnull on columns that have a not-null constraint
+		 * that's not marked NO INHERIT.
 		 */
-		pkattrs = RelationGetIndexAttrBitmap(relation,
-											 INDEX_ATTR_BITMAP_PRIMARY_KEY);
 		nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation), true);
-		foreach(lc1, nnconstrs)
-			nncols = bms_add_member(nncols,
-									((CookedConstraint *) lfirst(lc1))->attnum);
+		foreach_ptr(CookedConstraint, cc, nnconstrs)
+			nncols = bms_add_member(nncols, cc->attnum);
 
 		for (AttrNumber parent_attno = 1; parent_attno <= tupleDesc->natts;
 			 parent_attno++)
@@ -2756,38 +2749,10 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 			}
 
 			/*
-			 * mark attnotnull if parent has it and it's not NO INHERIT
+			 * mark attnotnull if parent has it
 			 */
-			if (bms_is_member(parent_attno, nncols) ||
-				bms_is_member(parent_attno - FirstLowInvalidHeapAttributeNumber,
-							  pkattrs))
+			if (bms_is_member(parent_attno, nncols))
 				mergeddef->is_not_null = true;
-
-			/*
-			 * In regular inheritance, columns in the parent's primary key get
-			 * an extra not-null constraint.  Partitioning doesn't need this,
-			 * because the PK itself is going to be cloned to the partition.
-			 */
-			if (!is_partition &&
-				bms_is_member(parent_attno -
-							  FirstLowInvalidHeapAttributeNumber,
-							  pkattrs))
-			{
-				CookedConstraint *nn;
-
-				nn = palloc(sizeof(CookedConstraint));
-				nn->contype = CONSTR_NOTNULL;
-				nn->conoid = InvalidOid;
-				nn->name = NULL;
-				nn->attnum = newattmap->attnums[parent_attno - 1];
-				nn->expr = NULL;
-				nn->skip_validation = false;
-				nn->is_local = false;
-				nn->inhcount = 1;
-				nn->is_no_inherit = false;
-
-				nnconstraints = lappend(nnconstraints, nn);
-			}
 
 			/*
 			 * Locate default/generation expression if any
@@ -5731,6 +5696,9 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 					cmd2->recurse = true;
 				switch (castNode(Constraint, cmd2->def)->contype)
 				{
+					case CONSTR_NOTNULL:
+						pass = AT_PASS_COL_ATTRS;
+						break;
 					case CONSTR_PRIMARY:
 					case CONSTR_UNIQUE:
 					case CONSTR_EXCLUSION:
@@ -12924,7 +12892,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 
 		/* Disallow if it's in the replica identity */
 		irattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_IDENTITY_KEY);
-		if (bms_is_member(attnum_notnull - FirstLowInvalidHeapAttributeNumber,
+		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
 						  irattrs))
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),

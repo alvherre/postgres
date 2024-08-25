@@ -309,6 +309,32 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 	Assert(stmt->constraints == NIL);
 
 	/*
+	 * Before processing index constraints, which could include a primary key,
+	 * we must scan all not-null constraints to propagate the is_not_null flag
+	 * to each corresponding ColumnDef.  This is necessary because table-level
+	 * not-null constraints have not been marked in each ColumnDef, and the PK
+	 * processing code needs to know whether one constraint has already been
+	 * declared in order not to declare a redundant one.
+	 */
+	foreach_node(Constraint, nn, cxt.nnconstraints)
+	{
+		char	   *colname = strVal(linitial(nn->keys));
+
+		foreach_node(ColumnDef, cd, cxt.columns)
+		{
+			/* not our column? */
+			if (strcmp(cd->colname, colname) != 0)
+				continue;
+			/* Already marked not-null? Nothing to do */
+			if (cd->is_not_null)
+				break;
+			/* Bingo, we're done for this constraint */
+			cd->is_not_null = true;
+			break;
+		}
+	}
+
+	/*
 	 * Postprocess constraints that give rise to index definitions.
 	 */
 	transformIndexConstraints(&cxt);
@@ -795,6 +821,16 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 				break;
 
 			case CONSTR_PRIMARY:
+				/* primary key columns need a NOT NULL constraint */
+				if (!saw_nullable)
+					need_notnull = true;
+				else if (!column->is_not_null)
+					ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+							 errmsg("conflicting NULL/NOT NULL declarations for column \"%s\" of table \"%s\"",
+									column->colname, cxt->relation->relname),
+							 parser_errposition(cxt->pstate,
+												constraint->location)));
 				if (cxt->isforeign)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -875,8 +911,8 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	}
 
 	/*
-	 * If we need a not-null constraint for SERIAL or IDENTITY, and one was
-	 * not explicitly specified, add one now.
+	 * If we need a not-null constraint for PRIMARY KEY, SERIAL or IDENTITY,
+	 * and one was not explicitly specified, add one now.
 	 */
 	if (need_notnull && !(saw_nullable && column->is_not_null))
 	{
@@ -933,6 +969,28 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 	switch (constraint->contype)
 	{
 		case CONSTR_PRIMARY:
+			foreach_node(String, key, constraint->keys)
+			{
+				Constraint *nnconstr;
+
+				/* XXX explain why only active when isalter */
+				if (cxt->isalter)
+				{
+					nnconstr = makeNode(Constraint);
+					nnconstr->contype = CONSTR_NOTNULL;
+					nnconstr->conname = NULL;	/* XXX use PK name? */
+					nnconstr->inhcount = 0;
+					nnconstr->deferrable = false;
+					nnconstr->initdeferred = false;
+					nnconstr->location = -1;
+					nnconstr->keys = list_make1(key);	/* already a String */
+					nnconstr->skip_validation = false;
+					nnconstr->initially_valid = true;
+
+					cxt->nnconstraints = lappend(cxt->nnconstraints, nnconstr);
+				}
+			}
+
 			if (cxt->isforeign)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2302,8 +2360,8 @@ transformIndexConstraints(CreateStmtContext *cxt)
  *		Transform one UNIQUE, PRIMARY KEY, or EXCLUDE constraint for
  *		transformIndexConstraints. An IndexStmt is returned.
  *
- * For a PRIMARY KEY constraint, we additionally force the columns to be
- * marked as not-null, without producing a not-null constraint.
+ * For a PRIMARY KEY constraint, we additionally create not-null constraints
+ * for columns that don't already have them.
  */
 static IndexStmt *
 transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
@@ -2523,6 +2581,22 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 							 errdetail("Cannot create a primary key or unique constraint using such an index."),
 							 parser_errposition(cxt->pstate, constraint->location)));
 
+				/* Ensure these columns get a NOT NULL constraint */
+				{
+					Constraint *notnull;
+
+					notnull = makeNode(Constraint);
+					notnull->contype = CONSTR_NOTNULL;
+					notnull->conname = NULL;
+					notnull->deferrable = false;
+					notnull->initdeferred = false;
+					notnull->location = -1;
+					notnull->keys = list_make1(makeString(attname));
+					notnull->skip_validation = false;
+					notnull->initially_valid = true;
+					cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
+				}
+
 				constraint->keys = lappend(constraint->keys, makeString(attname));
 			}
 			else
@@ -2594,9 +2668,21 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 				 * column is being added in the same command.
 				 */
 				if (constraint->contype == CONSTR_PRIMARY &&
-					!column->is_from_type)
+					!column->is_from_type &&
+					!column->is_not_null)
 				{
-					column->is_not_null = true;
+					Constraint *notnull;
+
+					notnull = makeNode(Constraint);
+					notnull->contype = CONSTR_NOTNULL;
+					notnull->conname = NULL;
+					notnull->deferrable = false;
+					notnull->initdeferred = false;
+					notnull->location = -1;
+					notnull->keys = list_make1(makeString(key));
+					notnull->skip_validation = false;
+					notnull->initially_valid = true;
+					cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
 				}
 			}
 			else if (SystemAttributeByName(key) != NULL)
