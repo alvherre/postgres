@@ -12900,7 +12900,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						   get_attname(RelationGetRelid(rel), attnum, false)));
 
 		/* Disallow if it's a GENERATED AS IDENTITY column */
-		atttup = SearchSysCacheAttNum(RelationGetRelid(rel), attnum);
+		atttup = SearchSysCacheCopyAttNum(RelationGetRelid(rel), attnum);
 		if (!HeapTupleIsValid(atttup))
 			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
 				 attnum, RelationGetRelid(rel));
@@ -12911,7 +12911,23 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						   get_attname(RelationGetRelid(rel), attnum,
 									   false),
 						   RelationGetRelationName(rel)));
-		ReleaseSysCache(atttup);
+
+		{
+			Relation	attrel;
+			Form_pg_attribute attForm;
+
+			attrel = table_open(AttributeRelationId, RowExclusiveLock);
+			attForm = (Form_pg_attribute) GETSTRUCT(atttup);
+
+			/* Reset attnotnull */
+			if (attForm->attnotnull)
+			{
+				attForm->attnotnull = false;
+				CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
+			}
+
+			table_close(attrel, RowExclusiveLock);
+		}
 	}
 
 	is_no_inherit_constraint = con->connoinherit;

@@ -912,7 +912,6 @@ RemoveConstraintById(Oid conId)
 	Relation	conDesc;
 	HeapTuple	tup;
 	Form_pg_constraint con;
-	AttrNumber	unconstrained_col = InvalidAttrNumber;
 
 	conDesc = table_open(ConstraintRelationId, RowExclusiveLock);
 
@@ -966,10 +965,6 @@ RemoveConstraintById(Oid conId)
 
 			table_close(pgrel, RowExclusiveLock);
 		}
-		else if (con->contype == CONSTRAINT_NOTNULL)
-		{
-			unconstrained_col = extractNotNullColumn(tup);
-		}
 
 		/* Keep lock on constraint's rel until end of xact */
 		table_close(rel, NoLock);
@@ -988,33 +983,6 @@ RemoveConstraintById(Oid conId)
 
 	/* Fry the constraint itself */
 	CatalogTupleDelete(conDesc, &tup->t_self);
-
-	/*
-	 * If this was a NOT NULL, the constrained column must have had
-	 * pg_attribute.attnotnull set.  Reset it now.
-	 */
-	if (unconstrained_col != InvalidAttrNumber)
-	{
-		Relation	attrel;
-		HeapTuple	atttup;
-		Form_pg_attribute attForm;
-
-		attrel = table_open(AttributeRelationId, RowExclusiveLock);
-		atttup = SearchSysCacheCopyAttNum(con->conrelid, unconstrained_col);
-		if (!HeapTupleIsValid(atttup))
-			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
-				 unconstrained_col, con->conrelid);
-		attForm = (Form_pg_attribute) GETSTRUCT(atttup);
-
-		/* Reset attnotnull */
-		if (attForm->attnotnull)
-		{
-			attForm->attnotnull = false;
-			CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
-		}
-
-		table_close(attrel, RowExclusiveLock);
-	}
 
 	/* Clean up */
 	ReleaseSysCache(tup);
