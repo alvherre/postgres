@@ -3051,18 +3051,23 @@ describeOneTableDetails(const char *schemaname,
 			PQclear(result);
 		}
 
-		/* If verbose, print NOT NULL constraints */
+		/*
+		 * If verbose, print NOT NULL constraints, omitting those in columns of
+		 * the primary key.
+		 */
 		if (verbose)
 		{
 			printfPQExpBuffer(&buf,
+							  /* FIXME the coalesce trick looks silly. What's a better way? */
 							  "SELECT co.conname, at.attname, co.connoinherit, co.conislocal,\n"
 							  "co.coninhcount <> 0\n"
 							  "FROM pg_catalog.pg_constraint co JOIN\n"
 							  "pg_catalog.pg_attribute at ON\n"
-							  "(at.attnum = co.conkey[1])\n"
+							  "(at.attrelid = co.conrelid AND at.attnum = co.conkey[1])\n"
 							  "WHERE co.contype = 'n' AND\n"
 							  "co.conrelid = '%s'::pg_catalog.regclass AND\n"
-							  "at.attrelid = '%s'::pg_catalog.regclass\n"
+							  "coalesce(NOT ARRAY[at.attnum] <@ (SELECT conkey FROM pg_catalog.pg_constraint\n"
+							  "  WHERE contype = 'p' AND conrelid = '%s'::regclass), true)\n"
 							  "ORDER BY at.attnum",
 							  oid,
 							  oid);
