@@ -1334,7 +1334,6 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 	TupleConstr *constr;
 	AttrMap    *attmap;
 	char	   *comment;
-	bool		at_pushed = false;
 	ListCell   *lc;
 
 	/*
@@ -1534,8 +1533,6 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 		atcmd->objtype = OBJECT_TABLE;
 		atcmd->missing_ok = false;
 		result = lcons(atcmd, result);
-
-		at_pushed = true;
 	}
 
 	/*
@@ -1562,39 +1559,6 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 												 parent_index,
 												 attmap,
 												 NULL);
-
-			/*
-			 * The PK columns might not yet non-nullable, so make sure they
-			 * become so.
-			 */
-			if (index_stmt->primary)
-			{
-				foreach(lc, index_stmt->indexParams)
-				{
-					IndexElem  *col = lfirst_node(IndexElem, lc);
-					AlterTableCmd *notnullcmd = makeNode(AlterTableCmd);
-
-					notnullcmd->subtype = AT_SetAttNotNull;
-					notnullcmd->name = pstrdup(col->name);
-					/* Luckily we can still add more AT-subcmds here */
-					atsubcmds = lappend(atsubcmds, notnullcmd);
-				}
-
-				/*
-				 * If we had already put the AlterTableStmt into the output
-				 * list, we don't need to do so again; otherwise do it.
-				 */
-				if (!at_pushed)
-				{
-					AlterTableStmt *atcmd = makeNode(AlterTableStmt);
-
-					atcmd->relation = copyObject(heapRel);
-					atcmd->cmds = atsubcmds;
-					atcmd->objtype = OBJECT_TABLE;
-					atcmd->missing_ok = false;
-					result = lcons(atcmd, result);
-				}
-			}
 
 			/* Copy comment on index, if requested */
 			if (table_like_clause->options & CREATE_TABLE_LIKE_COMMENTS)
@@ -3953,9 +3917,8 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 		Node	   *istmt = (Node *) lfirst(l);
 
 		/*
-		 * We assume here that cxt.alist contains only IndexStmts and possibly
-		 * AT_SetAttNotNull statements generated from primary key constraints.
-		 * We absorb the subcommands of the latter directly.
+		 * We assume here that cxt.alist contains only IndexStmts generated
+		 * from primary key constraints.
 		 */
 		if (IsA(istmt, IndexStmt))
 		{
@@ -3966,12 +3929,6 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 			newcmd->subtype = OidIsValid(idxstmt->indexOid) ? AT_AddIndexConstraint : AT_AddIndex;
 			newcmd->def = (Node *) idxstmt;
 			newcmds = lappend(newcmds, newcmd);
-		}
-		else if (IsA(istmt, AlterTableStmt))
-		{
-			AlterTableStmt *alterstmt = (AlterTableStmt *) istmt;
-
-			newcmds = list_concat(newcmds, alterstmt->cmds);
 		}
 		else
 			elog(ERROR, "unexpected stmt type %d", (int) nodeTag(istmt));

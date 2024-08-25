@@ -453,8 +453,6 @@ static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  char *constrname, char *colName,
 									  bool recurse, bool recursing,
 									  List **readyRels, LOCKMODE lockmode);
-static ObjectAddress ATExecSetAttNotNull(List **wqueue, Relation rel,
-										 const char *colName, LOCKMODE lockmode);
 static bool NotNullImpliedByRelConstraints(Relation rel, Form_pg_attribute attr);
 static bool ConstraintImpliedByRelConstraint(Relation scanrel,
 											 List *testConstraint, List *provenConstraint);
@@ -4592,7 +4590,6 @@ AlterTableGetLockLevel(List *cmds)
 			case AT_AddIndexConstraint:
 			case AT_ReplicaIdentity:
 			case AT_SetNotNull:
-			case AT_SetAttNotNull:
 			case AT_EnableRowSecurity:
 			case AT_DisableRowSecurity:
 			case AT_ForceRowSecurity:
@@ -4907,13 +4904,6 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			/* Set up recursion for phase 2; no other prep needed */
 			if (recurse)
 				cmd->recurse = true;
-			pass = AT_PASS_COL_ATTRS;
-			break;
-		case AT_SetAttNotNull:	/* set pg_attribute.attnotnull without adding
-								 * a constraint */
-			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
-			/* Need command-specific recursion decision */
-			ATSimpleRecursion(wqueue, rel, cmd, recurse, lockmode, context);
 			pass = AT_PASS_COL_ATTRS;
 			break;
 		case AT_SetExpression:	/* ALTER COLUMN SET EXPRESSION */
@@ -5308,9 +5298,6 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab,
 			address = ATExecSetNotNull(wqueue, rel, NULL, cmd->name,
 									   cmd->recurse, false, NULL, lockmode);
 			break;
-		case AT_SetAttNotNull:	/* set pg_attribute.attnotnull */
-			address = ATExecSetAttNotNull(wqueue, rel, cmd->name, lockmode);
-			break;
 		case AT_SetExpression:
 			address = ATExecSetExpression(tab, rel, cmd->name, cmd->def, lockmode);
 			break;
@@ -5671,10 +5658,6 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		 */
 		switch (cmd2->subtype)
 		{
-			case AT_SetAttNotNull:
-				ATSimpleRecursion(wqueue, rel, cmd2, recurse, lockmode, context);
-				pass = AT_PASS_COL_ATTRS;
-				break;
 			case AT_AddIndex:
 
 				/*
@@ -6468,8 +6451,6 @@ alter_table_type_to_string(AlterTableType cmdtype)
 			return "ALTER COLUMN ... DROP NOT NULL";
 		case AT_SetNotNull:
 			return "ALTER COLUMN ... SET NOT NULL";
-		case AT_SetAttNotNull:
-			return NULL;		/* not real grammar */
 		case AT_SetExpression:
 			return "ALTER COLUMN ... SET EXPRESSION";
 		case AT_DropExpression:
@@ -7997,39 +7978,6 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 			table_close(childrel, NoLock);
 		}
 	}
-
-	return address;
-}
-
-/*
- * ALTER TABLE ALTER COLUMN SET ATTNOTNULL
- *
- * This doesn't exist in the grammar; it's used when creating a
- * primary key and the column is not already marked attnotnull.
- *
- * XXX verify whether still needed
- */
-static ObjectAddress
-ATExecSetAttNotNull(List **wqueue, Relation rel,
-					const char *colName, LOCKMODE lockmode)
-{
-	AttrNumber	attnum;
-	ObjectAddress address = InvalidObjectAddress;
-
-	attnum = get_attnum(RelationGetRelid(rel), colName);
-	if (attnum == InvalidAttrNumber)
-		ereport(ERROR,
-				errcode(ERRCODE_UNDEFINED_COLUMN),
-				errmsg("column \"%s\" of relation \"%s\" does not exist",
-					   colName, RelationGetRelationName(rel)));
-
-	/*
-	 * Make the change, if necessary, and only if so report the column as
-	 * changed
-	 */
-	if (set_attnotnull(wqueue, rel, attnum, false, lockmode))
-		ObjectAddressSubSet(address, RelationRelationId,
-							RelationGetRelid(rel), attnum);
 
 	return address;
 }
@@ -14456,20 +14404,6 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 											 rel,
 											 NIL,
 											 con->conname);
-				}
-				else if (cmd->subtype == AT_SetAttNotNull)
-				{
-					/*
-					 * We see this subtype when a primary key is created
-					 * internally, for example when it is replaced with a new
-					 * constraint (say because one of the columns changes
-					 * type); in this case we need to reinstate attnotnull,
-					 * because it was removed because of the drop of the old
-					 * PK.  Schedule this subcommand to an upcoming AT pass.
-					 */
-					cmd->subtype = AT_SetAttNotNull;
-					tab->subcmds[AT_PASS_OLD_COL_ATTRS] =
-						lappend(tab->subcmds[AT_PASS_OLD_COL_ATTRS], cmd);
 				}
 				else
 					elog(ERROR, "unexpected statement subtype: %d",
