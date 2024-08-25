@@ -12887,7 +12887,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						  pkattrs))
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("column \"%s\" is in the primary key",
+					errmsg("column \"%s\" is in a primary key",
 						   get_attname(RelationGetRelid(rel), attnum, false)));
 
 		/* Disallow if it's in the replica identity */
