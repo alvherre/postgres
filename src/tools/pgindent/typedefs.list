@@ -1958,6 +1958,7 @@ PSQL_COMP_CASE
 PSQL_ECHO
 PSQL_ECHO_HIDDEN
 PSQL_ERROR_ROLLBACK
+PSQL_SEND_MODE
 PTEntryArray
 PTIterationArray
 PTOKEN_PRIVILEGES
@@ -2658,7 +2659,6 @@ SimpleStats
 SimpleStringList
 SimpleStringListCell
 SingleBoundSortItem
-SinglePartitionSpec
 Size
 SkipPages
 SlabBlock
@@ -2723,7 +2723,6 @@ SpinDelayStatus
 SplitInterval
 SplitLR
 SplitPageLayout
-SplitPartitionContext
 SplitPoint
 SplitTextOutputData
 SplitVar

@@ -1521,12 +1521,12 @@ check_collation_set(Oid collid)
 	}
 }
 
-/* varstr_cmp()
- * Comparison function for text strings with given lengths.
- * Includes locale support, but must copy strings to temporary memory
- *	to allow null-termination for inputs to strcoll().
- * Returns an integer less than, equal to, or greater than zero, indicating
- * whether arg1 is less than, equal to, or greater than arg2.
+/*
+ * varstr_cmp()
+ *
+ * Comparison function for text strings with given lengths, using the
+ * appropriate locale. Returns an integer less than, equal to, or greater than
+ * zero, indicating whether arg1 is less than, equal to, or greater than arg2.
  *
  * Note: many functions that depend on this are marked leakproof; therefore,
  * avoid reporting the actual contents of the input when throwing errors.
@@ -1541,12 +1541,6 @@ varstr_cmp(const char *arg1, int len1, const char *arg2, int len2, Oid collid)
 
 	check_collation_set(collid);
 
-	/*
-	 * Unfortunately, there is no strncoll(), so in the non-C locale case we
-	 * have to do some memory copying.  This turns out to be significantly
-	 * slower, so we optimize the case where LC_COLLATE is C.  We also try to
-	 * optimize relatively-short strings by avoiding palloc/pfree overhead.
-	 */
 	if (lc_collate_is_c(collid))
 	{
 		result = memcmp(arg1, arg2, Min(len1, len2));
@@ -1922,16 +1916,16 @@ varstr_sortsupport(SortSupport ssup, Oid typid, Oid collid)
 		 * Unfortunately, it seems that abbreviation for non-C collations is
 		 * broken on many common platforms; see pg_strxfrm_enabled().
 		 *
-		 * Even apart from the risk of broken locales, it's possible that there
-		 * are platforms where the use of abbreviated keys should be disabled at
-		 * compile time.  Having only 4 byte datums could make worst-case
-		 * performance drastically more likely, for example.  Moreover, macOS's
-		 * strxfrm() implementation is known to not effectively concentrate a
-		 * significant amount of entropy from the original string in earlier
-		 * transformed blobs.  It's possible that other supported platforms are
-		 * similarly encumbered.  So, if we ever get past disabling this
-		 * categorically, we may still want or need to disable it for particular
-		 * platforms.
+		 * Even apart from the risk of broken locales, it's possible that
+		 * there are platforms where the use of abbreviated keys should be
+		 * disabled at compile time.  Having only 4 byte datums could make
+		 * worst-case performance drastically more likely, for example.
+		 * Moreover, macOS's strxfrm() implementation is known to not
+		 * effectively concentrate a significant amount of entropy from the
+		 * original string in earlier transformed blobs.  It's possible that
+		 * other supported platforms are similarly encumbered.  So, if we ever
+		 * get past disabling this categorically, we may still want or need to
+		 * disable it for particular platforms.
 		 */
 		if (!pg_strxfrm_enabled(locale))
 			abbreviate = false;
