@@ -14357,12 +14357,14 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 						lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);
 
 					/* recreate any comment on the constraint */
-					RebuildConstraintComment(tab,
-											 AT_PASS_OLD_CONSTR,
-											 oldId,
-											 rel,
-											 NIL,
-											 con->conname);
+					/* XXX how do we end up with unnamed constraints here? */
+					if (con->conname)
+						RebuildConstraintComment(tab,
+												 AT_PASS_OLD_CONSTR,
+												 oldId,
+												 rel,
+												 NIL,
+												 con->conname);
 				}
 				else
 					elog(ERROR, "unexpected statement subtype: %d",
