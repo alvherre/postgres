@@ -2452,7 +2452,7 @@ AddRelationNewConstraints(Relation rel,
 				/* Needed because we don't do CommandCounterIncrement in loop */
 				foreach_ptr(char, chkname, checknames)
 				{
-					if (strcmp((char *) chkname, ccname) == 0)
+					if (strcmp(chkname, ccname) == 0)
 						ereport(ERROR,
 								(errcode(ERRCODE_DUPLICATE_OBJECT),
 								 errmsg("check constraint \"%s\" already exists",
