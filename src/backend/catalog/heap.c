@@ -2769,16 +2769,6 @@ MergeWithExistingConstraint(Relation rel, const char *ccname, Node *expr,
 	return found;
 }
 
-/* list_sort comparator to sort CookedConstraint by attnum */
-static int
-list_cookedconstr_attnum_cmp(const ListCell *p1, const ListCell *p2)
-{
-	AttrNumber	v1 = ((CookedConstraint *) lfirst(p1))->attnum;
-	AttrNumber	v2 = ((CookedConstraint *) lfirst(p2))->attnum;
-
-	return pg_cmp_s16(v1, v2);
-}
-
 /*
  * Create the not-null constraints when creating a new relation
  *
@@ -2899,7 +2889,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * null constraint marked not-local.  Because multiple parents could
 	 * specify a not-null constraint for the same column, we must count how
 	 * many there are and add to the original inhcount accordingly, deleting
-	 * elements we've already processed.  We sort the list to make it easy.
+	 * elements we've already processed.
 	 *
 	 * We don't use foreach() here because we have two nested loops over the
 	 * constraint list, with possible element deletions in the inner one. If
@@ -2908,7 +2898,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * both loops.  Note that any deletion will happen beyond where the outer
 	 * loop is, so its index never needs adjustment.
 	 */
-	list_sort(old_notnulls, list_cookedconstr_attnum_cmp);
 	for (int outerpos = 0; outerpos < list_length(old_notnulls); outerpos++)
 	{
 		CookedConstraint *cooked;
