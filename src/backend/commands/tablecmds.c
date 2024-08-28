@@ -9286,7 +9286,7 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 
 		nnconstr = makeNode(Constraint);
 		nnconstr->contype = CONSTR_NOTNULL;
-		nnconstr->conname = NULL;	/* XXX use PK name? */
+		nnconstr->conname = NULL;
 		nnconstr->inhcount = 1;
 		nnconstr->deferrable = false;
 		nnconstr->initdeferred = false;

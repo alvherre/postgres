@@ -983,7 +983,7 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 
 					nnconstr = makeNode(Constraint);
 					nnconstr->contype = CONSTR_NOTNULL;
-					nnconstr->conname = NULL;	/* XXX use PK name? */
+					nnconstr->conname = NULL;
 					nnconstr->inhcount = 0;
 					nnconstr->deferrable = false;
 					nnconstr->initdeferred = false;
@@ -2713,7 +2713,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 
 								nnconstr = makeNode(Constraint);
 								nnconstr->contype = CONSTR_NOTNULL;
-								nnconstr->conname = NULL;	/* XXX use PK name? */
+								nnconstr->conname = NULL;
 								nnconstr->inhcount = 0;
 								nnconstr->deferrable = false;
 								nnconstr->initdeferred = false;
