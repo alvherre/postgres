@@ -7603,52 +7603,20 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 	}
 
 	/*
-	 * Find the constraint that makes this column NOT NULL, and drop it if we
-	 * see one.  dropconstraint_internal() will do necessary consistency
-	 * checking.  If there isn't one, there are two possibilities: either the
-	 * column is marked attnotnull because it's part of the primary key, and
-	 * then we just throw an appropriate error; or it's a leftover marking
-	 * that we can remove.  However, before doing the latter, to avoid
-	 * breaking consistency any further, prevent this if the column is part of
-	 * the replica identity.
+	 * Find the constraint that makes this column NOT NULL, and drop it.
+	 * dropconstraint_internal() will do necessary consistency checking and
+	 * reset attnotnull.
 	 */
 	conTup = findNotNullConstraint(RelationGetRelid(rel), colName);
 	if (conTup == NULL)
-	{
-		Bitmapset  *pkcols;
-		Bitmapset  *ircols;
+		elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\" of relation \"%s\"",
+			 colName, RelationGetRelationName(rel));
 
-		/*
-		 * If the column is in a primary key, throw a specific error message.
-		 */
-		pkcols = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
-						  pkcols))
-			ereport(ERROR,
-					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("column \"%s\" is in a primary key", colName));
-
-		/* Also throw an error if the column is in the replica identity */
-		ircols = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_IDENTITY_KEY);
-		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, ircols))
-			ereport(ERROR,
-					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("column \"%s\" is in index used as replica identity",
-						   get_attname(RelationGetRelid(rel), attnum, false)));
-
-		/* Otherwise, just remove the attnotnull marking and do nothing else. */
-		attTup->attnotnull = false;
-		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
-	}
-	else
-	{
-		/* The normal case: we have a pg_constraint row, remove it */
-		readyRels = NIL;
-		dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
-								false, &readyRels, lockmode);
-
-		heap_freetuple(conTup);
-	}
+	/* The normal case: we have a pg_constraint row, remove it */
+	readyRels = NIL;
+	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
+							false, &readyRels, lockmode);
+	heap_freetuple(conTup);
 
 	InvokeObjectPostAlterHook(RelationRelationId,
 							  RelationGetRelid(rel), attnum);
