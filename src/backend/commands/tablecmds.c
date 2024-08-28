@@ -12755,8 +12755,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 
 		/* Disallow if it's in the primary key */
 		pkattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
-						  pkattrs))
+		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, pkattrs))
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 					errmsg("column \"%s\" is in a primary key",
@@ -12764,8 +12763,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 
 		/* Disallow if it's in the replica identity */
 		irattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_IDENTITY_KEY);
-		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber,
-						  irattrs))
+		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, irattrs))
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 					errmsg("column \"%s\" is in index used as replica identity",
@@ -12776,15 +12774,14 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		if (!HeapTupleIsValid(atttup))
 			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
 				 attnum, RelationGetRelid(rel));
-		if (((Form_pg_attribute) GETSTRUCT(atttup))->attidentity != '\0')
+		attForm = (Form_pg_attribute) GETSTRUCT(atttup);
+		if (attForm->attidentity != '\0')
 			ereport(ERROR,
 					errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 					errmsg("column \"%s\" of relation \"%s\" is an identity column",
 						   get_attname(RelationGetRelid(rel), attnum,
 									   false),
 						   RelationGetRelationName(rel)));
-
-		attForm = (Form_pg_attribute) GETSTRUCT(atttup);
 
 		/* All good -- reset attnotnull if needed */
 		if (attForm->attnotnull)
