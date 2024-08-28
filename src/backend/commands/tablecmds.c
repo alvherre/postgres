@@ -2737,7 +2737,6 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 				inh_columns = lappend(inh_columns, newdef);
 
 				newattmap->attnums[parent_attno - 1] = ++child_attno;
-
 				mergeddef = newdef;
 			}
 
