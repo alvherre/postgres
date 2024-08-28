@@ -2100,7 +2100,7 @@ Child tables: cc1,
  f3     | integer |           |          |         | plain    |              | 
  a2     | integer |           | not null |         | plain    |              | 
 Not-null constraints:
-    "pp1_f1_not_null" NOT NULL "f1" (inherited)
+    "cc1_f1_not_null" NOT NULL "f1" (inherited)
     "nn" NOT NULL "a2"
 Inherits: pp1
 Child tables: cc2
@@ -2115,7 +2115,7 @@ Child tables: cc2
  f4     | double precision |           |          |         | plain    |              | 
  a2     | integer          |           | not null |         | plain    |              | 
 Not-null constraints:
-    "pp1_f1_not_null" NOT NULL "f1" (inherited)
+    "cc2_f1_not_null" NOT NULL "f1" (inherited)
     "nn" NOT NULL "a2" (inherited)
 Inherits: pp1,
           cc1
@@ -2143,13 +2143,13 @@ alter table cc1 alter column a2 drop not null;
  f3     | integer |           |          |         | plain    |              | 
  a2     | integer |           |          |         | plain    |              | 
 Not-null constraints:
-    "pp1_f1_not_null" NOT NULL "f1" (inherited)
+    "cc1_f1_not_null" NOT NULL "f1" (inherited)
 Inherits: pp1
 Child tables: cc2
 
 -- same for cc2
 alter table cc2 alter column f1 drop not null;
-ERROR:  cannot drop inherited constraint "pp1_f1_not_null" of relation "cc2"
+ERROR:  cannot drop inherited constraint "cc2_f1_not_null" of relation "cc2"
 \d+ cc2
                                          Table "public.cc2"
  Column |       Type       | Collation | Nullable | Default | Storage  | Stats target | Description 
@@ -2160,13 +2160,13 @@ ERROR:  cannot drop inherited constraint "pp1_f1_not_null" of relation "cc2"
  f4     | double precision |           |          |         | plain    |              | 
  a2     | integer          |           |          |         | plain    |              | 
 Not-null constraints:
-    "pp1_f1_not_null" NOT NULL "f1" (inherited)
+    "cc2_f1_not_null" NOT NULL "f1" (inherited)
 Inherits: pp1,
           cc1
 
 -- remove from cc1, should fail again
 alter table cc1 alter column f1 drop not null;
-ERROR:  cannot drop inherited constraint "pp1_f1_not_null" of relation "cc1"
+ERROR:  cannot drop inherited constraint "cc1_f1_not_null" of relation "cc1"
 -- remove from pp1, should succeed
 alter table pp1 alter column f1 drop not null;
 \d+ pp1
@@ -2214,14 +2214,18 @@ select conrelid::regclass, conname, contype, conkey,
  from pg_constraint where contype in ('n','p') and
  conrelid::regclass::text in ('inh_child', 'inh_parent1', 'inh_parent2')
  order by 1, 2;
-  conrelid   |       conname        | contype | conkey | coninhcount | conislocal | connoinherit 
--------------+----------------------+---------+--------+-------------+------------+--------------
- inh_parent1 | inh_parent1_pkey     | p       | {1,2}  |           0 | t          | t
- inh_parent2 | inh_parent2_pkey     | p       | {1,3}  |           0 | t          | t
- inh_child   | inh_child_a_not_null | n       | {1}    |           1 | f          | f
- inh_child   | inh_child_b_not_null | n       | {2}    |           2 | f          | f
- inh_child   | inh_child_d_not_null | n       | {4}    |           1 | f          | f
-(5 rows)
+  conrelid   |        conname         | contype | conkey | coninhcount | conislocal | connoinherit 
+-------------+------------------------+---------+--------+-------------+------------+--------------
+ inh_parent1 | inh_parent1_a_not_null | n       | {1}    |           0 | t          | f
+ inh_parent1 | inh_parent1_b_not_null | n       | {2}    |           0 | t          | f
+ inh_parent1 | inh_parent1_pkey       | p       | {1,2}  |           0 | t          | t
+ inh_parent2 | inh_parent2_b_not_null | n       | {3}    |           0 | t          | f
+ inh_parent2 | inh_parent2_d_not_null | n       | {1}    |           0 | t          | f
+ inh_parent2 | inh_parent2_pkey       | p       | {1,3}  |           0 | t          | t
+ inh_child   | inh_parent1_a_not_null | n       | {1}    |           1 | f          | f
+ inh_child   | inh_parent1_b_not_null | n       | {2}    |           2 | f          | f
+ inh_child   | inh_parent2_d_not_null | n       | {4}    |           1 | f          | f
+(9 rows)
 
 \d+ inh_child
                                  Table "public.inh_child"
@@ -2233,9 +2237,9 @@ select conrelid::regclass, conname, contype, conkey,
  d      | integer |           | not null |         | plain   |              | 
  e      | integer |           |          |         | plain   |              | 
 Not-null constraints:
-    "inh_child_a_not_null" NOT NULL "a" (inherited)
-    "inh_child_b_not_null" NOT NULL "b" (inherited)
-    "inh_child_d_not_null" NOT NULL "d" (inherited)
+    "inh_parent1_a_not_null" NOT NULL "a" (inherited)
+    "inh_parent1_b_not_null" NOT NULL "b" (inherited)
+    "inh_parent2_d_not_null" NOT NULL "d" (inherited)
 Inherits: inh_parent1,
           inh_parent2
 
@@ -2296,11 +2300,11 @@ CREATE TABLE inh_nn_lvl4 () INHERITS (inh_nn_lvl3);
 CREATE TABLE inh_nn_lvl5 () INHERITS (inh_nn_lvl4);
 INSERT INTO inh_nn_lvl2 VALUES (NULL);
 ALTER TABLE inh_nn_lvl1 ADD PRIMARY KEY (a);
-ERROR:  column "a" of relation "inh_nn_lvl2" contains null values
+ERROR:  cannot change NO INHERIT status of NOT NULL constraint "foo" on relation "inh_nn_lvl3"
 DELETE FROM inh_nn_lvl2;
 INSERT INTO inh_nn_lvl5 VALUES (NULL);
 ALTER TABLE inh_nn_lvl1 ADD PRIMARY KEY (a);
-ERROR:  column "a" of relation "inh_nn_lvl5" contains null values
+ERROR:  cannot change NO INHERIT status of NOT NULL constraint "foo" on relation "inh_nn_lvl3"
 DROP TABLE inh_nn_lvl1 CASCADE;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table inh_nn_lvl2
@@ -2411,9 +2415,9 @@ drop table inh_parent, inh_child1, inh_child2, inh_child3;
 create table inh_parent (a int primary key);
 create table inh_child (a int primary key);
 alter table inh_child inherit inh_parent;		-- nope
-ERROR:  column "a" in child table must be marked NOT NULL
 alter table inh_child alter a set not null;
 alter table inh_child inherit inh_parent;		-- now it works
+ERROR:  relation "inh_parent" would be inherited from more than once
 -- don't interfere with other types of constraints
 alter table inh_parent add constraint inh_parent_excl exclude ((1) with =);
 alter table inh_parent add constraint inh_parent_uq unique (a);
@@ -2427,15 +2431,16 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
  order by 2, 1;
   conrelid  |        conname        | contype | coninhcount | conislocal 
 ------------+-----------------------+---------+-------------+------------
- inh_child2 | inh_child2_a_not_null | n       |           1 | f
- inh_child3 | inh_child3_a_not_null | n       |           1 | t
  inh_child  | inh_child_a_not_null  | n       |           1 | t
  inh_child  | inh_child_pkey        | p       |           0 | t
+ inh_parent | inh_parent_a_not_null | n       |           0 | t
+ inh_child2 | inh_parent_a_not_null | n       |           1 | f
+ inh_child3 | inh_parent_a_not_null | n       |           1 | t
  inh_parent | inh_parent_excl       | x       |           0 | t
  inh_parent | inh_parent_fk         | f       |           0 | t
  inh_parent | inh_parent_pkey       | p       |           0 | t
  inh_parent | inh_parent_uq         | u       |           0 | t
-(8 rows)
+(9 rows)
 
 drop table inh_parent, inh_child, inh_child2, inh_child3;
 --

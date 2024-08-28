@@ -1127,6 +1127,7 @@ Indexes:
     "atacc1_pkey" PRIMARY KEY, btree (test)
 
 alter table atacc1 alter column test drop not null;
+ERROR:  column "test" is in a primary key
 \d atacc1
                Table "public.atacc1"
  Column |  Type   | Collation | Nullable | Default 
@@ -1140,11 +1141,12 @@ alter table atacc1 drop constraint "atacc1_pkey";
                Table "public.atacc1"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
- test   | integer |           |          | 
+ test   | integer |           | not null | 
 
 insert into atacc1 values (null);
+ERROR:  null value in column "test" of relation "atacc1" violates not-null constraint
+DETAIL:  Failing row contains (null).
 alter table atacc1 alter test set not null;
-ERROR:  column "test" of relation "atacc1" contains null values
 delete from atacc1;
 alter table atacc1 alter test set not null;
 -- try altering a non-existent column, should fail
@@ -3395,9 +3397,10 @@ SELECT indexrelid::regclass::text as index, obj_description(indexrelid, 'pg_clas
 SELECT conname as constraint, obj_description(oid, 'pg_constraint') as comment FROM pg_constraint where conrelid = 'comment_test'::regclass ORDER BY 1, 2;
            constraint            |                    comment                    
 ---------------------------------+-----------------------------------------------
+ comment_test_id_not_null        | 
  comment_test_pk                 | PRIMARY KEY constraint of comment_test
  comment_test_positive_col_check | CHECK constraint on comment_test.positive_col
-(2 rows)
+(3 rows)
 
 -- Change the datatype of all the columns. ALTER TABLE is optimized to not
 -- rebuild an index if the new data type is binary compatible with the old
@@ -3426,9 +3429,10 @@ SELECT indexrelid::regclass::text as index, obj_description(indexrelid, 'pg_clas
 SELECT conname as constraint, obj_description(oid, 'pg_constraint') as comment FROM pg_constraint where conrelid = 'comment_test'::regclass ORDER BY 1, 2;
            constraint            |                    comment                    
 ---------------------------------+-----------------------------------------------
+ comment_test_id_not_null        | 
  comment_test_pk                 | PRIMARY KEY constraint of comment_test
  comment_test_positive_col_check | CHECK constraint on comment_test.positive_col
-(2 rows)
+(3 rows)
 
 -- Check compatibility for foreign keys and comments. This is done
 -- separately as rebuilding the column type of the parent leads
