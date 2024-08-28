@@ -12754,15 +12754,20 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						constrName, RelationGetRelationName(rel))));
 
 	/*
-	 * Disallow dropping a NOT NULL constraint underneath a primary key, a
-	 * replica identity index, or a generated identity column.
+	 * Reset pg_constraint.attnotnull.
+	 *
+	 * While doing that, we're in a good position to disallow dropping a NOT
+	 * NULL constraint underneath a primary key, a replica identity index, or a
+	 * generated identity column.
 	 */
 	if (con->contype == CONSTRAINT_NOTNULL)
 	{
+		Relation	attrel = table_open(AttributeRelationId, RowExclusiveLock);
 		AttrNumber	attnum = extractNotNullColumn(constraintTup);
 		Bitmapset  *pkattrs;
 		Bitmapset  *irattrs;
 		HeapTuple	atttup;
+		Form_pg_attribute attForm;
 
 		/* save column name for recursion step */
 		colname = get_attname(RelationGetRelid(rel), attnum, false);
@@ -12798,22 +12803,16 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 									   false),
 						   RelationGetRelationName(rel)));
 
+		attForm = (Form_pg_attribute) GETSTRUCT(atttup);
+
+		/* All good -- reset attnotnull if needed */
+		if (attForm->attnotnull)
 		{
-			Relation	attrel;
-			Form_pg_attribute attForm;
-
-			attrel = table_open(AttributeRelationId, RowExclusiveLock);
-			attForm = (Form_pg_attribute) GETSTRUCT(atttup);
-
-			/* Reset attnotnull */
-			if (attForm->attnotnull)
-			{
-				attForm->attnotnull = false;
-				CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
-			}
-
-			table_close(attrel, RowExclusiveLock);
+			attForm->attnotnull = false;
+			CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
 		}
+
+		table_close(attrel, RowExclusiveLock);
 	}
 
 	is_no_inherit_constraint = con->connoinherit;
