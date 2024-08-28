@@ -1271,8 +1271,7 @@
        <structfield>attnotnull</structfield> <type>bool</type>
       </para>
       <para>
-       This column is marked not-null, either by a not-null constraint
-       or a primary key.
+       This column has a not-null constraint.
       </para></entry>
      </row>
 
