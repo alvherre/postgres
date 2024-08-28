@@ -7696,11 +7696,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 
 			/* find_inheritance_children already got lock */
 			childrel = table_open(childrelid, NoLock);
-			/* XXX is this distinction worth anything? */
-			if (wqueue == NULL)
-				CheckTableNotInUse(childrel, "ALTER TABLE");
-			else
-				CheckAlterTableIsSafe(childrel);
+			CheckAlterTableIsSafe(childrel);
 
 			childattno = get_attnum(RelationGetRelid(childrel),
 									get_attname(RelationGetRelid(rel), attnum,
