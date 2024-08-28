@@ -7852,17 +7852,10 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 									   RelationGetNamespace(rel),
 									   NIL);
 	}
-	constraint = makeNode(Constraint);
-	constraint->contype = CONSTR_NOTNULL;
-	constraint->conname = conName;
-	constraint->deferrable = false;
-	constraint->initdeferred = false;
-	constraint->location = -1;
-	constraint->keys = list_make1(makeString(colName));
+
+	constraint = makeNotNullConstraint(makeString(colName));
 	constraint->is_no_inherit = is_no_inherit;
 	constraint->inhcount = recursing ? 1 : 0;
-	constraint->skip_validation = false;
-	constraint->initially_valid = true;
 
 	/* and do it */
 	cooked = AddRelationNewConstraints(rel, NIL, list_make1(constraint),
@@ -9247,16 +9240,8 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 
 		Assert(elem->expr == NULL);
 
-		nnconstr = makeNode(Constraint);
-		nnconstr->contype = CONSTR_NOTNULL;
-		nnconstr->conname = NULL;
+		nnconstr = makeNotNullConstraint(makeString(elem->name));
 		nnconstr->inhcount = 1;
-		nnconstr->deferrable = false;
-		nnconstr->initdeferred = false;
-		nnconstr->location = -1;
-		nnconstr->keys = list_make1(makeString(elem->name));
-		nnconstr->skip_validation = false;
-		nnconstr->initially_valid = true;
 
 		newconstrs = lappend(newconstrs, nnconstr);
 	}

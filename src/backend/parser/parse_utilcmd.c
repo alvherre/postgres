@@ -913,21 +913,10 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	 */
 	if (need_notnull && !(saw_nullable && column->is_not_null))
 	{
-		Constraint *notnull;
-
 		column->is_not_null = true;
-
-		notnull = makeNode(Constraint);
-		notnull->contype = CONSTR_NOTNULL;
-		notnull->conname = NULL;
-		notnull->deferrable = false;
-		notnull->initdeferred = false;
-		notnull->location = -1;
-		notnull->keys = list_make1(makeString(column->colname));
-		notnull->skip_validation = false;
-		notnull->initially_valid = true;
-
-		cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
+		cxt->nnconstraints =
+			lappend(cxt->nnconstraints,
+					makeNotNullConstraint(makeString(column->colname)));
 	}
 
 	/*
@@ -981,21 +970,12 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 				{
 					Constraint *nnconstr;
 
-					nnconstr = makeNode(Constraint);
-					nnconstr->contype = CONSTR_NOTNULL;
-					nnconstr->conname = NULL;
-					nnconstr->inhcount = 0;
-					nnconstr->deferrable = false;
-					nnconstr->initdeferred = false;
-					nnconstr->location = -1;
-					nnconstr->keys = list_make1(key);	/* already a String */
-					nnconstr->skip_validation = false;
-					nnconstr->initially_valid = true;
+					nnconstr = makeNotNullConstraint(key);
 
 					/*
 					 * Note hack: if we're adding a primary key to a
-					 * partitioned table, then we also need NOT NULL
-					 * constraints on all columns of the PK; but such
+					 * partitioned table, then here we're causing not-null
+					 * constraints on all columns of the PK to be added; such
 					 * constraints need to always be created, even when the PK
 					 * is being added non-recursively to the parent table.
 					 * Those additional constraints are added to each partition
@@ -1304,6 +1284,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 		{
 			Constraint *notnull;
 			AttrNumber	attnum = x + FirstLowInvalidHeapAttributeNumber;
+			String	   *colname;
 			Form_pg_attribute attForm;
 
 			/* ignore if we already have one for this column */
@@ -1311,17 +1292,8 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 				continue;
 
 			attForm = TupleDescAttr(tupleDesc, attnum - 1);
-
-			notnull = makeNode(Constraint);
-			notnull->contype = CONSTR_NOTNULL;
-			notnull->conname = NULL;
-			notnull->is_no_inherit = false;
-			notnull->deferrable = false;
-			notnull->initdeferred = false;
-			notnull->location = -1;
-			notnull->keys = list_make1(makeString(pstrdup(NameStr(attForm->attname))));
-			notnull->skip_validation = false;
-			notnull->initially_valid = true;
+			colname = makeString(pstrdup(NameStr(attForm->attname)));
+			notnull = makeNotNullConstraint(colname);
 
 			cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
 		}
@@ -2566,20 +2538,9 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 							 parser_errposition(cxt->pstate, constraint->location)));
 
 				/* Ensure these columns get a NOT NULL constraint */
-				{
-					Constraint *notnull;
-
-					notnull = makeNode(Constraint);
-					notnull->contype = CONSTR_NOTNULL;
-					notnull->conname = NULL;
-					notnull->deferrable = false;
-					notnull->initdeferred = false;
-					notnull->location = -1;
-					notnull->keys = list_make1(makeString(attname));
-					notnull->skip_validation = false;
-					notnull->initially_valid = true;
-					cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
-				}
+				cxt->nnconstraints =
+					lappend(cxt->nnconstraints,
+							makeNotNullConstraint(makeString(attname)));
 
 				constraint->keys = lappend(constraint->keys, makeString(attname));
 			}
@@ -2651,20 +2612,9 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 				 */
 				if (constraint->contype == CONSTR_PRIMARY &&
 					!column->is_not_null)
-				{
-					Constraint *notnull;
-
-					notnull = makeNode(Constraint);
-					notnull->contype = CONSTR_NOTNULL;
-					notnull->conname = NULL;
-					notnull->deferrable = false;
-					notnull->initdeferred = false;
-					notnull->location = -1;
-					notnull->keys = list_make1(makeString(key));
-					notnull->skip_validation = false;
-					notnull->initially_valid = true;
-					cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
-				}
+					cxt->nnconstraints =
+						lappend(cxt->nnconstraints,
+								makeNotNullConstraint(makeString(key)));
 			}
 			else if (SystemAttributeByName(key) != NULL)
 			{
@@ -2708,22 +2658,9 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 							found = true;
 
 							if (!inhattr->attnotnull)
-							{
-								Constraint *nnconstr;
-
-								nnconstr = makeNode(Constraint);
-								nnconstr->contype = CONSTR_NOTNULL;
-								nnconstr->conname = NULL;
-								nnconstr->inhcount = 0;
-								nnconstr->deferrable = false;
-								nnconstr->initdeferred = false;
-								nnconstr->location = -1;
-								nnconstr->keys = list_make1(makeString(inhname));
-								nnconstr->skip_validation = false;
-								nnconstr->initially_valid = true;
-
-								cxt->nnconstraints = lappend(cxt->nnconstraints, nnconstr);
-							}
+								cxt->nnconstraints =
+									lappend(cxt->nnconstraints,
+											makeNotNullConstraint(makeString(inhname)));
 							break;
 						}
 					}
