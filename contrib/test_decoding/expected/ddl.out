@@ -493,7 +493,6 @@ WITH (user_catalog_table = true)
 Indexes:
     "replication_metadata_pkey" PRIMARY KEY, btree (id)
 Not-null constraints:
-    "replication_metadata_id_not_null" NOT NULL "id"
     "replication_metadata_relation_not_null" NOT NULL "relation"
 Options: user_catalog_table=true
 
@@ -510,7 +509,6 @@ ALTER TABLE replication_metadata RESET (user_catalog_table);
 Indexes:
     "replication_metadata_pkey" PRIMARY KEY, btree (id)
 Not-null constraints:
-    "replication_metadata_id_not_null" NOT NULL "id"
     "replication_metadata_relation_not_null" NOT NULL "relation"
 
 INSERT INTO replication_metadata(relation, options)
@@ -526,7 +524,6 @@ ALTER TABLE replication_metadata SET (user_catalog_table = true);
 Indexes:
     "replication_metadata_pkey" PRIMARY KEY, btree (id)
 Not-null constraints:
-    "replication_metadata_id_not_null" NOT NULL "id"
     "replication_metadata_relation_not_null" NOT NULL "relation"
 Options: user_catalog_table=true
 
@@ -548,7 +545,6 @@ ALTER TABLE replication_metadata SET (user_catalog_table = false);
 Indexes:
     "replication_metadata_pkey" PRIMARY KEY, btree (id)
 Not-null constraints:
-    "replication_metadata_id_not_null" NOT NULL "id"
     "replication_metadata_relation_not_null" NOT NULL "relation"
 Options: user_catalog_table=false
 

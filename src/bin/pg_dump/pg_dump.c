@@ -16420,7 +16420,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 				appendPQExpBufferStr(q, ");\n");
 
 			/*
-			 * Fix up NOT NULL constraints that come from inheritance.  As
+			 * Fix up not-null constraints that come from inheritance.  As
 			 * above, do the pg_constraint manipulations in a single SQL
 			 * command.
 			 */
@@ -16432,6 +16432,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 				 * conislocal.  The inhcount is fixed later.
 				 */
 				if (tbinfo->notnull_constrs[j] != NULL &&
+					tbinfo->notnull_constrs[j][0] != '\0' &&
 					tbinfo->notnull_inh[j] &&
 					!tbinfo->ispartition)
 				{
@@ -16449,10 +16450,9 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 						appendPQExpBufferStr(q, ", ");
 					appendStringLiteralAH(q, tbinfo->notnull_constrs[j], fout);
 				}
-
-				if (!firstitem)
-					appendPQExpBufferStr(q, ";\n");
 			}
+			if (!firstitem)
+				appendPQExpBufferStr(q, ");\n");
 
 			/*
 			 * Add inherited CHECK constraints, if any.

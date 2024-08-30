@@ -58,8 +58,8 @@ NOTICE:    subcommand: type DETACH PARTITION desc table part2
 DROP TABLE part2;
 ALTER TABLE part ADD PRIMARY KEY (a);
 NOTICE:  DDL test: type alter table, tag ALTER TABLE
-NOTICE:    subcommand: type SET ATTNOTNULL desc column a of table part
-NOTICE:    subcommand: type SET ATTNOTNULL desc column a of table part1
+NOTICE:    subcommand: type ADD CONSTRAINT (and recurse) desc constraint part_a_not_null on table part
+NOTICE:    subcommand: type ADD CONSTRAINT (and recurse) desc <NULL>
 NOTICE:    subcommand: type ADD INDEX desc index part_pkey
 ALTER TABLE parent ALTER COLUMN a SET NOT NULL;
 NOTICE:  DDL test: type alter table, tag ALTER TABLE
