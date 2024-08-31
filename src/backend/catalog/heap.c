@@ -2821,6 +2821,12 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		attnum = get_attnum(RelationGetRelid(rel),
 							strVal(linitial(constr->keys)));
+		if (attnum == InvalidAttrNumber)
+			ereport(ERROR,
+					errcode(ERRCODE_UNDEFINED_COLUMN),
+					errmsg("column \"%s\" of relation \"%s\" does not exist",
+						   strVal(linitial(constr->keys)),
+						   RelationGetRelationName(rel)));
 
 		/*
 		 * Search in the list of inherited constraints for any entries on the
