@@ -2612,9 +2612,12 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 				 */
 				if (constraint->contype == CONSTR_PRIMARY &&
 					!column->is_not_null)
+				{
+					column->is_not_null = true;
 					cxt->nnconstraints =
 						lappend(cxt->nnconstraints,
 								makeNotNullConstraint(makeString(key)));
+				}
 			}
 			else if (SystemAttributeByName(key) != NULL)
 			{
