@@ -492,6 +492,12 @@ is( $result,
 	"$original_encoding|$original_provider|$original_datcollate|$original_datctype|$original_datlocale",
 	"check that locales in new cluster match original cluster");
 
+$result = $newnode->safe_psql(
+	'regression',
+	"SELECT conname, conrelid::regclass FROM pg_constraint
+	WHERE conname like '%throwaway%'");
+is ( $result, '', 'no throwaway constraints in the new node at the end');
+
 # Second dump from the upgraded instance.
 @dump_command = (
 	'pg_dumpall', '--no-sync', '-d', $newnode->connstr('postgres'),
