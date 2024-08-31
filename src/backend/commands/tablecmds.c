@@ -596,7 +596,8 @@ static ObjectAddress ATExecClusterOn(Relation rel, const char *indexName,
 static void ATExecDropCluster(Relation rel, LOCKMODE lockmode);
 static void ATPrepSetAccessMethod(AlteredTableInfo *tab, Relation rel, const char *amname);
 static void ATExecSetAccessMethodNoStorage(Relation rel, Oid newAccessMethodId);
-static bool ATPrepChangePersistence(Relation rel, bool toLogged);
+static void ATPrepChangePersistence(AlteredTableInfo *tab, Relation rel,
+									bool toLogged);
 static void ATPrepSetTableSpace(AlteredTableInfo *tab, Relation rel,
 								const char *tablespacename, LOCKMODE lockmode);
 static void ATExecSetTableSpace(Oid tableOid, Oid newTableSpace, LOCKMODE lockmode);
@@ -4997,33 +4998,13 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			pass = AT_PASS_MISC;
 			break;
 		case AT_SetLogged:		/* SET LOGGED */
-			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_SEQUENCE);
-			if (tab->chgPersistence)
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("cannot change persistence setting twice")));
-			tab->chgPersistence = ATPrepChangePersistence(rel, true);
-			/* force rewrite if necessary; see comment in ATRewriteTables */
-			if (tab->chgPersistence)
-			{
-				tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
-				tab->newrelpersistence = RELPERSISTENCE_PERMANENT;
-			}
-			pass = AT_PASS_MISC;
-			break;
 		case AT_SetUnLogged:	/* SET UNLOGGED */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_SEQUENCE);
 			if (tab->chgPersistence)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						 errmsg("cannot change persistence setting twice")));
-			tab->chgPersistence = ATPrepChangePersistence(rel, false);
-			/* force rewrite if necessary; see comment in ATRewriteTables */
-			if (tab->chgPersistence)
-			{
-				tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
-				tab->newrelpersistence = RELPERSISTENCE_UNLOGGED;
-			}
+			ATPrepChangePersistence(tab, rel, cmd->subtype == AT_SetLogged);
 			pass = AT_PASS_MISC;
 			break;
 		case AT_DropOids:		/* SET WITHOUT OIDS */
@@ -10937,7 +10918,7 @@ CloneFkReferencing(List **wqueue, Relation parentRel, Relation partRel)
 		if (fk->confrelid == RelationGetRelid(partRel))
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("can't attach table \"%s\" as a partition which is referenced by foreign key \"%s\"",
+					 errmsg("cannot attach table \"%s\" as a partition because it is referenced by foreign key \"%s\"",
 							RelationGetRelationName(partRel),
 							get_constraint_name(fk->conoid))));
 
@@ -13032,6 +13013,16 @@ ATPrepAlterColumnType(List **wqueue,
 						colName)));
 
 	/*
+	 * Cannot specify USING when altering type of a generated column, because
+	 * that would violate the generation expression.
+	 */
+	if (attTup->attgenerated && def->cooked_default)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
+				 errmsg("cannot specify USING when altering type of generated column"),
+				 errdetail("Column \"%s\" is a generated column.", colName)));
+
+	/*
 	 * Don't alter inherited columns.  At outer level, there had better not be
 	 * any inherited definition; when recursing, we assume this was checked at
 	 * the parent level (see below).
@@ -13107,11 +13098,12 @@ ATPrepAlterColumnType(List **wqueue,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
 						 errmsg("column \"%s\" cannot be cast automatically to type %s",
 								colName, format_type_be(targettype)),
+						 !attTup->attgenerated ?
 				/* translator: USING is SQL, don't translate it */
 						 errhint("You might need to specify \"USING %s::%s\".",
 								 quote_identifier(colName),
 								 format_type_with_typemod(targettype,
-														  targettypmod))));
+														  targettypmod)) : 0));
 		}
 
 		/* Fix collations after all else */
@@ -17323,12 +17315,9 @@ ATExecSetCompression(Relation rel,
  * This verifies that we're not trying to change a temp table.  Also,
  * existing foreign key constraints are checked to avoid ending up with
  * permanent tables referencing unlogged tables.
- *
- * Return value is false if the operation is a no-op (in which case the
- * checks are skipped), otherwise true.
  */
-static bool
-ATPrepChangePersistence(Relation rel, bool toLogged)
+static void
+ATPrepChangePersistence(AlteredTableInfo *tab, Relation rel, bool toLogged)
 {
 	Relation	pg_constraint;
 	HeapTuple	tuple;
@@ -17352,12 +17341,12 @@ ATPrepChangePersistence(Relation rel, bool toLogged)
 		case RELPERSISTENCE_PERMANENT:
 			if (toLogged)
 				/* nothing to do */
-				return false;
+				return;
 			break;
 		case RELPERSISTENCE_UNLOGGED:
 			if (!toLogged)
 				/* nothing to do */
-				return false;
+				return;
 			break;
 	}
 
@@ -17440,7 +17429,13 @@ ATPrepChangePersistence(Relation rel, bool toLogged)
 
 	table_close(pg_constraint, AccessShareLock);
 
-	return true;
+	/* force rewrite if necessary; see comment in ATRewriteTables */
+	tab->rewrite |= AT_REWRITE_ALTER_PERSISTENCE;
+	if (toLogged)
+		tab->newrelpersistence = RELPERSISTENCE_PERMANENT;
+	else
+		tab->newrelpersistence = RELPERSISTENCE_UNLOGGED;
+	tab->chgPersistence = true;
 }
 
 /*
