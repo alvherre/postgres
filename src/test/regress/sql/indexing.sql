@@ -592,7 +592,7 @@ create table idxpart2 partition of idxpart for values from (0) to (1000) partiti
 create table idxpart21 partition of idxpart2 for values from (0) to (1000);
 select conname, contype, conrelid::regclass, conindid::regclass, conkey
   from pg_constraint where conrelid::regclass::text like 'idxpart%'
-  order by conname;
+  order by conrelid::regclass::text, conname;
 drop table idxpart;
 
 -- If a partitioned table has a unique/PK constraint, then it's not possible
