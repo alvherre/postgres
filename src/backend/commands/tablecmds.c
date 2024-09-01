@@ -150,7 +150,6 @@ typedef enum AlterTablePass
 	AT_PASS_ALTER_TYPE,			/* ALTER COLUMN TYPE */
 	AT_PASS_ADD_COL,			/* ADD COLUMN */
 	AT_PASS_SET_EXPRESSION,		/* ALTER SET EXPRESSION */
-	AT_PASS_OLD_COL_ATTRS,		/* re-install attnotnull */
 	AT_PASS_OLD_INDEX,			/* re-add existing indexes */
 	AT_PASS_OLD_CONSTR,			/* re-add existing constraints */
 	/* We could support a RENAME COLUMN pass here, but not currently used */
