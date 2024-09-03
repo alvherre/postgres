@@ -710,31 +710,33 @@ extractNotNullColumn(HeapTuple constrTup)
  *
  * If no not-null constraint is found for the column, return false.
  * Caller can create one.
- * If the constraint does exist and it's inheritable, adjust its
- * inheritance count (and possibly islocal status) and return true.
- * No further action needs to be taken.
+ *
+ * If the constraint does exist and matches the requested inheritability
+ * status, adjust its inheritance count and islocal status as requested, and
+ * return true.  If the inheritability status doesn't match, an error is
+ * raised.
  */
 bool
 AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
-						  bool is_no_inherit)
+						  bool is_local, bool is_no_inherit)
 {
 	HeapTuple	tup;
 
-	Assert(count >= 0);
+	Assert(count == 0 || count == 1);
 
 	tup = findNotNullConstraintAttnum(relid, attnum);
 	if (HeapTupleIsValid(tup))
 	{
 		Relation	pg_constraint;
 		Form_pg_constraint conform;
-		int			retval = 1;
+		bool		changed = false;
 
 		pg_constraint = table_open(ConstraintRelationId, RowExclusiveLock);
 		conform = (Form_pg_constraint) GETSTRUCT(tup);
 
 		/*
-		 * If we're asked for a NO INHERIT constraint and this relation
-		 * already has an inheritable one, throw an error.
+		 * If the NO INHERIT flag we're asked for doesn't match what the
+		 * existing constraint has, throw an error.
 		 */
 		if (is_no_inherit != conform->connoinherit)
 			ereport(ERROR,
@@ -743,24 +745,25 @@ AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
 						   NameStr(conform->conname), get_rel_name(relid)));
 
 		if (count > 0)
+		{
 			conform->coninhcount += count;
-
-		/*
-		 * If the constraint is no longer inherited, mark it local.  It's
-		 * arguable that we should drop it instead, but it's hard to see that
-		 * being better.  The user can drop it manually later.
-		 */
-		if (conform->coninhcount == 0)
+			changed = true;
+		}
+		if (is_local)
+		{
 			conform->conislocal = true;
+			changed = true;
+		}
 
-		CatalogTupleUpdate(pg_constraint, &tup->t_self, tup);
+		if (changed)
+			CatalogTupleUpdate(pg_constraint, &tup->t_self, tup);
 
 		table_close(pg_constraint, RowExclusiveLock);
 
-		return retval;
+		return true;
 	}
 
-	return 0;
+	return false;
 }
 
 /*

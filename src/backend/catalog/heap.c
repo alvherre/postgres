@@ -2550,11 +2550,11 @@ AddRelationNewConstraints(Relation rel,
 							   strVal(linitial(cdef->keys)), RelationGetRelationName(rel)));
 
 			/*
-			 * If the column already has an inheritable not-null constraint,
-			 * we need only adjust its coninhcount and we're done.
+			 * If the column already has a not-null constraint, we don't want
+			 * to add another one; just adjust inheritance status as needed.
 			 */
 			if (AdjustNotNullInheritance1(RelationGetRelid(rel), colnum,
-										  cdef->inhcount, cdef->is_no_inherit))
+										  cdef->inhcount, is_local, cdef->is_no_inherit))
 				continue;
 
 			/*
