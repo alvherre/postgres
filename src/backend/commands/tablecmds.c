@@ -9557,7 +9557,6 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	List	   *children;
 	ListCell   *child;
 	ObjectAddress address = InvalidObjectAddress;
-	bool		allow_non_recursive = false;
 
 	/* Guard against stack overflow due to overly deep inheritance tree. */
 	check_stack_depth();
@@ -9565,19 +9564,6 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	/* At top level, permission check was done in ATPrepCmd, else do it */
 	if (recursing)
 		ATSimplePermissions(AT_AddConstraint, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
-
-	/*
-	 * Test whether the constraint specifies that non-recursive addition is
-	 * allowed.  This is a special case used for NOT NULL constraints when
-	 * adding a primary key to a ONLY table with children.
-	 *
-	 * XXX this is a strange hack that should probably replaced by something
-	 * more ad-hoc.
-	 */
-	if (!recursing)
-		foreach_node(DefElem, option, constr->options)
-			if (strcmp(option->defname, "allow_non_recursive") == 0)
-				allow_non_recursive = true;
 
 	/*
 	 * Call AddRelationNewConstraints to do the work, making sure it works on
@@ -9666,10 +9652,29 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 	 * constraint creation only if there are no children currently, or a
 	 * special exception was requested.  Error out otherwise.
 	 */
-	if (!recurse && children != NIL && !allow_non_recursive)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				 errmsg("constraint must be added to child tables too")));
+	if (!recurse && children != NIL)
+	{
+		bool	allow_non_recursive = false;
+
+		/*
+		 * Test whether the constraint specifies that non-recursive addition
+		 * is allowed.  This is a special case used for NOT NULL constraints
+		 * when adding a primary key to a partitioned table with children
+		 * and ONLY was specified.
+		 *
+		 * XXX this is a strange hack that should probably be replaced by
+		 * something more ad-hoc.
+		 */
+		if (!recursing)
+			foreach_node(DefElem, option, constr->options)
+				if (strcmp(option->defname, "allow_non_recursive") == 0)
+					allow_non_recursive = true;
+
+		if (!allow_non_recursive)
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					 errmsg("constraint must be added to child tables too")));
+	}
 
 	/*
 	 * The constraint must appear as inherited in children, so create a
