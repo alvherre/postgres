@@ -976,7 +976,7 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 					 * Note hack: if we're adding a primary key to a
 					 * partitioned table, then here we're causing not-null
 					 * constraints on all columns of the PK to be added; such
-					 * constraints need to always be created, even when the PK
+					 * constraints always need to be created, even when the PK
 					 * is being added non-recursively to the parent table.
 					 * Those additional constraints are added to each partition
 					 * in ATPrepAddPrimaryKey, but we still need to prevent
