@@ -2297,7 +2297,7 @@ StoreConstraints(Relation rel, List *cooked_constraints, bool is_internal)
  *		cooked CHECK constraints
  *
  * All entries in newColDefaults will be processed.  Entries in newConstraints
- * will be processed only if they are CONSTR_CHECK type.
+ * will be processed only if they are CONSTR_CHECK or CONSTR_NOTNULL types.
  *
  * Returns a list of CookedConstraint nodes that shows the cooked form of
  * the default and constraint expressions added to the relation.
