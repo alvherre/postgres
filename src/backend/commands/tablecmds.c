@@ -446,7 +446,7 @@ static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
 static void add_column_collation_dependency(Oid relid, int32 attnum, Oid collid);
 static ObjectAddress ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 									   LOCKMODE lockmode);
-static bool set_attnotnull(List **wqueue, Relation rel,
+static void set_attnotnull(List **wqueue, Relation rel,
 						   AttrNumber attnum, bool recurse, LOCKMODE lockmode);
 static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  char *constrname, char *colName,
@@ -7610,19 +7610,17 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
  * Helper to set pg_attribute.attnotnull if it isn't set, and to tell phase 3
  * to verify it; recurses to apply the same to children.
  *
- * When called to alter an existing table, 'wqueue' must be given so that we can
- * queue a check that existing tuples pass the constraint.  When called from
- * table creation, 'wqueue' should be passed as NULL.
- *
- * Returns true if the flag was set in any table, otherwise false.
+ * When called to alter an existing table, 'wqueue' must be given so that we
+ * can queue a check that existing tuples pass the constraint.  When called
+ * from table creation, 'wqueue' should be passed as NULL.
  */
-static bool
+static void
 set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 			   LOCKMODE lockmode)
 {
 	HeapTuple	tuple;
 	Form_pg_attribute attForm;
-	bool		retval = false;
+	bool		changed = false;
 
 	/* Guard against stack overflow due to overly deep inheritance tree. */
 	check_stack_depth();
@@ -7655,7 +7653,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 			tab->verify_new_notnull = true;
 		}
 
-		retval = true;
+		changed = true;
 	}
 
 	if (recurse)
@@ -7664,7 +7662,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 		ListCell   *lc;
 
 		/* Make above update visible, for multiple inheritance cases */
-		if (retval)
+		if (changed)
 			CommandCounterIncrement();
 
 		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
@@ -7681,13 +7679,11 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 			childattno = get_attnum(RelationGetRelid(childrel),
 									get_attname(RelationGetRelid(rel), attnum,
 												false));
-			retval |= set_attnotnull(wqueue, childrel, childattno,
-									 recurse, lockmode);
+			set_attnotnull(wqueue, childrel, childattno,
+						   recurse, lockmode);
 			table_close(childrel, NoLock);
 		}
 	}
-
-	return retval;
 }
 
 /*
