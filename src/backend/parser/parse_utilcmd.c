@@ -1255,51 +1255,6 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	}
 
 	/*
-	 * If INCLUDING INDEXES is not given and a primary key exists, we need to
-	 * add not-null constraints to the columns covered by the PK (except those
-	 * that already have one.)  This is required for backwards compatibility.
-	 */
-	if ((table_like_clause->options & CREATE_TABLE_LIKE_INDEXES) == 0)
-	{
-		Bitmapset  *pkcols;
-		int			x = -1;
-		Bitmapset  *donecols = NULL;
-		ListCell   *lc;
-
-		/*
-		 * Obtain a bitmapset of columns on which we'll add not-null
-		 * constraints in expandTableLikeClause, so that we skip this for
-		 * those.
-		 */
-		foreach(lc, RelationGetNotNullConstraints(RelationGetRelid(relation), true))
-		{
-			CookedConstraint *cooked = (CookedConstraint *) lfirst(lc);
-
-			donecols = bms_add_member(donecols, cooked->attnum);
-		}
-
-		pkcols = RelationGetIndexAttrBitmap(relation,
-											INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		while ((x = bms_next_member(pkcols, x)) >= 0)
-		{
-			Constraint *notnull;
-			AttrNumber	attnum = x + FirstLowInvalidHeapAttributeNumber;
-			String	   *colname;
-			Form_pg_attribute attForm;
-
-			/* ignore if we already have one for this column */
-			if (bms_is_member(attnum, donecols))
-				continue;
-
-			attForm = TupleDescAttr(tupleDesc, attnum - 1);
-			colname = makeString(pstrdup(NameStr(attForm->attname)));
-			notnull = makeNotNullConstraint(colname);
-
-			cxt->nnconstraints = lappend(cxt->nnconstraints, notnull);
-		}
-	}
-
-	/*
 	 * Close the parent rel, but keep our AccessShareLock on it until xact
 	 * commit.  That will prevent someone else from deleting or ALTERing the
 	 * parent before we can run expandTableLikeClause.
