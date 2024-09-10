@@ -4313,10 +4313,10 @@ DomainConstraintElem:
 					n->contype = CONSTR_NOTNULL;
 					n->location = @1;
 					n->keys = list_make1(makeString("value"));
-					/* no NOT VALID support yet */
+					/* no NOT VALID, NO INHERIT support */
 					processCASbits($3, @3, "NOT NULL",
 								   NULL, NULL, NULL,
-								   &n->is_no_inherit, yyscanner);
+								   NULL, yyscanner);
 					n->initially_valid = true;
 					$$ = (Node *) n;
 				}
