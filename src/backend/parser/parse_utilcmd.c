@@ -1081,6 +1081,7 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	AclResult	aclresult;
 	char	   *comment;
 	ParseCallbackState pcbstate;
+	List	   *lst;
 
 	setup_parser_errposition_callback(&pcbstate, cxt->pstate,
 									  table_like_clause->relation->location);
@@ -1225,9 +1226,8 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	 * Reproduce not-null constraints by copying them.  This doesn't require
 	 * any option to have been given.
 	 */
-	cxt->nnconstraints = list_concat(cxt->nnconstraints,
-									 RelationGetNotNullConstraints(RelationGetRelid(relation),
-																   false));
+	lst = RelationGetNotNullConstraints(RelationGetRelid(relation), false);
+	cxt->nnconstraints = list_concat(cxt->nnconstraints, lst);
 
 	/*
 	 * We cannot yet deal with defaults, CHECK constraints, indexes, or
