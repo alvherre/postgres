@@ -1081,7 +1081,6 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	AclResult	aclresult;
 	char	   *comment;
 	ParseCallbackState pcbstate;
-	bool		process_notnull_constraints = false;
 
 	setup_parser_errposition_callback(&pcbstate, cxt->pstate,
 									  table_like_clause->relation->location);
@@ -1156,14 +1155,6 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 							attribute->atttypmod, attribute->attcollation);
 
 		/*
-		 * For constraints, ONLY the not-null constraint is inherited by the
-		 * new column definition per SQL99; however we cannot do that
-		 * correctly here, so we leave it for expandTableLikeClause to handle.
-		 */
-		if (attribute->attnotnull)
-			process_notnull_constraints = true;
-
-		/*
 		 * Add to column list
 		 */
 		cxt->columns = lappend(cxt->columns, def);
@@ -1231,24 +1222,29 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	}
 
 	/*
+	 * Reproduce not-null constraints by copying them.  This doesn't require
+	 * any option to have been given.
+	 */
+	cxt->nnconstraints = list_concat(cxt->nnconstraints,
+									 RelationGetNotNullConstraints(RelationGetRelid(relation),
+																   false));
+
+	/*
 	 * We cannot yet deal with defaults, CHECK constraints, indexes, or
 	 * statistics, since we don't yet know what column numbers the copied
 	 * columns will have in the finished table.  If any of those options are
 	 * specified, add the LIKE clause to cxt->likeclauses so that
-	 * expandTableLikeClause will be called after we do know that; in
-	 * addition, do that if there are any NOT NULL constraints, because those
-	 * must be propagated even if not explicitly requested.
+	 * expandTableLikeClause will be called after we do know that.
 	 *
 	 * In order for this to work, we remember the relation OID so that
 	 * expandTableLikeClause is certain to open the same table.
 	 */
-	if ((table_like_clause->options &
-		 (CREATE_TABLE_LIKE_DEFAULTS |
-		  CREATE_TABLE_LIKE_GENERATED |
-		  CREATE_TABLE_LIKE_CONSTRAINTS |
-		  CREATE_TABLE_LIKE_INDEXES |
-		  CREATE_TABLE_LIKE_STATISTICS)) ||
-		process_notnull_constraints)
+	if (table_like_clause->options &
+		(CREATE_TABLE_LIKE_DEFAULTS |
+		 CREATE_TABLE_LIKE_GENERATED |
+		 CREATE_TABLE_LIKE_CONSTRAINTS |
+		 CREATE_TABLE_LIKE_INDEXES |
+		 CREATE_TABLE_LIKE_STATISTICS))
 	{
 		table_like_clause->relationOid = RelationGetRelid(relation);
 		cxt->likeclauses = lappend(cxt->likeclauses, table_like_clause);
@@ -1282,7 +1278,6 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 	TupleConstr *constr;
 	AttrMap    *attmap;
 	char	   *comment;
-	ListCell   *lc;
 
 	/*
 	 * Open the relation referenced by the LIKE clause.  We should still have
@@ -1451,20 +1446,6 @@ expandTableLikeClause(RangeVar *heapRel, TableLikeClause *table_like_clause)
 				result = lappend(result, stmt);
 			}
 		}
-	}
-
-	/*
-	 * Copy not-null constraints, too (these do not require any option to have
-	 * been given).
-	 */
-	foreach(lc, RelationGetNotNullConstraints(RelationGetRelid(relation), false))
-	{
-		AlterTableCmd *atsubcmd;
-
-		atsubcmd = makeNode(AlterTableCmd);
-		atsubcmd->subtype = AT_AddConstraint;
-		atsubcmd->def = (Node *) lfirst_node(Constraint, lc);
-		atsubcmds = lappend(atsubcmds, atsubcmd);
 	}
 
 	/*
