@@ -697,6 +697,7 @@ extractNotNullColumn(HeapTuple constrTup)
 		elog(ERROR, "conkey is not a 1-D smallint array");
 
 	memcpy(&colnum, ARR_DATA_PTR(arr), sizeof(AttrNumber));
+	Assert(colnum > 0 && colnum <= MaxAttrNumber);
 
 	if ((Pointer) arr != DatumGetPointer(adatum))
 		pfree(arr);				/* free de-toasted copy, if any */
