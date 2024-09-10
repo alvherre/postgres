@@ -375,7 +375,7 @@ NOTICE:  merging constraint "ctlt1_a_check" with inherited definition
 Check constraints:
     "ctlt1_a_check" CHECK (length(a) > 2)
 Not-null constraints:
-    "ctlt1_a_not_null" NOT NULL "a" (inherited)
+    "ctlt1_a_not_null" NOT NULL "a" (local, inherited)
 Inherits: ctlt1
 
 SELECT description FROM pg_description, pg_constraint c WHERE classoid = 'pg_constraint'::regclass AND objoid = c.oid AND c.conrelid = 'ctlt1_inh'::regclass;
