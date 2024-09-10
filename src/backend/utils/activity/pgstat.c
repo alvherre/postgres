@@ -411,6 +411,8 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.shared_data_off = offsetof(PgStatShared_IO, stats),
 		.shared_data_len = sizeof(((PgStatShared_IO *) 0)->stats),
 
+		.flush_fixed_cb = pgstat_io_flush_cb,
+		.have_fixed_pending_cb = pgstat_io_have_pending_cb,
 		.init_shmem_cb = pgstat_io_init_shmem_cb,
 		.reset_all_cb = pgstat_io_reset_all_cb,
 		.snapshot_cb = pgstat_io_snapshot_cb,
@@ -426,6 +428,8 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.shared_data_off = offsetof(PgStatShared_SLRU, stats),
 		.shared_data_len = sizeof(((PgStatShared_SLRU *) 0)->stats),
 
+		.flush_fixed_cb = pgstat_slru_flush_cb,
+		.have_fixed_pending_cb = pgstat_slru_have_pending_cb,
 		.init_shmem_cb = pgstat_slru_init_shmem_cb,
 		.reset_all_cb = pgstat_slru_reset_all_cb,
 		.snapshot_cb = pgstat_slru_snapshot_cb,
@@ -441,6 +445,9 @@ static const PgStat_KindInfo pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]
 		.shared_data_off = offsetof(PgStatShared_Wal, stats),
 		.shared_data_len = sizeof(((PgStatShared_Wal *) 0)->stats),
 
+		.init_backend_cb = pgstat_wal_init_backend_cb,
+		.flush_fixed_cb = pgstat_wal_flush_cb,
+		.have_fixed_pending_cb = pgstat_wal_have_pending_cb,
 		.init_shmem_cb = pgstat_wal_init_shmem_cb,
 		.reset_all_cb = pgstat_wal_reset_all_cb,
 		.snapshot_cb = pgstat_wal_snapshot_cb,
@@ -604,9 +611,18 @@ pgstat_initialize(void)
 
 	pgstat_attach_shmem();
 
-	pgstat_init_wal();
-
 	pgstat_init_snapshot_fixed();
+
+	/* Backend initialization callbacks */
+	for (PgStat_Kind kind = PGSTAT_KIND_MIN; kind <= PGSTAT_KIND_MAX; kind++)
+	{
+		const PgStat_KindInfo *kind_info = pgstat_get_kind_info(kind);
+
+		if (kind_info == NULL || kind_info->init_backend_cb == NULL)
+			continue;
+
+		kind_info->init_backend_cb();
+	}
 
 	/* Set up a process-exit hook to clean up */
 	before_shmem_exit(pgstat_shutdown_hook, 0);
@@ -661,13 +677,37 @@ pgstat_report_stat(bool force)
 	}
 
 	/* Don't expend a clock check if nothing to do */
-	if (dlist_is_empty(&pgStatPending) &&
-		!have_iostats &&
-		!have_slrustats &&
-		!pgstat_have_pending_wal())
+	if (dlist_is_empty(&pgStatPending))
 	{
-		Assert(pending_since == 0);
-		return 0;
+		bool		do_flush = false;
+
+		/* Check for pending fixed-numbered stats */
+		for (PgStat_Kind kind = PGSTAT_KIND_MIN; kind <= PGSTAT_KIND_MAX; kind++)
+		{
+			const PgStat_KindInfo *kind_info = pgstat_get_kind_info(kind);
+
+			if (!kind_info)
+				continue;
+			if (!kind_info->fixed_amount)
+			{
+				Assert(kind_info->have_fixed_pending_cb == NULL);
+				continue;
+			}
+			if (!kind_info->have_fixed_pending_cb)
+				continue;
+
+			if (kind_info->have_fixed_pending_cb())
+			{
+				do_flush = true;
+				break;
+			}
+		}
+
+		if (!do_flush)
+		{
+			Assert(pending_since == 0);
+			return 0;
+		}
 	}
 
 	/*
@@ -720,14 +760,23 @@ pgstat_report_stat(bool force)
 	/* flush database / relation / function / ... stats */
 	partial_flush |= pgstat_flush_pending_entries(nowait);
 
-	/* flush IO stats */
-	partial_flush |= pgstat_flush_io(nowait);
+	/* flush of fixed-numbered stats */
+	for (PgStat_Kind kind = PGSTAT_KIND_MIN; kind <= PGSTAT_KIND_MAX; kind++)
+	{
+		const PgStat_KindInfo *kind_info = pgstat_get_kind_info(kind);
 
-	/* flush wal stats */
-	partial_flush |= pgstat_flush_wal(nowait);
+		if (!kind_info)
+			continue;
+		if (!kind_info->fixed_amount)
+		{
+			Assert(kind_info->flush_fixed_cb == NULL);
+			continue;
+		}
+		if (!kind_info->flush_fixed_cb)
+			continue;
 
-	/* flush SLRU stats */
-	partial_flush |= pgstat_slru_flush(nowait);
+		partial_flush |= kind_info->flush_fixed_cb(nowait);
+	}
 
 	last_flush = now;
 
@@ -1781,6 +1830,12 @@ pgstat_read_statsfile(XLogRecPtr redo)
 					}
 
 					info = pgstat_get_kind_info(kind);
+					if (!info)
+					{
+						elog(WARNING, "could not find information of kind %u for entry of type %c",
+							 kind, t);
+						goto error;
+					}
 
 					if (!info->fixed_amount)
 					{
@@ -1861,6 +1916,12 @@ pgstat_read_statsfile(XLogRecPtr redo)
 						}
 
 						kind_info = pgstat_get_kind_info(kind);
+						if (!kind_info)
+						{
+							elog(WARNING, "could not find information of kind %u for entry of type %c",
+								 kind, t);
+							goto error;
+						}
 
 						if (!kind_info->from_serialized_name)
 						{

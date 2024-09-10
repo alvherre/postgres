@@ -83,7 +83,7 @@
  * this flag is set. Note that we don't need to reset this variable as after
  * promotion the slot sync worker won't be restarted because the pmState
  * changes to PM_RUN from PM_HOT_STANDBY and we don't support demoting
- * primary without restarting the server. See MaybeStartSlotSyncWorker.
+ * primary without restarting the server. See LaunchMissingBackgroundProcesses.
  *
  * The 'syncing' flag is needed to prevent concurrent slot syncs to avoid slot
  * overwrites.
@@ -962,14 +962,14 @@ validate_remote_info(WalReceiverConn *wrconn)
 
 	if (res->status != WALRCV_OK_TUPLES)
 		ereport(ERROR,
-				errmsg("could not fetch primary_slot_name \"%s\" info from the primary server: %s",
+				errmsg("could not fetch primary slot name \"%s\" info from the primary server: %s",
 					   PrimarySlotName, res->err),
-				errhint("Check if primary_slot_name is configured correctly."));
+				errhint("Check if \"primary_slot_name\" is configured correctly."));
 
 	tupslot = MakeSingleTupleTableSlot(res->tupledesc, &TTSOpsMinimalTuple);
 	if (!tuplestore_gettupleslot(res->tuplestore, true, false, tupslot))
 		elog(ERROR,
-			 "failed to fetch tuple for the primary server slot specified by primary_slot_name");
+			 "failed to fetch tuple for the primary server slot specified by \"primary_slot_name\"");
 
 	remote_in_recovery = DatumGetBool(slot_getattr(tupslot, 1, &isnull));
 	Assert(!isnull);

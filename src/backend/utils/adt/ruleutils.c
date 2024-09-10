@@ -589,8 +589,7 @@ pg_get_ruledef_worker(Oid ruleoid, int prettyFlags)
 	/*
 	 * Connect to SPI manager
 	 */
-	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "SPI_connect failed");
+	SPI_connect();
 
 	/*
 	 * On the first call prepare the plan to lookup pg_rewrite. We read
@@ -782,8 +781,7 @@ pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn)
 	/*
 	 * Connect to SPI manager
 	 */
-	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "SPI_connect failed");
+	SPI_connect();
 
 	/*
 	 * On the first call prepare the plan to lookup pg_rewrite. We read
@@ -5457,10 +5455,27 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 {
 	deparse_context context;
 	deparse_namespace dpns;
+	int			rtable_size;
 
 	/* Guard against excessively long or deeply-nested queries */
 	CHECK_FOR_INTERRUPTS();
 	check_stack_depth();
+
+	rtable_size = query->hasGroupRTE ?
+		list_length(query->rtable) - 1 :
+		list_length(query->rtable);
+
+	/*
+	 * Replace any Vars in the query's targetlist and havingQual that
+	 * reference GROUP outputs with the underlying grouping expressions.
+	 */
+	if (query->hasGroupRTE)
+	{
+		query->targetList = (List *)
+			flatten_group_exprs(NULL, query, (Node *) query->targetList);
+		query->havingQual =
+			flatten_group_exprs(NULL, query, query->havingQual);
+	}
 
 	/*
 	 * Before we begin to examine the query, acquire locks on referenced
@@ -5479,7 +5494,7 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	context.targetList = NIL;
 	context.windowClause = NIL;
 	context.varprefix = (parentnamespace != NIL ||
-						 list_length(query->rtable) != 1);
+						 rtable_size != 1);
 	context.prettyFlags = prettyFlags;
 	context.wrapColumn = wrapColumn;
 	context.indentLevel = startIndent;
@@ -8138,6 +8153,14 @@ get_name_for_var_field(Var *var, int fieldno,
 					return result;
 				}
 			}
+			break;
+		case RTE_GROUP:
+
+			/*
+			 * We couldn't get here: any Vars that reference the RTE_GROUP RTE
+			 * should have been replaced with the underlying grouping
+			 * expressions.
+			 */
 			break;
 	}
 
@@ -11741,7 +11764,6 @@ get_json_table_columns(TableFunc *tf, JsonTablePathScan *scan,
 					   bool showimplicit)
 {
 	StringInfo	buf = context->buf;
-	JsonExpr   *jexpr = castNode(JsonExpr, tf->docexpr);
 	ListCell   *lc_colname;
 	ListCell   *lc_coltype;
 	ListCell   *lc_coltypmod;
@@ -11794,6 +11816,10 @@ get_json_table_columns(TableFunc *tf, JsonTablePathScan *scan,
 		if (ordinality)
 			continue;
 
+		/*
+		 * Set default_behavior to guide get_json_expr_options() on whether to
+		 * to emit the ON ERROR / EMPTY clauses.
+		 */
 		if (colexpr->op == JSON_EXISTS_OP)
 		{
 			appendStringInfoString(buf, " EXISTS");
@@ -11816,9 +11842,6 @@ get_json_table_columns(TableFunc *tf, JsonTablePathScan *scan,
 
 			default_behavior = JSON_BEHAVIOR_NULL;
 		}
-
-		if (jexpr->on_error->btype == JSON_BEHAVIOR_ERROR)
-			default_behavior = JSON_BEHAVIOR_ERROR;
 
 		appendStringInfoString(buf, " PATH ");
 
@@ -11897,7 +11920,7 @@ get_json_table(TableFunc *tf, deparse_context *context, bool showimplicit)
 	get_json_table_columns(tf, castNode(JsonTablePathScan, tf->plan), context,
 						   showimplicit);
 
-	if (jexpr->on_error->btype != JSON_BEHAVIOR_EMPTY)
+	if (jexpr->on_error->btype != JSON_BEHAVIOR_EMPTY_ARRAY)
 		get_json_behavior(jexpr->on_error, context, "ERROR");
 
 	if (PRETTY_INDENT(context))

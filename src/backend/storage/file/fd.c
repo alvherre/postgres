@@ -1790,8 +1790,8 @@ TempTablespacePath(char *path, Oid tablespace)
 	else
 	{
 		/* All other tablespaces are accessed via symlinks */
-		snprintf(path, MAXPGPATH, "pg_tblspc/%u/%s/%s",
-				 tablespace, TABLESPACE_VERSION_DIRECTORY,
+		snprintf(path, MAXPGPATH, "%s/%u/%s/%s",
+				 PG_TBLSPC_DIR, tablespace, TABLESPACE_VERSION_DIRECTORY,
 				 PG_TEMP_FILES_DIR);
 	}
 }
@@ -2254,7 +2254,7 @@ FileWriteV(File file, const struct iovec *iov, int iovcnt, off_t offset,
 			if (newTotal > (uint64) temp_file_limit * (uint64) 1024)
 				ereport(ERROR,
 						(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
-						 errmsg("temporary file size exceeds temp_file_limit (%dkB)",
+						 errmsg("temporary file size exceeds \"temp_file_limit\" (%dkB)",
 								temp_file_limit)));
 		}
 	}
@@ -3296,7 +3296,7 @@ CleanupTempFiles(bool isCommit, bool isProcExit)
 void
 RemovePgTempFiles(void)
 {
-	char		temp_path[MAXPGPATH + 10 + sizeof(TABLESPACE_VERSION_DIRECTORY) + sizeof(PG_TEMP_FILES_DIR)];
+	char		temp_path[MAXPGPATH + sizeof(PG_TBLSPC_DIR) + sizeof(TABLESPACE_VERSION_DIRECTORY) + sizeof(PG_TEMP_FILES_DIR)];
 	DIR		   *spc_dir;
 	struct dirent *spc_de;
 
@@ -3310,20 +3310,21 @@ RemovePgTempFiles(void)
 	/*
 	 * Cycle through temp directories for all non-default tablespaces.
 	 */
-	spc_dir = AllocateDir("pg_tblspc");
+	spc_dir = AllocateDir(PG_TBLSPC_DIR);
 
-	while ((spc_de = ReadDirExtended(spc_dir, "pg_tblspc", LOG)) != NULL)
+	while ((spc_de = ReadDirExtended(spc_dir, PG_TBLSPC_DIR, LOG)) != NULL)
 	{
 		if (strcmp(spc_de->d_name, ".") == 0 ||
 			strcmp(spc_de->d_name, "..") == 0)
 			continue;
 
-		snprintf(temp_path, sizeof(temp_path), "pg_tblspc/%s/%s/%s",
-				 spc_de->d_name, TABLESPACE_VERSION_DIRECTORY, PG_TEMP_FILES_DIR);
+		snprintf(temp_path, sizeof(temp_path), "%s/%s/%s/%s",
+				 PG_TBLSPC_DIR, spc_de->d_name, TABLESPACE_VERSION_DIRECTORY,
+				 PG_TEMP_FILES_DIR);
 		RemovePgTempFilesInDir(temp_path, true, false);
 
-		snprintf(temp_path, sizeof(temp_path), "pg_tblspc/%s/%s",
-				 spc_de->d_name, TABLESPACE_VERSION_DIRECTORY);
+		snprintf(temp_path, sizeof(temp_path), "%s/%s/%s",
+				 PG_TBLSPC_DIR, spc_de->d_name, TABLESPACE_VERSION_DIRECTORY);
 		RemovePgTempRelationFiles(temp_path);
 	}
 
@@ -3610,15 +3611,15 @@ SyncDataDirectory(void)
 		/* Sync the top level pgdata directory. */
 		do_syncfs(".");
 		/* If any tablespaces are configured, sync each of those. */
-		dir = AllocateDir("pg_tblspc");
-		while ((de = ReadDirExtended(dir, "pg_tblspc", LOG)))
+		dir = AllocateDir(PG_TBLSPC_DIR);
+		while ((de = ReadDirExtended(dir, PG_TBLSPC_DIR, LOG)))
 		{
 			char		path[MAXPGPATH];
 
 			if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
 				continue;
 
-			snprintf(path, MAXPGPATH, "pg_tblspc/%s", de->d_name);
+			snprintf(path, MAXPGPATH, "%s/%s", PG_TBLSPC_DIR, de->d_name);
 			do_syncfs(path);
 		}
 		FreeDir(dir);
@@ -3641,7 +3642,7 @@ SyncDataDirectory(void)
 	walkdir(".", pre_sync_fname, false, DEBUG1);
 	if (xlog_is_symlink)
 		walkdir("pg_wal", pre_sync_fname, false, DEBUG1);
-	walkdir("pg_tblspc", pre_sync_fname, true, DEBUG1);
+	walkdir(PG_TBLSPC_DIR, pre_sync_fname, true, DEBUG1);
 #endif
 
 	/* Prepare to report progress syncing the data directory via fsync. */
@@ -3659,7 +3660,7 @@ SyncDataDirectory(void)
 	walkdir(".", datadir_fsync_fname, false, LOG);
 	if (xlog_is_symlink)
 		walkdir("pg_wal", datadir_fsync_fname, false, LOG);
-	walkdir("pg_tblspc", datadir_fsync_fname, true, LOG);
+	walkdir(PG_TBLSPC_DIR, datadir_fsync_fname, true, LOG);
 }
 
 /*
@@ -3970,7 +3971,8 @@ check_debug_io_direct(char **newval, void **extra, GucSource source)
 #if PG_O_DIRECT == 0
 	if (strcmp(*newval, "") != 0)
 	{
-		GUC_check_errdetail("\"debug_io_direct\" is not supported on this platform.");
+		GUC_check_errdetail("\"%s\" is not supported on this platform.",
+							"debug_io_direct");
 		result = false;
 	}
 	flags = 0;
@@ -4017,14 +4019,16 @@ check_debug_io_direct(char **newval, void **extra, GucSource source)
 #if XLOG_BLCKSZ < PG_IO_ALIGN_SIZE
 	if (result && (flags & (IO_DIRECT_WAL | IO_DIRECT_WAL_INIT)))
 	{
-		GUC_check_errdetail("\"debug_io_direct\" is not supported for WAL because XLOG_BLCKSZ is too small");
+		GUC_check_errdetail("\"%s\" is not supported for WAL because %s is too small",
+							"debug_io_direct", "XLOG_BLCKSZ");
 		result = false;
 	}
 #endif
 #if BLCKSZ < PG_IO_ALIGN_SIZE
 	if (result && (flags & IO_DIRECT_DATA))
 	{
-		GUC_check_errdetail("\"debug_io_direct\" is not supported for data because BLCKSZ is too small");
+		GUC_check_errdetail("\"%s\" is not supported for WAL because %s is too small",
+							"debug_io_direct", "BLCKSZ");
 		result = false;
 	}
 #endif

@@ -50,6 +50,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pwd.h>
 #endif
 
 #ifdef WIN32
@@ -947,7 +948,7 @@ fillPGconn(PGconn *conn, PQconninfoOption *connOptions)
  * Copy over option values from srcConn to dstConn
  *
  * Don't put anything cute here --- intelligence should be in
- * connectOptions2 ...
+ * pqConnectOptions2 ...
  *
  * Returns true on success. On failure, returns false and sets error message of
  * dstConn.
@@ -3342,16 +3343,6 @@ keep_going:						/* We will come back to here until there is
 #ifdef USE_SSL
 
 				/*
-				 * Enable the libcrypto callbacks before checking if SSL needs
-				 * to be done.  This is done before sending the startup packet
-				 * as depending on the type of authentication done, like MD5
-				 * or SCRAM that use cryptohashes, the callbacks would be
-				 * required even without a SSL connection
-				 */
-				if (pqsecure_initialize(conn, false, true) < 0)
-					goto error_return;
-
-				/*
 				 * If SSL is enabled, start the SSL negotiation. We will come
 				 * back here after SSL encryption has been established, with
 				 * ssl_in_use set.
@@ -3542,14 +3533,6 @@ keep_going:						/* We will come back to here until there is
 						goto error_return;
 					}
 				}
-
-				/*
-				 * Set up global SSL state if required.  The crypto state has
-				 * already been set if libpq took care of doing that, so there
-				 * is no need to make that happen again.
-				 */
-				if (pqsecure_initialize(conn, true, false) != 0)
-					goto error_return;
 
 				/*
 				 * Begin or continue the SSL negotiation process.
@@ -7176,6 +7159,16 @@ PQprotocolVersion(const PGconn *conn)
 }
 
 int
+PQfullProtocolVersion(const PGconn *conn)
+{
+	if (!conn)
+		return 0;
+	if (conn->status == CONNECTION_BAD)
+		return 0;
+	return PG_PROTOCOL_FULL(conn->pversion);
+}
+
+int
 PQserverVersion(const PGconn *conn)
 {
 	if (!conn)
@@ -7702,10 +7695,24 @@ pqGetHomeDirectory(char *buf, int bufsize)
 	const char *home;
 
 	home = getenv("HOME");
-	if (home == NULL || home[0] == '\0')
-		return pg_get_user_home_dir(geteuid(), buf, bufsize);
-	strlcpy(buf, home, bufsize);
-	return true;
+	if (home && home[0])
+	{
+		strlcpy(buf, home, bufsize);
+		return true;
+	}
+	else
+	{
+		struct passwd pwbuf;
+		struct passwd *pw;
+		char		tmpbuf[1024];
+		int			rc;
+
+		rc = getpwuid_r(geteuid(), &pwbuf, tmpbuf, sizeof tmpbuf, &pw);
+		if (rc != 0 || !pw)
+			return false;
+		strlcpy(buf, pw->pw_dir, bufsize);
+		return true;
+	}
 #else
 	char		tmppath[MAX_PATH];
 

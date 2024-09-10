@@ -151,6 +151,13 @@ typedef struct
 static MemoryContext CollationCacheContext = NULL;
 static collation_cache_hash *CollationCache = NULL;
 
+/*
+ * The collation cache is often accessed repeatedly for the same collation, so
+ * remember the last one used.
+ */
+static Oid	last_collation_cache_oid = InvalidOid;
+static pg_locale_t last_collation_cache_locale = NULL;
+
 #if defined(WIN32) && defined(LC_MESSAGES)
 static char *IsoLocaleName(const char *);
 #endif
@@ -1259,59 +1266,6 @@ lookup_collation_cache(Oid collation)
 	return cache_entry;
 }
 
-
-/*
- * Detect whether collation's LC_COLLATE property is C
- */
-bool
-lc_collate_is_c(Oid collation)
-{
-	/*
-	 * If we're asked about "collation 0", return false, so that the code will
-	 * go into the non-C path and report that the collation is bogus.
-	 */
-	if (!OidIsValid(collation))
-		return false;
-
-	/*
-	 * If we're asked about the built-in C/POSIX collations, we know that.
-	 */
-	if (collation == C_COLLATION_OID ||
-		collation == POSIX_COLLATION_OID)
-		return true;
-
-	/*
-	 * Otherwise, we have to consult pg_collation, but we cache that.
-	 */
-	return pg_newlocale_from_collation(collation)->collate_is_c;
-}
-
-/*
- * Detect whether collation's LC_CTYPE property is C
- */
-bool
-lc_ctype_is_c(Oid collation)
-{
-	/*
-	 * If we're asked about "collation 0", return false, so that the code will
-	 * go into the non-C path and report that the collation is bogus.
-	 */
-	if (!OidIsValid(collation))
-		return false;
-
-	/*
-	 * If we're asked about the built-in C/POSIX collations, we know that.
-	 */
-	if (collation == C_COLLATION_OID ||
-		collation == POSIX_COLLATION_OID)
-		return true;
-
-	/*
-	 * Otherwise, we have to consult pg_collation, but we cache that.
-	 */
-	return pg_newlocale_from_collation(collation)->ctype_is_c;
-}
-
 /* simple subroutine for reporting errors from newlocale() */
 static void
 report_newlocale_failure(const char *localename)
@@ -1564,11 +1518,14 @@ pg_newlocale_from_collation(Oid collid)
 {
 	collation_cache_entry *cache_entry;
 
-	/* Callers must pass a valid OID */
-	Assert(OidIsValid(collid));
-
 	if (collid == DEFAULT_COLLATION_OID)
 		return &default_locale;
+
+	if (!OidIsValid(collid))
+		elog(ERROR, "cache lookup failed for collation %u", collid);
+
+	if (last_collation_cache_oid == collid)
+		return last_collation_cache_locale;
 
 	cache_entry = lookup_collation_cache(collid);
 
@@ -1694,6 +1651,9 @@ pg_newlocale_from_collation(Oid collid)
 
 		cache_entry->locale = resultp;
 	}
+
+	last_collation_cache_oid = collid;
+	last_collation_cache_locale = cache_entry->locale;
 
 	return cache_entry->locale;
 }
