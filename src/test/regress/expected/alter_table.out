@@ -1137,16 +1137,16 @@ Indexes:
     "atacc1_pkey" PRIMARY KEY, btree (test)
 
 alter table atacc1 drop constraint "atacc1_pkey";
+alter table atacc1 alter column test drop not null;
 \d atacc1
                Table "public.atacc1"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
- test   | integer |           | not null | 
+ test   | integer |           |          | 
 
 insert into atacc1 values (null);
-ERROR:  null value in column "test" of relation "atacc1" violates not-null constraint
-DETAIL:  Failing row contains (null).
 alter table atacc1 alter test set not null;
+ERROR:  column "test" of relation "atacc1" contains null values
 delete from atacc1;
 alter table atacc1 alter test set not null;
 -- try altering a non-existent column, should fail
@@ -3372,6 +3372,7 @@ DROP TABLE tt9;
 -- Check that comments on constraints and indexes are not lost at ALTER TABLE.
 CREATE TABLE comment_test (
   id int,
+  constraint id_notnull_constraint not null id,
   positive_col int CHECK (positive_col > 0),
   indexed_col int,
   CONSTRAINT comment_test_pk PRIMARY KEY (id));
@@ -3380,6 +3381,7 @@ COMMENT ON COLUMN comment_test.id IS 'Column ''id'' on comment_test';
 COMMENT ON INDEX comment_test_index IS 'Simple index on comment_test';
 COMMENT ON CONSTRAINT comment_test_positive_col_check ON comment_test IS 'CHECK constraint on comment_test.positive_col';
 COMMENT ON CONSTRAINT comment_test_pk ON comment_test IS 'PRIMARY KEY constraint of comment_test';
+COMMENT ON CONSTRAINT id_notnull_constraint ON comment_test IS 'NOT NULL constraint of comment_test';
 COMMENT ON INDEX comment_test_pk IS 'Index backing the PRIMARY KEY of comment_test';
 SELECT col_description('comment_test'::regclass, 1) as comment;
            comment           
@@ -3397,9 +3399,9 @@ SELECT indexrelid::regclass::text as index, obj_description(indexrelid, 'pg_clas
 SELECT conname as constraint, obj_description(oid, 'pg_constraint') as comment FROM pg_constraint where conrelid = 'comment_test'::regclass ORDER BY 1, 2;
            constraint            |                    comment                    
 ---------------------------------+-----------------------------------------------
- comment_test_id_not_null        | 
  comment_test_pk                 | PRIMARY KEY constraint of comment_test
  comment_test_positive_col_check | CHECK constraint on comment_test.positive_col
+ id_notnull_constraint           | NOT NULL constraint of comment_test
 (3 rows)
 
 -- Change the datatype of all the columns. ALTER TABLE is optimized to not
@@ -3429,9 +3431,9 @@ SELECT indexrelid::regclass::text as index, obj_description(indexrelid, 'pg_clas
 SELECT conname as constraint, obj_description(oid, 'pg_constraint') as comment FROM pg_constraint where conrelid = 'comment_test'::regclass ORDER BY 1, 2;
            constraint            |                    comment                    
 ---------------------------------+-----------------------------------------------
- comment_test_id_not_null        | 
  comment_test_pk                 | PRIMARY KEY constraint of comment_test
  comment_test_positive_col_check | CHECK constraint on comment_test.positive_col
+ id_notnull_constraint           | NOT NULL constraint of comment_test
 (3 rows)
 
 -- Check compatibility for foreign keys and comments. This is done

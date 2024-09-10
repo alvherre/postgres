@@ -854,6 +854,7 @@ alter table atacc1 add constraint "atacc1_pkey" primary key (test);
 alter table atacc1 alter column test drop not null;
 \d atacc1
 alter table atacc1 drop constraint "atacc1_pkey";
+alter table atacc1 alter column test drop not null;
 \d atacc1
 insert into atacc1 values (null);
 alter table atacc1 alter test set not null;
@@ -2118,6 +2119,7 @@ DROP TABLE tt9;
 -- Check that comments on constraints and indexes are not lost at ALTER TABLE.
 CREATE TABLE comment_test (
   id int,
+  constraint id_notnull_constraint not null id,
   positive_col int CHECK (positive_col > 0),
   indexed_col int,
   CONSTRAINT comment_test_pk PRIMARY KEY (id));
@@ -2127,6 +2129,7 @@ COMMENT ON COLUMN comment_test.id IS 'Column ''id'' on comment_test';
 COMMENT ON INDEX comment_test_index IS 'Simple index on comment_test';
 COMMENT ON CONSTRAINT comment_test_positive_col_check ON comment_test IS 'CHECK constraint on comment_test.positive_col';
 COMMENT ON CONSTRAINT comment_test_pk ON comment_test IS 'PRIMARY KEY constraint of comment_test';
+COMMENT ON CONSTRAINT id_notnull_constraint ON comment_test IS 'NOT NULL constraint of comment_test';
 COMMENT ON INDEX comment_test_pk IS 'Index backing the PRIMARY KEY of comment_test';
 
 SELECT col_description('comment_test'::regclass, 1) as comment;
