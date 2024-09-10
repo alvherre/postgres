@@ -2827,7 +2827,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 					errmsg("column \"%s\" of relation \"%s\" does not exist",
 						   strVal(linitial(constr->keys)),
 						   RelationGetRelationName(rel)));
-		/* accept each column only once */
+
+		/*
+		 * A column can only have one not-null constraint, so discard any
+		 * additional ones that appear for columns we already saw.
+		 */
 		if (list_member_int(nncols, attnum))
 			continue;
 
