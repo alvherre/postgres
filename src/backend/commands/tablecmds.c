@@ -7585,10 +7585,9 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 	/*
 	 * Find the constraint that makes this column NOT NULL, and drop it.
-	 * dropconstraint_internal() will do necessary consistency checking and
-	 * reset attnotnull.
+	 * dropconstraint_internal() resets attnotnull.
 	 */
-	conTup = findNotNullConstraint(RelationGetRelid(rel), colName);
+	conTup = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
 	if (conTup == NULL)
 		elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\" of relation \"%s\"",
 			 colName, RelationGetRelationName(rel));
@@ -12717,10 +12716,10 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 						constrName, RelationGetRelationName(rel))));
 
 	/*
-	 * Reset pg_constraint.attnotnull.
+	 * Reset pg_constraint.attnotnull, if this is a not-null constraint.
 	 *
-	 * While doing that, we're in a good position to disallow dropping a NOT
-	 * NULL constraint underneath a primary key, a replica identity index, or a
+	 * While doing that, we're in a good position to disallow dropping a not-
+	 * null constraint underneath a primary key, a replica identity index, or a
 	 * generated identity column.
 	 */
 	if (con->contype == CONSTRAINT_NOTNULL)
