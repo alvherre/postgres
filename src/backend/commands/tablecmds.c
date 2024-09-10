@@ -2668,7 +2668,8 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 		 * Request attnotnull on columns that have a not-null constraint
 		 * that's not marked NO INHERIT.
 		 */
-		nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation), true);
+		nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation),
+												  true);
 		foreach_ptr(CookedConstraint, cc, nnconstrs)
 			nncols = bms_add_member(nncols, cc->attnum);
 
