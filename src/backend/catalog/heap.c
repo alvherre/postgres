@@ -2182,6 +2182,8 @@ StoreRelNotNull(Relation rel, const char *nnname, AttrNumber attnum,
 {
 	Oid			constrOid;
 
+	Assert(attnum > InvalidAttrNumber);
+
 	constrOid =
 		CreateConstraintEntry(nnname,
 							  RelationGetNamespace(rel),
@@ -2543,11 +2545,16 @@ AddRelationNewConstraints(Relation rel,
 
 			/* Determine which column to modify */
 			colnum = get_attnum(RelationGetRelid(rel), strVal(linitial(cdef->keys)));
-			if (colnum == InvalidAttrNumber)	/* shouldn't happen */
+			if (colnum == InvalidAttrNumber)
 				ereport(ERROR,
 						errcode(ERRCODE_UNDEFINED_COLUMN),
 						errmsg("column \"%s\" of relation \"%s\" does not exist",
 							   strVal(linitial(cdef->keys)), RelationGetRelationName(rel)));
+			if (colnum < InvalidAttrNumber)
+				ereport(ERROR,
+						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot add not-null constraint on system column \"%s\"",
+							   strVal(linitial(cdef->keys))));
 
 			/*
 			 * If the column already has a not-null constraint, we don't want
@@ -2827,6 +2834,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 					errmsg("column \"%s\" of relation \"%s\" does not exist",
 						   strVal(linitial(constr->keys)),
 						   RelationGetRelationName(rel)));
+		if (attnum < InvalidAttrNumber)
+			ereport(ERROR,
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("cannot add not-null constraint on system column \"%s\"",
+						   strVal(linitial(constr->keys))));
 
 		/*
 		 * A column can only have one not-null constraint, so discard any
