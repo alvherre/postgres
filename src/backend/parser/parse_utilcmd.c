@@ -1031,7 +1031,6 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("not-null constraints on partitioned tables cannot be NO INHERIT"));
 
-
 			cxt->nnconstraints = lappend(cxt->nnconstraints, constraint);
 			break;
 
