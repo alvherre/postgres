@@ -939,9 +939,7 @@ RemoveConstraintById(Oid conId)
 		/*
 		 * We need to update the relchecks count if it is a check constraint
 		 * being dropped.  This update will force backends to rebuild relcache
-		 * entries when we commit.  For not-null and primary key constraints,
-		 * obtain the list of columns affected, so that we can reset their
-		 * attnotnull flags below.
+		 * entries when we commit.
 		 */
 		if (con->contype == CONSTRAINT_CHECK)
 		{
