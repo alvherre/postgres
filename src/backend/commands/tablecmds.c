@@ -13897,10 +13897,26 @@ RememberConstraintForRebuilding(Oid conoid, AlteredTableInfo *tab)
 		char	   *defstring = pg_get_constraintdef_command(conoid);
 		Oid			indoid;
 
-		tab->changedConstraintOids = lappend_oid(tab->changedConstraintOids,
-												 conoid);
-		tab->changedConstraintDefs = lappend(tab->changedConstraintDefs,
-											 defstring);
+		/*
+		 * It is critical to create not-null constraints ahead of primary key
+		 * indexes; otherwise, the not-null constraint would be created by the
+		 * primary key, and the constraint name would be wrong.
+		 */
+		if (get_constraint_type(conoid) == CONSTRAINT_NOTNULL)
+		{
+			tab->changedConstraintOids = lcons_oid(conoid,
+												   tab->changedConstraintOids);
+			tab->changedConstraintDefs = lcons(defstring,
+											   tab->changedConstraintDefs);
+		}
+		else
+		{
+
+			tab->changedConstraintOids = lappend_oid(tab->changedConstraintOids,
+													 conoid);
+			tab->changedConstraintDefs = lappend(tab->changedConstraintDefs,
+												 defstring);
+		}
 
 		/*
 		 * For the index of a constraint, if any, remember if it is used for
@@ -14305,8 +14321,12 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 					tab->subcmds[AT_PASS_OLD_CONSTR] =
 						lappend(tab->subcmds[AT_PASS_OLD_CONSTR], cmd);
 
-					/* recreate any comment on the constraint */
-					/* XXX how do we end up with unnamed constraints here? */
+					/*
+					 * Recreate any comment on the constraint.  If we have
+					 * recreated a primary key, then transformTableConstraint
+					 * has added an unnamed not-null constraint here; skip
+					 * this in that case.
+					 */
 					if (con->conname)
 						RebuildConstraintComment(tab,
 												 AT_PASS_OLD_CONSTR,
@@ -14314,6 +14334,8 @@ ATPostAlterTypeParse(Oid oldId, Oid oldRelId, Oid refRelId, char *cmd,
 												 rel,
 												 NIL,
 												 con->conname);
+					else
+						Assert(con->contype == CONSTR_NOTNULL);
 				}
 				else
 					elog(ERROR, "unexpected statement subtype: %d",
