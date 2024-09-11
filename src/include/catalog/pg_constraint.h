@@ -251,8 +251,8 @@ extern HeapTuple findNotNullConstraintAttnum(Oid relid, AttrNumber attnum);
 extern HeapTuple findNotNullConstraint(Oid relid, const char *colname);
 extern HeapTuple findDomainNotNullConstraint(Oid typid);
 extern AttrNumber extractNotNullColumn(HeapTuple constrTup);
-extern bool AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
-									  bool is_local, bool is_no_inherit);
+extern bool AdjustNotNullInheritance(Oid relid, AttrNumber attnum, int count,
+									 bool is_local, bool is_no_inherit);
 extern List *RelationGetNotNullConstraints(Oid relid, bool cooked);
 
 extern void RemoveConstraintById(Oid conId);

@@ -706,7 +706,7 @@ extractNotNullColumn(HeapTuple constrTup)
 }
 
 /*
- * AdjustNotNullInheritance1
+ * AdjustNotNullInheritance
  *		Adjust inheritance count for a single not-null constraint
  *
  * If no not-null constraint is found for the column, return false.
@@ -718,8 +718,8 @@ extractNotNullColumn(HeapTuple constrTup)
  * raised.
  */
 bool
-AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
-						  bool is_local, bool is_no_inherit)
+AdjustNotNullInheritance(Oid relid, AttrNumber attnum, int count,
+						 bool is_local, bool is_no_inherit)
 {
 	HeapTuple	tup;
 
