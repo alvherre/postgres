@@ -978,10 +978,10 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 					 * constraints on all columns of the PK to be added; such
 					 * constraints always need to be created, even when the PK
 					 * is being added non-recursively to the parent table.
-					 * Those additional constraints are added to each partition
-					 * in ATPrepAddPrimaryKey, but we still need to prevent
-					 * ATAddCheckNNConstraint from failing.  We do that by
-					 * passing this option down.
+					 * Those additional constraints are added to each
+					 * partition in ATPrepAddPrimaryKey, but we still need to
+					 * prevent ATAddCheckNNConstraint from failing.  We do
+					 * that by passing this option down.
 					 */
 					if (!cxt->relation->inh &&
 						cxt->rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
