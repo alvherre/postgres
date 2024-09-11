@@ -768,64 +768,6 @@ AdjustNotNullInheritance1(Oid relid, AttrNumber attnum, int count,
 }
 
 /*
- * AdjustNotNullInheritance
- *		Adjust not-null constraints' inhcount/islocal for
- *		ALTER TABLE [NO] INHERITS
- *
- * Mark the NOT NULL constraints for the given relation columns as
- * inherited, so that they can't be dropped.
- *
- * Caller must have checked beforehand that attnotnull was set for all
- * columns.  However, some of those could be set because of a primary
- * key, so throw a proper user-visible error if one is not found.
- */
-void
-AdjustNotNullInheritance(Oid relid, Bitmapset *columns, int count)
-{
-	Relation	pg_constraint;
-	int			attnum;
-
-	pg_constraint = table_open(ConstraintRelationId, RowExclusiveLock);
-
-	/*
-	 * Scan the set of columns and bump inhcount for each.
-	 */
-	attnum = -1;
-	while ((attnum = bms_next_member(columns, attnum)) >= 0)
-	{
-		HeapTuple	tup;
-		Form_pg_constraint conform;
-
-		tup = findNotNullConstraintAttnum(relid, attnum);
-		if (!HeapTupleIsValid(tup))
-			ereport(ERROR,
-					errcode(ERRCODE_DATATYPE_MISMATCH),
-					errmsg("column \"%s\" in child table must be marked NOT NULL",
-						   get_attname(relid, attnum,
-									   false)));
-
-		conform = (Form_pg_constraint) GETSTRUCT(tup);
-		conform->coninhcount += count;
-		if (conform->coninhcount < 0)
-			elog(ERROR, "invalid inhcount %d for constraint \"%s\" on relation \"%s\"",
-				 conform->coninhcount, NameStr(conform->conname),
-				 get_rel_name(relid));
-
-		/*
-		 * If the constraints are no longer inherited, mark them local.  It's
-		 * arguable that we should drop them instead, but it's hard to see
-		 * that being better.  The user can drop it manually later.
-		 */
-		if (conform->coninhcount == 0)
-			conform->conislocal = true;
-
-		CatalogTupleUpdate(pg_constraint, &tup->t_self, tup);
-	}
-
-	table_close(pg_constraint, RowExclusiveLock);
-}
-
-/*
  * RelationGetNotNullConstraints
  *		Return the list of not-null constraints for the given rel
  *
