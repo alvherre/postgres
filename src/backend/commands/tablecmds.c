@@ -7656,16 +7656,14 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 	if (recurse)
 	{
 		List	   *children;
-		ListCell   *lc;
 
 		/* Make above update visible, for multiple inheritance cases */
 		if (changed)
 			CommandCounterIncrement();
 
 		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
-		foreach(lc, children)
+		foreach_oid(childrelid, children)
 		{
-			Oid			childrelid = lfirst_oid(lc);
 			Relation	childrel;
 			AttrNumber	childattno;
 
@@ -9213,15 +9211,14 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 	{
 		Relation	childrel = table_open(childrelid, NoLock);
 		AlterTableCmd *newcmd = makeNode(AlterTableCmd);
-		ListCell   *lc2;
 
 		newcmd->subtype = AT_AddConstraint;
 		newcmd->recurse = true;
 
-		foreach(lc2, newconstrs)
+		foreach_node(Constraint, lc2, newconstrs)
 		{
 			/* ATPrepCmd copies newcmd, so we can scribble on it here */
-			newcmd->def = lfirst(lc2);
+			newcmd->def = (Node *) lc2;
 
 			ATPrepCmd(wqueue, childrel, newcmd,
 					  true, false, lockmode, context);

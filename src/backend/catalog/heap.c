@@ -2797,7 +2797,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	List	   *givennames;
 	List	   *nnnames;
 	List	   *nncols = NIL;
-	ListCell   *lc;
 
 	/*
 	 * We track two lists of names: nnnames keeps all the constraint names,
@@ -2815,9 +2814,8 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * each element with identical attnum.  We delete from there any element
 	 * that we process.
 	 */
-	foreach(lc, constraints)
+	foreach_node(Constraint, constr, constraints)
 	{
-		Constraint *constr = lfirst_node(Constraint, lc);
 		AttrNumber	attnum;
 		char	   *conname;
 		bool		is_local = true;
