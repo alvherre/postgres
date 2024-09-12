@@ -1269,8 +1269,8 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 */
 	nncols = AddRelationNotNullConstraints(rel, stmt->nnconstraints,
 										   old_notnulls);
-	foreach(listptr, nncols)
-		set_attnotnull(NULL, rel, lfirst_int(listptr), false, NoLock);
+	foreach_int(attrnum, nncols)
+		set_attnotnull(NULL, rel, attrnum, false, NoLock);
 
 	ObjectAddressSet(address, RelationRelationId, relationId);
 
@@ -2861,10 +2861,8 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 		 * Also copy the not-null constraints from this parent.  The
 		 * attnotnull markings were already installed above.
 		 */
-		foreach(lc1, nnconstrs)
+		foreach_ptr(CookedConstraint, nn, nnconstrs)
 		{
-			CookedConstraint *nn = lfirst(lc1);
-
 			Assert(nn->contype == CONSTR_NOTNULL);
 
 			nn->attnum = newattmap->attnums[nn->attnum - 1];
@@ -19048,10 +19046,9 @@ AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel)
 	attachInfos = palloc(sizeof(IndexInfo *) * list_length(attachRelIdxs));
 
 	/* Build arrays of all existing indexes and their IndexInfos */
-	foreach(cell, attachRelIdxs)
+	foreach_oid(cldIdxId, attachRelIdxs)
 	{
-		Oid			cldIdxId = lfirst_oid(cell);
-		int			i = foreach_current_index(cell);
+		int			i = foreach_current_index(cldIdxId);
 
 		attachrelIdxRels[i] = index_open(cldIdxId, AccessShareLock);
 		attachInfos[i] = BuildIndexInfo(attachrelIdxRels[i]);

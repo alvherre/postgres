@@ -2820,7 +2820,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		char	   *conname;
 		bool		is_local = true;
 		int			inhcount = 0;
-		ListCell   *lc2;
 
 		Assert(constr->contype == CONSTR_NOTNULL);
 
@@ -2849,10 +2848,8 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		 * Search in the list of inherited constraints for any entries on the
 		 * same column.
 		 */
-		foreach(lc2, old_notnulls)
+		foreach_ptr(CookedConstraint, old, old_notnulls)
 		{
-			CookedConstraint *old = (CookedConstraint *) lfirst(lc2);
-
 			if (old->attnum == attnum)
 			{
 				/*
@@ -2867,7 +2864,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 							 errdetail("The column has an inherited not-null constraint.")));
 
 				inhcount++;
-				old_notnulls = foreach_delete_current(old_notnulls, lc2);
+				old_notnulls = foreach_delete_current(old_notnulls, old);
 			}
 		}
 
@@ -2878,9 +2875,9 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		 */
 		if (constr->conname)
 		{
-			foreach(lc2, givennames)
+			foreach_ptr(char, thisname, givennames)
 			{
-				if (strcmp(lfirst(lc2), constr->conname) == 0)
+				if (strcmp(thisname, constr->conname) == 0)
 					ereport(ERROR,
 							errcode(ERRCODE_DUPLICATE_OBJECT),
 							errmsg("constraint \"%s\" for relation \"%s\" already exists",
@@ -2926,7 +2923,6 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		CookedConstraint *cooked;
 		char	   *conname = NULL;
 		int			add_inhcount = 0;
-		ListCell   *lc2;
 
 		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
 		Assert(cooked->contype == CONSTR_NOTNULL);
@@ -2959,9 +2955,9 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		/* If we got a name, make sure it isn't one we've already used */
 		if (conname != NULL)
 		{
-			foreach(lc2, nnnames)
+			foreach_ptr(char, thisname, nnnames)
 			{
-				if (strcmp(lfirst(lc2), conname) == 0)
+				if (strcmp(thisname, conname) == 0)
 				{
 					conname = NULL;
 					break;

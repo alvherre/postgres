@@ -3664,25 +3664,25 @@ transformAlterTableStmt(Oid relid, AlterTableStmt *stmt,
 	cxt.alist = NIL;
 
 	/* Append any CHECK, NOT NULL or FK constraints to the commands list */
-	foreach(l, cxt.ckconstraints)
+	foreach_node(Constraint, def, cxt.ckconstraints)
 	{
 		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;
-		newcmd->def = (Node *) lfirst_node(Constraint, l);
+		newcmd->def = (Node *) def;
 		newcmds = lappend(newcmds, newcmd);
 	}
-	foreach(l, cxt.nnconstraints)
+	foreach_node(Constraint, def, cxt.nnconstraints)
 	{
 		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;
-		newcmd->def = (Node *) lfirst_node(Constraint, l);
+		newcmd->def = (Node *) def;
 		newcmds = lappend(newcmds, newcmd);
 	}
-	foreach(l, cxt.fkconstraints)
+	foreach_node(Constraint, def, cxt.fkconstraints)
 	{
 		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;
-		newcmd->def = (Node *) lfirst_node(Constraint, l);
+		newcmd->def = (Node *) def;
 		newcmds = lappend(newcmds, newcmd);
 	}
 
