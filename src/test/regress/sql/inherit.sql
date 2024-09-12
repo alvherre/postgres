@@ -804,6 +804,24 @@ alter table pp1 alter column f1 drop not null;
 alter table pp1 add primary key (f1);
 -- Leave these tables around, for pg_upgrade testing
 
+-- test that inhcount is updated correctly through multiple inheritance
+create table inh_pp1 (f1 int);
+create table inh_cc1 (f2 text, f3 int) inherits (inh_pp1);
+create table inh_cc2(f4 float) inherits(inh_pp1,inh_cc1);
+alter table inh_pp1 alter column f1 set not null;
+alter table inh_cc2 no inherit inh_pp1;
+alter table inh_cc2 no inherit inh_cc1;
+\d+ inh_cc2
+drop table inh_pp1, inh_cc1, inh_cc2;
+
+create table inh_pp1 (f1 int not null);
+create table inh_cc1 (f2 text, f3 int) inherits (inh_pp1);
+create table inh_cc2(f4 float) inherits(inh_pp1,inh_cc1);
+alter table inh_pp1 alter column f1 drop not null;
+\d+ inh_cc2
+drop table inh_pp1, inh_cc1, inh_cc2;
+
+
 -- Test a not-null addition that must walk down the hierarchy
 CREATE TABLE inh_parent ();
 CREATE TABLE inh_child (i int) INHERITS (inh_parent);

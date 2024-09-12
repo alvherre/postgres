@@ -451,7 +451,7 @@ static void set_attnotnull(List **wqueue, Relation rel,
 static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  char *constrname, char *colName,
 									  bool recurse, bool recursing,
-									  List **readyRels, LOCKMODE lockmode);
+									  LOCKMODE lockmode);
 static bool NotNullImpliedByRelConstraints(Relation rel, Form_pg_attribute attr);
 static bool ConstraintImpliedByRelConstraint(Relation scanrel,
 											 List *testConstraint, List *provenConstraint);
@@ -559,8 +559,7 @@ static void ATExecDropConstraint(Relation rel, const char *constrName,
 static ObjectAddress dropconstraint_internal(Relation rel,
 											 HeapTuple constraintTup, DropBehavior behavior,
 											 bool recurse, bool recursing,
-											 bool missing_ok, List **readyRels,
-											 LOCKMODE lockmode);
+											 bool missing_ok, LOCKMODE lockmode);
 static void ATPrepAlterColumnType(List **wqueue,
 								  AlteredTableInfo *tab, Relation rel,
 								  bool recurse, bool recursing,
@@ -5253,7 +5252,7 @@ ATExecCmd(List **wqueue, AlteredTableInfo *tab,
 			break;
 		case AT_SetNotNull:		/* ALTER COLUMN SET NOT NULL */
 			address = ATExecSetNotNull(wqueue, rel, NULL, cmd->name,
-									   cmd->recurse, false, NULL, lockmode);
+									   cmd->recurse, false, lockmode);
 			break;
 		case AT_SetExpression:
 			address = ATExecSetExpression(tab, rel, cmd->name, cmd->def, lockmode);
@@ -7497,7 +7496,6 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 	AttrNumber	attnum;
 	Relation	attr_rel;
 	ObjectAddress address;
-	List	   *readyRels;
 
 	/*
 	 * lookup the attribute
@@ -7593,9 +7591,8 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 			 colName, RelationGetRelationName(rel));
 
 	/* The normal case: we have a pg_constraint row, remove it */
-	readyRels = NIL;
 	dropconstraint_internal(rel, conTup, DROP_RESTRICT, recurse, false,
-							false, &readyRels, lockmode);
+							false, lockmode);
 	heap_freetuple(conTup);
 
 	InvokeObjectPostAlterHook(RelationRelationId,
@@ -7698,8 +7695,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
  */
 static ObjectAddress
 ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
-				 bool recurse, bool recursing, List **readyRels,
-				 LOCKMODE lockmode)
+				 bool recurse, bool recursing, LOCKMODE lockmode)
 {
 	HeapTuple	tuple;
 	AttrNumber	attnum;
@@ -7708,24 +7704,9 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	CookedConstraint *ccon;
 	List	   *cooked;
 	bool		is_no_inherit = false;
-	List	   *ready = NIL;
 
 	/* Guard against stack overflow due to overly deep inheritance tree. */
 	check_stack_depth();
-
-	/*
-	 * In cases of multiple inheritance, we might visit the same child more
-	 * than once.  In the topmost call, set up a list that we fill with all
-	 * visited relations, to skip those.
-	 */
-	if (readyRels == NULL)
-	{
-		Assert(!recursing);
-		readyRels = &ready;
-	}
-	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
-		return InvalidObjectAddress;
-	*readyRels = lappend_oid(*readyRels, RelationGetRelid(rel));
 
 	/* At top level, permission check was done in ATPrepCmd, else do it */
 	if (recursing)
@@ -7855,6 +7836,12 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	{
 		List	   *children;
 
+		/*
+		 * Make previous addition visible, in case we process the same
+		 * relation again while chasing down multiple inheritance trees.
+		 */
+		CommandCounterIncrement();
+
 		children = find_inheritance_children(RelationGetRelid(rel),
 											 lockmode);
 
@@ -7862,10 +7849,8 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 		{
 			Relation	childrel = table_open(childoid, NoLock);
 
-			ATExecSetNotNull(wqueue, childrel,
-							 conName, colName, recurse, true,
-							 readyRels, lockmode);
-
+			ATExecSetNotNull(wqueue, childrel, conName, colName,
+							 recurse, true, lockmode);
 			table_close(childrel, NoLock);
 		}
 	}
@@ -12621,10 +12606,8 @@ ATExecDropConstraint(Relation rel, const char *constrName,
 	/* There can be at most one matching row */
 	if (HeapTupleIsValid(tuple = systable_getnext(scan)))
 	{
-		List	   *readyRels = NIL;
-
 		dropconstraint_internal(rel, tuple, behavior, recurse, false,
-								missing_ok, &readyRels, lockmode);
+								missing_ok, lockmode);
 		found = true;
 	}
 
@@ -12656,7 +12639,7 @@ ATExecDropConstraint(Relation rel, const char *constrName,
  */
 static ObjectAddress
 dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior behavior,
-						bool recurse, bool recursing, bool missing_ok, List **readyRels,
+						bool recurse, bool recursing, bool missing_ok,
 						LOCKMODE lockmode)
 {
 	Relation	conrel;
@@ -12666,10 +12649,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	bool		is_no_inherit_constraint = false;
 	char	   *constrName;
 	char	   *colname = NULL;
-
-	if (list_member_oid(*readyRels, RelationGetRelid(rel)))
-		return InvalidObjectAddress;
-	*readyRels = lappend_oid(*readyRels, RelationGetRelid(rel));
 
 	/* Guard against stack overflow due to overly deep inheritance tree. */
 	check_stack_depth();
@@ -12840,9 +12819,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		HeapTuple	tuple;
 		Form_pg_constraint childcon;
 
-		if (list_member_oid(*readyRels, childrelid))
-			continue;			/* child already processed */
-
 		/* find_inheritance_children already got lock */
 		childrel = table_open(childrelid, NoLock);
 		CheckAlterTableIsSafe(childrel);
@@ -12910,7 +12886,7 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 			{
 				/* Time to delete this child constraint, too */
 				dropconstraint_internal(childrel, tuple, behavior,
-										recurse, true, missing_ok, readyRels,
+										recurse, true, missing_ok,
 										lockmode);
 			}
 			else
