@@ -1214,7 +1214,7 @@ ERROR:  constraint "cnn_parent_pkey" of relation "cnn_parent" does not exist
 create table cnn2_parted (a int primary key) partition by list (a);
 create table cnn2_part1 (a int unique);
 alter table cnn2_parted attach partition cnn2_part1 for values in (1);
-ERROR:  column "a" in child table must be marked NOT NULL
+ERROR:  column "a" in child table "cnn2_part1" must be marked NOT NULL
 \d+ cnn2_part1
                                 Table "public.cnn2_part1"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -1229,7 +1229,7 @@ create table cnn2_parted(a int primary key) partition by list (a);
 create table cnn2_part1(a int);
 ERROR:  relation "cnn2_part1" already exists
 alter table cnn2_parted attach partition cnn2_part1 for values in (1);
-ERROR:  column "a" in child table must be marked NOT NULL
+ERROR:  column "a" in child table "cnn2_part1" must be marked NOT NULL
 insert into cnn2_part1 values (null);
 drop table cnn2_parted, cnn2_part1;
 create table cnn2_parted(a int not null) partition by list (a);

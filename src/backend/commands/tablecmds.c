@@ -16075,8 +16075,8 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel, bool ispart
 					!((Form_pg_constraint) GETSTRUCT(contup))->connoinherit)
 					ereport(ERROR,
 							errcode(ERRCODE_DATATYPE_MISMATCH),
-							errmsg("column \"%s\" in child table must be marked NOT NULL",
-								   parent_attname));
+							errmsg("column \"%s\" in child table \"%s\" must be marked NOT NULL",
+								   parent_attname, RelationGetRelationName(child_rel)));
 			}
 
 			/*
@@ -16316,10 +16316,11 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			if (parent_con->contype == CONSTRAINT_NOTNULL)
 				ereport(ERROR,
 						errcode(ERRCODE_DATATYPE_MISMATCH),
-						errmsg("column \"%s\" in child table must be marked NOT NULL",
+						errmsg("column \"%s\" in child table \"%s\" must be marked NOT NULL",
 							   get_attname(parent_relid,
 										   extractNotNullColumn(parent_tuple),
-										   false)));
+										   false),
+								RelationGetRelationName(child_rel)));
 
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),

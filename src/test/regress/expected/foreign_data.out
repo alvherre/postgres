@@ -2103,7 +2103,7 @@ Server: s0
 FDW options: (delimiter ',', quote '"', "be quoted" 'value')
 
 ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1);       -- ERROR
-ERROR:  column "c2" in child table must be marked NOT NULL
+ERROR:  column "c2" in child table "fd_pt2_1" must be marked NOT NULL
 ALTER FOREIGN TABLE fd_pt2_1 ALTER c2 SET NOT NULL;
 ALTER TABLE fd_pt2 ATTACH PARTITION fd_pt2_1 FOR VALUES IN (1);
 ALTER TABLE fd_pt2 DETACH PARTITION fd_pt2_1;
