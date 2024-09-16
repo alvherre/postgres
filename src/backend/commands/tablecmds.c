@@ -4941,6 +4941,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 			break;
 		case AT_AddConstraint:	/* ADD CONSTRAINT */
 			ATSimplePermissions(cmd->subtype, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
+			ATPrepAddPrimaryKey(wqueue, rel, cmd, lockmode, context);
 			if (recurse)
 			{
 				/* recurses at exec time; lock descendants and set flag */
@@ -5597,18 +5598,9 @@ ATParseTransformCmd(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		switch (cmd2->subtype)
 		{
 			case AT_AddIndex:
-
-				/*
-				 * A primary key on an inheritance parent needs supporting NOT
-				 * NULL constraint on its children; enqueue commands to create
-				 * those or mark them inherited if they already exist.
-				 */
-				ATPrepAddPrimaryKey(wqueue, rel, cmd2, lockmode, context);
 				pass = AT_PASS_ADD_INDEX;
 				break;
 			case AT_AddIndexConstraint:
-				/* as above */
-				ATPrepAddPrimaryKey(wqueue, rel, cmd2, lockmode, context);
 				pass = AT_PASS_ADD_INDEXCONSTR;
 				break;
 			case AT_AddConstraint:
@@ -9158,71 +9150,35 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
 }
 
 /*
- * Prepare to add a primary key on table with children, by adding NOT NULL
- * constraints on them.
+ * Prepare to add a primary key on table, by adding not-null constraints
+ * on all columns.
  */
 static void
 ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 					LOCKMODE lockmode, AlterTableUtilityContext *context)
 {
-	List	   *children;
-	List	   *newconstrs = NIL;
-	IndexStmt  *indexstmt;
+	ListCell   *lc;
+	Constraint *pkconstr;
 
-	/* No work if not creating a primary key */
-	if (!IsA(cmd->def, IndexStmt))
-		return;
-	indexstmt = castNode(IndexStmt, cmd->def);
-	if (!indexstmt->primary)
+	pkconstr = castNode(Constraint, cmd->def);
+	if (pkconstr->contype != CONSTR_PRIMARY)
 		return;
 
-	/* Only needed if children are present */
-	if (!rel->rd_rel->relhassubclass)
-		return;
-
-	/*
-	 * Acquire locks all the way down the hierarchy.  The recursion to lower
-	 * levels occurs at execution time as necessary, so we don't need to do it
-	 * here, and we don't need the returned list either.
-	 */
-	(void) find_all_inheritors(RelationGetRelid(rel), lockmode, NULL);
-
-	/*
-	 * Construct the list of constraints that we need to add to each child
-	 * relation.
-	 */
-	foreach_node(IndexElem, elem, indexstmt->indexParams)
+	/* Insert not-null constraints in the queue for the PK columns */
+	foreach(lc, pkconstr->keys)
 	{
+		AlterTableCmd *newcmd;
 		Constraint *nnconstr;
 
-		Assert(elem->expr == NULL);
+		nnconstr = makeNotNullConstraint(lfirst(lc));
+		nnconstr->inhcount = 0;
 
-		nnconstr = makeNotNullConstraint(makeString(elem->name));
-		nnconstr->inhcount = 1;
-
-		newconstrs = lappend(newconstrs, nnconstr);
-	}
-
-	/* Finally, add AT subcommands to add each constraint to each child. */
-	children = find_inheritance_children(RelationGetRelid(rel), NoLock);
-	foreach_oid(childrelid, children)
-	{
-		Relation	childrel = table_open(childrelid, NoLock);
-		AlterTableCmd *newcmd = makeNode(AlterTableCmd);
-
+		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;
 		newcmd->recurse = true;
+		newcmd->def = (Node *) nnconstr;
 
-		foreach_node(Constraint, lc2, newconstrs)
-		{
-			/* ATPrepCmd copies newcmd, so we can scribble on it here */
-			newcmd->def = (Node *) lc2;
-
-			ATPrepCmd(wqueue, childrel, newcmd,
-					  true, false, lockmode, context);
-		}
-
-		table_close(childrel, NoLock);
+		ATPrepCmd(wqueue, rel, newcmd, true, false, lockmode, context);
 	}
 }
 

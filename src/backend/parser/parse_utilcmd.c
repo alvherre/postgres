@@ -955,43 +955,6 @@ transformTableConstraint(CreateStmtContext *cxt, Constraint *constraint)
 	switch (constraint->contype)
 	{
 		case CONSTR_PRIMARY:
-			foreach_node(String, key, constraint->keys)
-			{
-				/*
-				 * Add not-null constraints for all columns of the primary
-				 * key.  This is not needed in the CREATE case, because
-				 * transformIndexConstraint will do it for columns that are
-				 * being created in the same command; but for ALTER of
-				 * existing columns, that's not effective, as noted in
-				 * comments there.  Also, these constraint creation requests
-				 * will do nothing for columns that already have one.
-				 */
-				if (cxt->isalter)
-				{
-					Constraint *nnconstr;
-
-					nnconstr = makeNotNullConstraint(key);
-
-					/*
-					 * Note hack: if we're adding a primary key to a
-					 * partitioned table, then here we're causing not-null
-					 * constraints on all columns of the PK to be added; such
-					 * constraints always need to be created, even when the PK
-					 * is being added non-recursively to the parent table.
-					 * Those additional constraints are added to each
-					 * partition in ATPrepAddPrimaryKey, but we still need to
-					 * prevent ATAddCheckNNConstraint from failing.  We do
-					 * that by passing this option down.
-					 */
-					if (!cxt->relation->inh &&
-						cxt->rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-						nnconstr->options =
-							list_make1(makeDefElem("allow_non_recursive", NULL, -1));
-
-					cxt->nnconstraints = lappend(cxt->nnconstraints, nnconstr);
-				}
-			}
-
 			if (cxt->isforeign)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
