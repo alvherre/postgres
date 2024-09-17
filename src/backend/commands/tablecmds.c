@@ -12613,31 +12613,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	con = (Form_pg_constraint) GETSTRUCT(constraintTup);
 	constrName = NameStr(con->conname);
 
-	/*
-	 * If we're asked to drop a constraint which is both defined locally and
-	 * inherited, we can simply mark it as no longer having a local
-	 * definition, and no further changes are required.
-	 *
-	 * XXX We do this for not-null constraints only, not CHECK, because the
-	 * latter have historically not behaved this way and it might be confusing
-	 * to change the behavior now.
-	 */
-	if (con->contype == CONSTRAINT_NOTNULL &&
-		con->conislocal && con->coninhcount > 0)
-	{
-		HeapTuple	copytup;
-
-		copytup = heap_copytuple(constraintTup);
-		con = (Form_pg_constraint) GETSTRUCT(copytup);
-		con->conislocal = false;
-		CatalogTupleUpdate(conrel, &copytup->t_self, copytup);
-		ObjectAddressSet(conobj, ConstraintRelationId, con->oid);
-
-		CommandCounterIncrement();
-		table_close(conrel, RowExclusiveLock);
-		return conobj;
-	}
-
 	/* Don't allow drop of inherited constraints */
 	if (con->coninhcount > 0 && !recursing)
 		ereport(ERROR,
