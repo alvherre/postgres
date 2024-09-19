@@ -7751,7 +7751,8 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	/* At top level, permission check was done in ATPrepCmd, else do it */
 	if (recursing)
 	{
-		ATSimplePermissions(AT_AddConstraint, rel, ATT_TABLE | ATT_FOREIGN_TABLE);
+		ATSimplePermissions(AT_AddConstraint, rel,
+							ATT_PARTITIONED_TABLE | ATT_TABLE | ATT_FOREIGN_TABLE);
 		Assert(conName != NULL);
 	}
 
