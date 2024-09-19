@@ -2562,10 +2562,9 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 						{
 							found = true;
 
-							if (!inhattr->attnotnull)
-								cxt->nnconstraints =
-									lappend(cxt->nnconstraints,
-											makeNotNullConstraint(makeString(inhname)));
+							cxt->nnconstraints =
+								lappend(cxt->nnconstraints,
+										makeNotNullConstraint(makeString(inhname)));
 							break;
 						}
 					}
