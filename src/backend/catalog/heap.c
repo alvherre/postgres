@@ -2216,6 +2216,7 @@ StoreRelNotNull(Relation rel, const char *nnname, AttrNumber attnum,
 							  is_local,
 							  inhcount,
 							  is_no_inherit,
+							  false,
 							  false);
 	return constrOid;
 }
