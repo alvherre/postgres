@@ -9353,8 +9353,7 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 	{
 		/*
 		 * < 18 doesn't have not-null names, so an unnamed constraint is
-		 * sufficient.  Note that in binary upgrade of inheritance children,
-		 * flagInhAttrs needs to set a nonempty name too.
+		 * sufficient.
 		 */
 		if (PQgetisnull(res, r, i_notnull_name))
 			tbinfo->notnull_constrs[j] = NULL;
