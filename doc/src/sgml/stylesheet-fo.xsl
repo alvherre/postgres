@@ -20,8 +20,12 @@
   <!-- Do nothing for ulink to avoid footnotes -->
 </xsl:template>
 
-<!-- Also suppress the description of the section markers in print mode -->
-<xsl:template match="appendix[@id='release']//para[@id='release-no-print-output']">
+<!--
+Suppress the description of the commit link markers in print mode.
+Caues an "Unresolved ID reference found" warning during PDF builds
+because the paragraph is suppressed in the output.
+-->
+<xsl:template match="appendix[@id='release']//para[@id='release-commit-links']">
   <!-- Output nothing for this para -->
 </xsl:template>
 
