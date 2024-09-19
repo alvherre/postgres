@@ -348,7 +348,7 @@ static void getTableDataFKConstraints(void);
 static void determineNotNullFlags(Archive *fout, PGresult *res, int r,
 								  TableInfo *tbinfo, int j,
 								  int i_notnull_name, int i_notnull_noinherit,
-								  int i_notnull_inh);
+								  int i_notnull_islocal);
 static char *format_function_arguments(const FuncInfo *finfo, const char *funcargs,
 									   bool is_agg);
 static char *format_function_signature(Archive *fout,
@@ -8732,7 +8732,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	int			i_attislocal;
 	int			i_notnull_name;
 	int			i_notnull_noinherit;
-	int			i_notnull_inh;
+	int			i_notnull_islocal;
 	int			i_attoptions;
 	int			i_attcollation;
 	int			i_attcompression;
@@ -8819,20 +8819,21 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	 * attnotnull (this cues dumpTableSchema to print the NOT NULL clause
 	 * without a name); also, such cases are never NO INHERIT.
 	 *
-	 * We track in notnull_inh whether the constraint was defined directly in
-	 * this table or via an ancestor, for binary upgrade.  flagInhAttrs might
-	 * modify this later for servers older than 18.
+	 * We track in notnull_islocal whether the constraint was defined directly
+	 * in this table or via an ancestor, for binary upgrade.  flagInhAttrs
+	 * might modify this later for servers older than 18; it's also in charge
+	 * of determining the correct inhcount.
 	 */
 	if (fout->remoteVersion >= 180000)
 		appendPQExpBufferStr(q,
 							 "co.conname AS notnull_name,\n"
 							 "co.connoinherit AS notnull_noinherit,\n"
-							 "NOT co.conislocal AS notnull_inh,\n");
+							 "co.conislocal AS notnull_islocal,\n");
 	else
 		appendPQExpBufferStr(q,
 							 "CASE WHEN a.attnotnull THEN '' ELSE NULL END AS notnull_name,\n"
 							 "false AS notnull_noinherit,\n"
-							 "NOT a.attislocal AS notnull_inh,\n");
+							 "a.attislocal AS notnull_islocal,\n");
 
 	if (fout->remoteVersion >= 140000)
 		appendPQExpBufferStr(q,
@@ -8906,7 +8907,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 	i_attislocal = PQfnumber(res, "attislocal");
 	i_notnull_name = PQfnumber(res, "notnull_name");
 	i_notnull_noinherit = PQfnumber(res, "notnull_noinherit");
-	i_notnull_inh = PQfnumber(res, "notnull_inh");
+	i_notnull_islocal = PQfnumber(res, "notnull_islocal");
 	i_attoptions = PQfnumber(res, "attoptions");
 	i_attcollation = PQfnumber(res, "attcollation");
 	i_attcompression = PQfnumber(res, "attcompression");
@@ -8973,7 +8974,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 		tbinfo->attmissingval = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnull_constrs = (char **) pg_malloc(numatts * sizeof(char *));
 		tbinfo->notnull_noinh = (bool *) pg_malloc(numatts * sizeof(bool));
-		tbinfo->notnull_inh = (bool *) pg_malloc(numatts * sizeof(bool));
+		tbinfo->notnull_islocal = (bool *) pg_malloc(numatts * sizeof(bool));
 		tbinfo->attrdefs = (AttrDefInfo **) pg_malloc(numatts * sizeof(AttrDefInfo *));
 		hasdefaults = false;
 
@@ -9002,7 +9003,7 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
 			determineNotNullFlags(fout, res, r,
 								  tbinfo, j,
 								  i_notnull_name, i_notnull_noinherit,
-								  i_notnull_inh);
+								  i_notnull_islocal);
 
 			tbinfo->attoptions[j] = pg_strdup(PQgetvalue(res, r, i_attoptions));
 			tbinfo->attcollation[j] = atooid(PQgetvalue(res, r, i_attcollation));
@@ -9331,30 +9332,40 @@ static void
 determineNotNullFlags(Archive *fout, PGresult *res, int r,
 					  TableInfo *tbinfo, int j,
 					  int i_notnull_name, int i_notnull_noinherit,
-					  int i_notnull_inh)
+					  int i_notnull_islocal)
 {
 	DumpOptions *dopt = fout->dopt;
 
 	/*
-	 * We set ->notnull_inh straight from the query here, but flagInhAttrs can
-	 * change it later.
+	 * notnull_noinh is straight from the query result. notnull_islocal
+	 * also, though flagInhAttrs may change that one later in versions < 18.
 	 */
-	tbinfo->notnull_inh[j] = PQgetvalue(res, r, i_notnull_inh)[0] == 't';
+	tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
+	tbinfo->notnull_islocal[j] = PQgetvalue(res, r, i_notnull_islocal)[0] == 't';
 
+	/*
+	 * Determine a constraint name to use.  If the column is not marked not-
+	 * null, we set NULL which cues ... to do nothing.  An empty string says
+	 * to print an unnamed NOT NULL, and anything else is a constraint name
+	 * to use.
+	 */
 	if (fout->remoteVersion < 180000)
 	{
 		/*
 		 * < 18 doesn't have not-null names, so an unnamed constraint is
-		 * sufficient for most cases.
+		 * sufficient.  Note that in binary upgrade of inheritance children,
+		 * flagInhAttrs needs to set a nonempty name too.
 		 */
-		if (!PQgetisnull(res, r, i_notnull_name))
-			tbinfo->notnull_constrs[j] = "";
-		else
+		if (PQgetisnull(res, r, i_notnull_name))
 			tbinfo->notnull_constrs[j] = NULL;
+		else
+			tbinfo->notnull_constrs[j] = "";
 	}
 	else
 	{
-		if (!PQgetisnull(res, r, i_notnull_name))
+		if (PQgetisnull(res, r, i_notnull_name))
+			tbinfo->notnull_constrs[j] = NULL;
+		else
 		{
 			/*
 			 * In binary upgrade of inheritance child tables, must have a
@@ -9362,7 +9373,7 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 			 */
 			if (dopt->binary_upgrade &&
 				!tbinfo->ispartition &&
-				tbinfo->notnull_inh[j])
+				!tbinfo->notnull_islocal)
 			{
 				tbinfo->notnull_constrs[j] =
 					pstrdup(PQgetvalue(res, r, i_notnull_name));
@@ -9384,12 +9395,7 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 				}
 			}
 		}
-		else
-			tbinfo->notnull_constrs[j] = NULL;
 	}
-
-	/* Lastly, set NO INHERIT */
-	tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
 }
 
 /*
@@ -16089,14 +16095,14 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 									 !tbinfo->attrdefs[j]->separate);
 
 					/*
-					 * Not Null constraint --- suppress unless it is locally
-					 * defined, except if partition, or in binary-upgrade case
-					 * where that won't work.
+					 * Not Null constraint --- print it if it is locally
+					 * defined, or if binary upgrade.  (In the latter case,
+					 * we reset conislocal below.)
 					 */
-					print_notnull =
-						(tbinfo->notnull_constrs[j] != NULL &&
-						 (!tbinfo->notnull_inh[j] || tbinfo->ispartition ||
-						  dopt->binary_upgrade));
+					print_notnull = (tbinfo->notnull_constrs[j] != NULL &&
+									 (tbinfo->notnull_islocal[j] ||
+									  dopt->binary_upgrade ||
+									  tbinfo->ispartition));
 
 					/*
 					 * Skip column if fully defined by reloftype, except in
@@ -16428,12 +16434,12 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			{
 				/*
 				 * If a not-null constraint comes from inheritance, reset
-				 * conislocal.  The inhcount is fixed later.
+				 * conislocal.  The inhcount is fixed by ALTER TABLE INHERIT,
+				 * below.
 				 */
 				if (tbinfo->notnull_constrs[j] != NULL &&
 					tbinfo->notnull_constrs[j][0] != '\0' &&
-					tbinfo->notnull_inh[j] &&
-					!tbinfo->ispartition)
+					!tbinfo->notnull_islocal[j])
 				{
 					if (firstitem)
 					{
@@ -16593,7 +16599,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			 */
 			if (!shouldPrintColumn(dopt, tbinfo, j) &&
 				tbinfo->notnull_constrs[j] != NULL &&
-				(!tbinfo->notnull_inh[j] && !tbinfo->ispartition && !dopt->binary_upgrade))
+				(tbinfo->notnull_islocal[j] && !tbinfo->ispartition && !dopt->binary_upgrade))
 			{
 				/* No constraint name desired? */
 				if (tbinfo->notnull_constrs[j][0] == '\0')

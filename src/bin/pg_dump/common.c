@@ -539,8 +539,16 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				{
 					AttrDefInfo *parentDef = parent->attrdefs[inhAttrInd];
 
-					foundNotNull |= (parent->notnull_constrs[inhAttrInd] != NULL &&
-									 !parent->notnull_noinh[inhAttrInd]);
+					/*
+					 * Account for each parent having a not-null constraint
+					 * not marked NO INHERIT on this column.  In versions
+					 * 18 and later, we don't need this.
+					 */
+					if (fout->remoteVersion < 180000 &&
+						parent->notnull_constrs[inhAttrInd] != NULL &&
+						!parent->notnull_noinh[inhAttrInd])
+						foundNotNull = true;
+
 					foundDefault |= (parentDef != NULL &&
 									 strcmp(parentDef->adef_expr, "NULL") != 0 &&
 									 !parent->attgenerated[inhAttrInd]);
@@ -558,9 +566,13 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 				}
 			}
 
-			/* In versions < 18, remember if we found inherited NOT NULL */
-			if (fout->remoteVersion < 180000)
-				tbinfo->notnull_inh[j] = foundNotNull;
+			/*
+			 * In versions < 18, for lack of a better system, we arbitrarily
+			 * decide that a not-null constraint is not locally defined if at
+			 * least one of the parents has it.
+			 */
+			if (fout->remoteVersion < 180000 && !foundNotNull)
+				tbinfo->notnull_islocal[j] = false;
 
 			/*
 			 * Manufacture a DEFAULT NULL clause if necessary.  This breaks
