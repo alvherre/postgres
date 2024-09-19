@@ -14,6 +14,17 @@
 <xsl:param name="tablecolumns.extension" select="0"></xsl:param>
 <xsl:param name="toc.max.depth">3</xsl:param>
 <xsl:param name="ulink.footnotes" select="1"></xsl:param>
+
+<!-- The release notes have too many ulinks to look good as footnotes in print mode -->
+<xsl:template match="sect1[starts-with(@id, 'release-')]//ulink[starts-with(@url, 'https://postgr.es/c/')]">
+  <!-- Do nothing for ulink to avoid footnotes -->
+</xsl:template>
+
+<!-- Also suppress the description of the section markers in print mode -->
+<xsl:template match="appendix[@id='release']//para[@id='release-no-print-output']">
+  <!-- Output nothing for this para -->
+</xsl:template>
+
 <xsl:param name="use.extensions" select="1"></xsl:param>
 <xsl:param name="variablelist.as.blocks" select="1"></xsl:param>
 <xsl:param name="orderedlist.label.width">1.5em</xsl:param>
