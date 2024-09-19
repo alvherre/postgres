@@ -9303,10 +9303,10 @@ getTableAttrs(Archive *fout, TableInfo *tblinfo, int numTables)
  * There are three possibilities:
  * 1) the column has no not-null constraints. In that case, ->notnull_constrs
  *    (the constraint name) remains NULL.
- * 2) The column has a regular constraint with no name (this is the case when
+ * 2) The column has a constraint with no name (this is the case when
  *    constraints come from pre-18 servers).  In this case, ->notnull_constrs
  *    is set to the empty string; dumpTableSchema will print just "NOT NULL".
- * 3) The column has a regular constraint with a known name; in that case
+ * 3) The column has a constraint with a known name; in that case
  *    notnull_constrs carries that name and dumpTableSchema will print
  *    "CONSTRAINT the_name NOT NULL".  However, if the name is the default
  *    (table_column_not_null), there's no need to print that name in the dump,
