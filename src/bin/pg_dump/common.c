@@ -541,8 +541,8 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 
 					/*
 					 * Account for each parent having a not-null constraint
-					 * not marked NO INHERIT on this column.  In versions
-					 * 18 and later, we don't need this.
+					 * not marked NO INHERIT on this column.  In versions 18
+					 * and later, we don't need this.
 					 */
 					if (fout->remoteVersion < 180000 &&
 						parent->notnull_constrs[inhAttrInd] != NULL &&

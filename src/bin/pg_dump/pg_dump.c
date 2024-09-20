@@ -9347,8 +9347,8 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 	DumpOptions *dopt = fout->dopt;
 
 	/*
-	 * notnull_noinh is straight from the query result. notnull_islocal
-	 * also, though flagInhAttrs may change that one later in versions < 18.
+	 * notnull_noinh is straight from the query result. notnull_islocal also,
+	 * though flagInhAttrs may change that one later in versions < 18.
 	 */
 	tbinfo->notnull_noinh[j] = PQgetvalue(res, r, i_notnull_noinherit)[0] == 't';
 	tbinfo->notnull_islocal[j] = PQgetvalue(res, r, i_notnull_islocal)[0] == 't';
@@ -9356,8 +9356,8 @@ determineNotNullFlags(Archive *fout, PGresult *res, int r,
 	/*
 	 * Determine a constraint name to use.  If the column is not marked not-
 	 * null, we set NULL which cues ... to do nothing.  An empty string says
-	 * to print an unnamed NOT NULL, and anything else is a constraint name
-	 * to use.
+	 * to print an unnamed NOT NULL, and anything else is a constraint name to
+	 * use.
 	 */
 	if (fout->remoteVersion < 180000)
 	{
@@ -16105,8 +16105,8 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 
 					/*
 					 * Not Null constraint --- print it if it is locally
-					 * defined, or if binary upgrade.  (In the latter case,
-					 * we reset conislocal below.)
+					 * defined, or if binary upgrade.  (In the latter case, we
+					 * reset conislocal below.)
 					 */
 					print_notnull = (tbinfo->notnull_constrs[j] != NULL &&
 									 (tbinfo->notnull_islocal[j] ||

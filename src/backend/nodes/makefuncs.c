@@ -443,7 +443,7 @@ makeRangeVar(char *schemaname, char *relname, int location)
 Constraint *
 makeNotNullConstraint(String *colname)
 {
-	Constraint	   *notnull;
+	Constraint *notnull;
 
 	notnull = makeNode(Constraint);
 	notnull->contype = CONSTR_NOTNULL;

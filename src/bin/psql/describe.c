@@ -3060,8 +3060,8 @@ describeOneTableDetails(const char *schemaname,
 		}
 
 		/*
-		 * If verbose, print NOT NULL constraints, omitting those in columns of
-		 * the primary key.
+		 * If verbose, print NOT NULL constraints, omitting those in columns
+		 * of the primary key.
 		 */
 		if (verbose)
 		{

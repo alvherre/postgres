@@ -352,7 +352,7 @@ typedef struct _tableInfo
 									 * empty string, unnamed constraint
 									 * (pre-v17) */
 	bool	   *notnull_noinh;	/* NOT NULL is NO INHERIT */
-	bool	   *notnull_islocal; /* true if NOT NULL has local definition */
+	bool	   *notnull_islocal;	/* true if NOT NULL has local definition */
 	struct _attrDefInfo **attrdefs; /* DEFAULT expressions */
 	struct _constraintInfo *checkexprs; /* CHECK constraints */
 	bool		needs_override; /* has GENERATED ALWAYS AS IDENTITY */

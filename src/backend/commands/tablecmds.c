@@ -9671,8 +9671,8 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	/*
 	 * Check if ONLY was specified with ALTER TABLE.  If so, allow the
-	 * constraint creation only if there are no children currently.
-	 * Error out otherwise.
+	 * constraint creation only if there are no children currently. Error out
+	 * otherwise.
 	 */
 	if (!recurse && children != NIL)
 		ereport(ERROR,
@@ -12834,8 +12834,8 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 	 * Reset pg_constraint.attnotnull, if this is a not-null constraint.
 	 *
 	 * While doing that, we're in a good position to disallow dropping a not-
-	 * null constraint underneath a primary key, a replica identity index, or a
-	 * generated identity column.
+	 * null constraint underneath a primary key, a replica identity index, or
+	 * a generated identity column.
 	 */
 	if (con->contype == CONSTRAINT_NOTNULL)
 	{
@@ -16461,7 +16461,7 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 							   get_attname(parent_relid,
 										   extractNotNullColumn(parent_tuple),
 										   false),
-								RelationGetRelationName(child_rel)));
+							   RelationGetRelationName(child_rel)));
 
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),
