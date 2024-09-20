@@ -1276,21 +1276,11 @@ create table idxpart (a int) partition by range (a);
 create table idxpart0 (like idxpart);
 alter table idxpart0 add unique (a);
 alter table idxpart attach partition idxpart0 default;
-alter table only idxpart add primary key (a);  -- works, but idxpart0.a is nullable
-\d idxpart0
-              Table "public.idxpart0"
- Column |  Type   | Collation | Nullable | Default 
---------+---------+-----------+----------+---------
- a      | integer |           | not null | 
-Partition of: idxpart DEFAULT
-Indexes:
-    "idxpart0_a_key" UNIQUE CONSTRAINT, btree (a)
-
-alter index idxpart_pkey attach partition idxpart0_a_key; -- fails, lacks NOT NULL
+alter table only idxpart add primary key (a);  -- fail, no not-null constraint
+ERROR:  column a of table idxpart0 is not marked not null
 alter table idxpart0 alter column a set not null;
+alter table only idxpart add primary key (a);  -- now it works
 alter index idxpart_pkey attach partition idxpart0_a_key;
-alter table idxpart0 alter column a drop not null;  -- fail, pkey needs it
-ERROR:  column "a" is marked NOT NULL in parent table
 drop table idxpart;
 -- if a partition has a unique index without a constraint, does not attach
 -- automatically; creates a new index instead.

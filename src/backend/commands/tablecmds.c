@@ -488,7 +488,8 @@ static ObjectAddress ATExecDropColumn(List **wqueue, Relation rel, const char *c
 									  bool missing_ok, LOCKMODE lockmode,
 									  ObjectAddresses *addrs);
 static void ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
-								LOCKMODE lockmode, AlterTableUtilityContext *context);
+								bool recurse, LOCKMODE lockmode,
+								AlterTableUtilityContext *context);
 static ObjectAddress ATExecAddIndex(AlteredTableInfo *tab, Relation rel,
 									IndexStmt *stmt, bool is_rebuild, LOCKMODE lockmode);
 static ObjectAddress ATExecAddStatistics(AlteredTableInfo *tab, Relation rel,
@@ -4971,7 +4972,7 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		case AT_AddConstraint:	/* ADD CONSTRAINT */
 			ATSimplePermissions(cmd->subtype, rel,
 								ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE);
-			ATPrepAddPrimaryKey(wqueue, rel, cmd, lockmode, context);
+			ATPrepAddPrimaryKey(wqueue, rel, cmd, recurse, lockmode, context);
 			if (recurse)
 			{
 				/* recurses at exec time; lock descendants and set flag */
@@ -9206,7 +9207,8 @@ ATExecDropColumn(List **wqueue, Relation rel, const char *colName,
  */
 static void
 ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
-					LOCKMODE lockmode, AlterTableUtilityContext *context)
+					bool recurse, LOCKMODE lockmode,
+					AlterTableUtilityContext *context)
 {
 	ListCell   *lc;
 	Constraint *pkconstr;
@@ -9214,6 +9216,38 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 	pkconstr = castNode(Constraint, cmd->def);
 	if (pkconstr->contype != CONSTR_PRIMARY)
 		return;
+
+	/*
+	 * If not recursing, we must ensure that all children have a NOT NULL
+	 * constraint on the columns, and error out if not.
+	 */
+	if (!recurse)
+	{
+		List	   *children;
+
+		children = find_inheritance_children(RelationGetRelid(rel),
+											 lockmode);
+		foreach_oid(childrelid, children)
+		{
+			foreach(lc, pkconstr->keys)
+			{
+				HeapTuple	tup;
+				Form_pg_attribute attrForm;
+				char	   *attname = strVal(lfirst(lc));
+
+				tup = SearchSysCacheAttName(childrelid, attname);
+				if (!tup)
+					elog(ERROR, "cache lookup failed for attribute %s of relation %u",
+						 attname, childrelid);
+				attrForm = (Form_pg_attribute) GETSTRUCT(tup);
+				if (!attrForm->attnotnull)
+					ereport(ERROR,
+							errmsg("column \"%s\" of table \"%s\" is not marked NOT NULL",
+								   attname, get_rel_name(childrelid)));
+				ReleaseSysCache(tup);
+			}
+		}
+	}
 
 	/* Insert not-null constraints in the queue for the PK columns */
 	foreach(lc, pkconstr->keys)
