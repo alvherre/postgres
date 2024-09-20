@@ -2560,7 +2560,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 					column->is_not_null = true;
 					cxt->nnconstraints =
 						lappend(cxt->nnconstraints,
-								makeNotNullConstraint(makeString(key)));
+								makeNotNullConstraint(makeString(pstrdup(key))));
 				}
 			}
 			else if (SystemAttributeByName(key) != NULL)
