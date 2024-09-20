@@ -7854,6 +7854,7 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	constraint = makeNotNullConstraint(makeString(colName));
 	constraint->is_no_inherit = is_no_inherit;
 	constraint->inhcount = recursing ? 1 : 0;
+	constraint->conname = conName;
 
 	/* and do it */
 	cooked = AddRelationNewConstraints(rel, NIL, list_make1(constraint),

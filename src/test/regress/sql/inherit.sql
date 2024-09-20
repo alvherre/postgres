@@ -764,9 +764,15 @@ drop table cnullparent cascade;
 --
 create table pp1 (f1 int);
 create table cc1 (f2 text, f3 int) inherits (pp1);
-\d cc1
-create table cc2(f4 float) inherits(pp1,cc1);
-\d cc2
+create table cc2 (f4 float) inherits (pp1,cc1);
+create table cc3 () inherits (pp1,cc1,cc2);
+alter table pp1 alter f1 set not null;
+\d+ cc3
+alter table cc3 no inherit pp1;
+alter table cc3 no inherit cc1;
+alter table cc3 no inherit cc2;
+\d+ cc3
+drop table cc3;
 
 -- named NOT NULL constraint
 alter table cc1 add column a2 int constraint nn not null;
@@ -786,7 +792,7 @@ alter table cc2 add not null a2 no inherit;
 -- remove constraint from cc2: no dice, it's inherited
 alter table cc2 alter column a2 drop not null;
 
--- remove constraint cc1, should succeed
+-- remove constraint from cc1, should succeed
 alter table cc1 alter column a2 drop not null;
 \d+ cc1
 

@@ -1655,7 +1655,7 @@ Child tables: ft2, FOREIGN
  c8     | text    |           |          |         |             | external |              | 
 Not-null constraints:
     "ft2_c1_not_null" NOT NULL "c1" (local, inherited)
-    "ft2_c6_not_null" NOT NULL "c6" (inherited)
+    "fd_pt1_c6_not_null" NOT NULL "c6" (inherited)
 Server: s0
 FDW options: (delimiter ',', quote '"', "be quoted" 'value')
 Inherits: fd_pt1
