@@ -3066,17 +3066,18 @@ describeOneTableDetails(const char *schemaname,
 		if (verbose)
 		{
 			printfPQExpBuffer(&buf,
-							  /* FIXME the coalesce trick looks silly. What's a better way? */
-							  "SELECT co.conname, at.attname, co.connoinherit, co.conislocal,\n"
-							  "co.coninhcount <> 0\n"
-							  "FROM pg_catalog.pg_constraint co JOIN\n"
-							  "pg_catalog.pg_attribute at ON\n"
-							  "(at.attrelid = co.conrelid AND at.attnum = co.conkey[1])\n"
-							  "WHERE co.contype = 'n' AND\n"
-							  "co.conrelid = '%s'::pg_catalog.regclass AND\n"
-							  "coalesce(NOT ARRAY[at.attnum] <@ (SELECT conkey FROM pg_catalog.pg_constraint\n"
-							  "  WHERE contype = 'p' AND conrelid = '%s'::regclass), true)\n"
-							  "ORDER BY at.attnum",
+							  "SELECT c.conname, a.attname, c.connoinherit,\n"
+							  "  c.conislocal, c.coninhcount <> 0\n"
+							  "FROM pg_catalog.pg_constraint c JOIN\n"
+							  "  pg_catalog.pg_attribute a ON\n"
+							  "    (a.attrelid = c.conrelid AND a.attnum = c.conkey[1])\n"
+							  "WHERE c.contype = 'n' AND\n"
+							  "  c.conrelid = '%s'::pg_catalog.regclass AND\n"
+							  "  NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint co1\n"
+							  "       WHERE co1.contype = 'p' AND\n"
+							  "       a.attnum = any(co1.conkey) AND\n"
+							  "       co1.conrelid = '%s'::pg_catalog.regclass)\n"
+							  "ORDER BY a.attnum",
 							  oid,
 							  oid);
 
