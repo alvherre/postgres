@@ -4474,7 +4474,7 @@ ALTER INDEX measurement_city_id_logdate_key
        <para>
         Both <literal>CHECK</literal> and <literal>NOT NULL</literal>
         constraints of a partitioned table are always inherited by all its
-        partitions; it is not allowed to create <literal>NO INHERIT<literal>
+        partitions; it is not allowed to create <literal>NO INHERIT</literal>
         constraints of those types.
         You cannot drop a constraint of those types if the same constraint
         is present in the parent table.
