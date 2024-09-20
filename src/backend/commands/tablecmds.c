@@ -7878,18 +7878,14 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	{
 		List	   *children;
 
-		/*
-		 * Make previous addition visible, in case we process the same
-		 * relation again while chasing down multiple inheritance trees.
-		 */
-		CommandCounterIncrement();
-
 		children = find_inheritance_children(RelationGetRelid(rel),
 											 lockmode);
 
 		foreach_oid(childoid, children)
 		{
 			Relation	childrel = table_open(childoid, NoLock);
+
+			CommandCounterIncrement();
 
 			ATExecSetNotNull(wqueue, childrel, conName, colName,
 							 recurse, true, lockmode);
