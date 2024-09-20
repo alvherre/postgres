@@ -9637,32 +9637,13 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 
 	/*
 	 * Check if ONLY was specified with ALTER TABLE.  If so, allow the
-	 * constraint creation only if there are no children currently, or a
-	 * special exception was requested.  Error out otherwise.
+	 * constraint creation only if there are no children currently.
+	 * Error out otherwise.
 	 */
 	if (!recurse && children != NIL)
-	{
-		bool	allow_non_recursive = false;
-
-		/*
-		 * Test whether the constraint specifies that non-recursive addition
-		 * is allowed.  This is a special case used for NOT NULL constraints
-		 * when adding a primary key to a partitioned table with children
-		 * and ONLY was specified.
-		 *
-		 * XXX this is a strange hack that should probably be replaced by
-		 * something more ad-hoc.
-		 */
-		if (!recursing)
-			foreach_node(DefElem, option, constr->options)
-				if (strcmp(option->defname, "allow_non_recursive") == 0)
-					allow_non_recursive = true;
-
-		if (!allow_non_recursive)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					 errmsg("constraint must be added to child tables too")));
-	}
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+				 errmsg("constraint must be added to child tables too")));
 
 	/*
 	 * The constraint must appear as inherited in children, so create a
