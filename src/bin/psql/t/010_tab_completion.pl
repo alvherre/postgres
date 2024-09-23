@@ -39,7 +39,7 @@ $node->start;
 
 # set up a few database objects
 $node->safe_psql('postgres',
-		"CREATE TABLE tab1 (c1 int primary key constraint foo not null, c2 text);\n"
+	"CREATE TABLE tab1 (c1 int primary key constraint foo not null, c2 text);\n"
 	  . "CREATE TABLE mytab123 (f1 int, f2 text);\n"
 	  . "CREATE TABLE mytab246 (f1 int, f2 text);\n"
 	  . "CREATE TABLE \"mixedName\" (f1 int, f2 text);\n"
