@@ -963,6 +963,8 @@ ALTER TABLE cnn_pk ADD CONSTRAINT cnn_primarykey PRIMARY KEY (b);
  b      | integer |           | not null |         | plain   |              | 
 Indexes:
     "cnn_primarykey" PRIMARY KEY, btree (b)
+Not-null constraints:
+    "cnn_pk_b_not_null" NOT NULL "b"
 Child tables: cnn_pk_child
 
                                Table "public.cnn_pk_child"
@@ -1006,6 +1008,8 @@ CREATE TABLE cnn_pk_child () INHERITS (cnn_pk);
  b      | integer |           | not null |         | plain   |              | 
 Indexes:
     "cnn_primarykey" PRIMARY KEY, btree (b)
+Not-null constraints:
+    "cnn_pk_b_not_null" NOT NULL "b"
 Child tables: cnn_pk_child
 
                                Table "public.cnn_pk_child"
@@ -1052,6 +1056,8 @@ NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "cnn_uq" to 
  b      | integer |           | not null |         | plain   |              | 
 Indexes:
     "cnn_primarykey" PRIMARY KEY, btree (b)
+Not-null constraints:
+    "cnn_pk_b_not_null" NOT NULL "b"
 Child tables: cnn_pk_child
 
                                Table "public.cnn_pk_child"
@@ -1087,6 +1093,8 @@ CREATE TABLE notnull_tbl4_cld3 (PRIMARY KEY (a) DEFERRABLE, CONSTRAINT a_nn NOT 
  a      | integer |           | not null |         | plain   |              | 
 Indexes:
     "notnull_tbl4_pkey" PRIMARY KEY, btree (a) DEFERRABLE INITIALLY DEFERRED
+Not-null constraints:
+    "notnull_tbl4_a_not_null" NOT NULL "a"
 Child tables: notnull_tbl4_cld,
               notnull_tbl4_cld2,
               notnull_tbl4_cld3
@@ -1106,6 +1114,8 @@ Not-null constraints:
  a      | integer |           | not null |         | plain   |              | 
 Indexes:
     "notnull_tbl4_lk2_pkey" PRIMARY KEY, btree (a) DEFERRABLE INITIALLY DEFERRED
+Not-null constraints:
+    "notnull_tbl4_a_not_null" NOT NULL "a"
 
 \d+ notnull_tbl4_lk3
                              Table "public.notnull_tbl4_lk3"
@@ -1114,6 +1124,8 @@ Indexes:
  a      | integer |           | not null |         | plain   |              | 
 Indexes:
     "notnull_tbl4_lk3_pkey" PRIMARY KEY, btree (a) DEFERRABLE INITIALLY DEFERRED
+Not-null constraints:
+    "notnull_tbl4_a_not_null" NOT NULL "a"
 
 \d+ notnull_tbl4_cld
                              Table "public.notnull_tbl4_cld"
@@ -1131,6 +1143,8 @@ Inherits: notnull_tbl4
  a      | integer |           | not null |         | plain   |              | 
 Indexes:
     "notnull_tbl4_cld2_pkey" PRIMARY KEY, btree (a) DEFERRABLE
+Not-null constraints:
+    "notnull_tbl4_cld2_a_not_null" NOT NULL "a" (local, inherited)
 Inherits: notnull_tbl4
 
 \d+ notnull_tbl4_cld3
@@ -1140,6 +1154,8 @@ Inherits: notnull_tbl4
  a      | integer |           | not null |         | plain   |              | 
 Indexes:
     "notnull_tbl4_cld3_pkey" PRIMARY KEY, btree (a) DEFERRABLE
+Not-null constraints:
+    "a_nn" NOT NULL "a" (local, inherited)
 Inherits: notnull_tbl4
 
 -- leave these tables around for pg_upgrade testing

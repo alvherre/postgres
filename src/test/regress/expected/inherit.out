@@ -1252,6 +1252,8 @@ Indexes:
     "test_primary_constraints_pkey" PRIMARY KEY, btree (id)
 Referenced by:
     TABLE "test_foreign_constraints" CONSTRAINT "test_foreign_constraints_id1_fkey" FOREIGN KEY (id1) REFERENCES test_primary_constraints(id)
+Not-null constraints:
+    "test_primary_constraints_id_not_null" NOT NULL "id"
 
 \d+ test_foreign_constraints
                          Table "public.test_foreign_constraints"

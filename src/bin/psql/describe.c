@@ -3060,8 +3060,7 @@ describeOneTableDetails(const char *schemaname,
 		}
 
 		/*
-		 * If verbose, print NOT NULL constraints, omitting those in columns
-		 * of the primary key.
+		 * If verbose, print NOT NULL constraints.
 		 */
 		if (verbose)
 		{
@@ -3072,13 +3071,8 @@ describeOneTableDetails(const char *schemaname,
 							  "  pg_catalog.pg_attribute a ON\n"
 							  "    (a.attrelid = c.conrelid AND a.attnum = c.conkey[1])\n"
 							  "WHERE c.contype = 'n' AND\n"
-							  "  c.conrelid = '%s'::pg_catalog.regclass AND\n"
-							  "  NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint co1\n"
-							  "       WHERE co1.contype = 'p' AND\n"
-							  "       a.attnum = any(co1.conkey) AND\n"
-							  "       co1.conrelid = '%s'::pg_catalog.regclass)\n"
+							  "  c.conrelid = '%s'::pg_catalog.regclass\n"
 							  "ORDER BY a.attnum",
-							  oid,
 							  oid);
 
 			result = PSQLexec(buf.data);

@@ -3868,6 +3868,7 @@ Indexes:
 Not-null constraints:
     "atnotnull1_a_not_null" NOT NULL "a"
     "atnotnull1_b_not_null" NOT NULL "b"
+    "atnotnull1_c_not_null" NOT NULL "c"
 
 -- cannot drop column that is part of the partition key
 CREATE TABLE partitioned (
