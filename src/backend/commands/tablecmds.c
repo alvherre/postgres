@@ -450,8 +450,8 @@ static void add_column_datatype_dependency(Oid relid, int32 attnum, Oid typid);
 static void add_column_collation_dependency(Oid relid, int32 attnum, Oid collid);
 static ObjectAddress ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 									   LOCKMODE lockmode);
-static void set_attnotnull(List **wqueue, Relation rel,
-						   AttrNumber attnum, bool recurse, LOCKMODE lockmode);
+static void set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
+						   LOCKMODE lockmode);
 static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  char *constrname, char *colName,
 									  bool recurse, bool recursing,
@@ -1278,7 +1278,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	nncols = AddRelationNotNullConstraints(rel, stmt->nnconstraints,
 										   old_notnulls);
 	foreach_int(attrnum, nncols)
-		set_attnotnull(NULL, rel, attrnum, false, NoLock);
+		set_attnotnull(NULL, rel, attrnum, NoLock);
 
 	ObjectAddressSet(address, RelationRelationId, relationId);
 
@@ -7648,27 +7648,26 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 /*
  * Helper to set pg_attribute.attnotnull if it isn't set, and to tell phase 3
- * to verify it; recurses to apply the same to children.
+ * to verify it.
  *
  * When called to alter an existing table, 'wqueue' must be given so that we
  * can queue a check that existing tuples pass the constraint.  When called
  * from table creation, 'wqueue' should be passed as NULL.
  */
 static void
-set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
+set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 			   LOCKMODE lockmode)
 {
+	Oid			reloid = RelationGetRelid(rel);
 	HeapTuple	tuple;
 	Form_pg_attribute attForm;
-	bool		changed = false;
 
-	/* Guard against stack overflow due to overly deep inheritance tree. */
-	check_stack_depth();
+	CheckAlterTableIsSafe(rel);
 
-	tuple = SearchSysCacheCopyAttNum(RelationGetRelid(rel), attnum);
+	tuple = SearchSysCacheCopyAttNum(reloid, attnum);
 	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for attribute %d of relation %u",
-			 attnum, RelationGetRelid(rel));
+			 attnum, reloid);
 	attForm = (Form_pg_attribute) GETSTRUCT(tuple);
 	if (!attForm->attnotnull)
 	{
@@ -7679,12 +7678,6 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 		attForm->attnotnull = true;
 		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
 
-		table_close(attr_rel, RowExclusiveLock);
-
-		/*
-		 * And set up for existing values to be checked, unless another
-		 * constraint already proves this.
-		 */
 		if (wqueue && !NotNullImpliedByRelConstraints(rel, attForm))
 		{
 			AlteredTableInfo *tab;
@@ -7693,35 +7686,12 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum, bool recurse,
 			tab->verify_new_notnull = true;
 		}
 
-		changed = true;
+		CommandCounterIncrement();
+
+		table_close(attr_rel, RowExclusiveLock);
 	}
 
-	if (recurse)
-	{
-		List	   *children;
-
-		/* Make above update visible, for multiple inheritance cases */
-		if (changed)
-			CommandCounterIncrement();
-
-		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
-		foreach_oid(childrelid, children)
-		{
-			Relation	childrel;
-			AttrNumber	childattno;
-
-			/* find_inheritance_children already got lock */
-			childrel = table_open(childrelid, NoLock);
-			CheckAlterTableIsSafe(childrel);
-
-			childattno = get_attnum(RelationGetRelid(childrel),
-									get_attname(RelationGetRelid(rel), attnum,
-												false));
-			set_attnotnull(wqueue, childrel, childattno,
-						   recurse, lockmode);
-			table_close(childrel, NoLock);
-		}
-	}
+	heap_freetuple(tuple);
 }
 
 /*
@@ -7866,11 +7836,8 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	InvokeObjectPostAlterHook(RelationRelationId,
 							  RelationGetRelid(rel), attnum);
 
-	/*
-	 * Mark pg_attribute.attnotnull for the column. Tell that function not to
-	 * recurse, because we're going to do it here.
-	 */
-	set_attnotnull(wqueue, rel, attnum, false, lockmode);
+	/* Mark pg_attribute.attnotnull for the column */
+	set_attnotnull(wqueue, rel, attnum, lockmode);
 
 	/*
 	 * Recurse to propagate the constraint to children that don't have one.
@@ -9634,8 +9601,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		 * phase 3 to verify existing rows, if needed.
 		 */
 		if (constr->contype == CONSTR_NOTNULL)
-			set_attnotnull(wqueue, rel, ccon->attnum,
-						   !ccon->is_no_inherit, lockmode);
+			set_attnotnull(wqueue, rel, ccon->attnum, lockmode);
 
 		ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 	}
@@ -19316,7 +19282,8 @@ AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel)
 
 		/*
 		 * If no suitable index was found in the partition-to-be, create one
-		 * now.
+		 * now.  Note that if this is a PK, not-null constraints must already
+		 * exist.
 		 */
 		if (!found)
 		{
@@ -19326,28 +19293,6 @@ AttachPartitionEnsureIndexes(List **wqueue, Relation rel, Relation attachrel)
 			stmt = generateClonedIndexStmt(NULL,
 										   idxRel, attmap,
 										   &conOid);
-
-			/*
-			 * If the index is a primary key, mark all columns as NOT NULL if
-			 * they aren't already.
-			 */
-			if (stmt->primary)
-			{
-				MemoryContextSwitchTo(oldcxt);
-				for (int j = 0; j < info->ii_NumIndexKeyAttrs; j++)
-				{
-					AttrNumber	childattno;
-
-					childattno = get_attnum(RelationGetRelid(attachrel),
-											get_attname(RelationGetRelid(rel),
-														info->ii_IndexAttrNumbers[j],
-														false));
-					set_attnotnull(wqueue, attachrel, childattno,
-								   true, AccessExclusiveLock);
-				}
-				MemoryContextSwitchTo(cxt);
-			}
-
 			DefineIndex(RelationGetRelid(attachrel), stmt, InvalidOid,
 						RelationGetRelid(idxRel),
 						conOid,
