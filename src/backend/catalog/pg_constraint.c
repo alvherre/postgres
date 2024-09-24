@@ -622,12 +622,17 @@ findNotNullConstraintAttnum(Oid relid, AttrNumber attnum)
 
 /*
  * Find and return the pg_constraint tuple that implements a validated
- * not-null constraint for the given column of the given relation.
+ * not-null constraint for the given column of the given relation.  If
+ * no such column or no such constraint exists, return NULL.
  */
 HeapTuple
 findNotNullConstraint(Oid relid, const char *colname)
 {
-	AttrNumber	attnum = get_attnum(relid, colname);
+	AttrNumber	attnum;
+
+	attnum = get_attnum(relid, colname);
+	if (attnum <= InvalidAttrNumber)
+		return NULL;
 
 	return findNotNullConstraintAttnum(relid, attnum);
 }
