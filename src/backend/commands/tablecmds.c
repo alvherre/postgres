@@ -2676,7 +2676,7 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 		 * that's not marked NO INHERIT.
 		 */
 		nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation),
-												  true);
+												  true, false);
 		foreach_ptr(CookedConstraint, cc, nnconstrs)
 			nncols = bms_add_member(nncols, cc->attnum);
 

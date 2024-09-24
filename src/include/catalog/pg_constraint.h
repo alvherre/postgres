@@ -263,7 +263,8 @@ extern HeapTuple findDomainNotNullConstraint(Oid typid);
 extern AttrNumber extractNotNullColumn(HeapTuple constrTup);
 extern bool AdjustNotNullInheritance(Oid relid, AttrNumber attnum, int count,
 									 bool is_local, bool is_no_inherit);
-extern List *RelationGetNotNullConstraints(Oid relid, bool cooked);
+extern List *RelationGetNotNullConstraints(Oid relid, bool cooked,
+										   bool include_noinh);
 
 extern void RemoveConstraintById(Oid conId);
 extern void RenameConstraintById(Oid conId, const char *newname);

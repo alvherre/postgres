@@ -783,11 +783,10 @@ AdjustNotNullInheritance(Oid relid, AttrNumber attnum, int count,
  *
  * This is seldom needed, so we just scan pg_constraint each time.
  *
- * XXX This is only used to create derived tables, so NO INHERIT constraints
- * are always skipped.
+ * 'include_noinh' determines whether to include NO INHERIT constraints or not.
  */
 List *
-RelationGetNotNullConstraints(Oid relid, bool cooked)
+RelationGetNotNullConstraints(Oid relid, bool cooked, bool include_noinh)
 {
 	List	   *notnulls = NIL;
 	Relation	constrRel;
@@ -810,7 +809,7 @@ RelationGetNotNullConstraints(Oid relid, bool cooked)
 
 		if (conForm->contype != CONSTRAINT_NOTNULL)
 			continue;
-		if (conForm->connoinherit)
+		if (conForm->connoinherit && !include_noinh)
 			continue;
 
 		colnum = extractNotNullColumn(htup);
@@ -846,6 +845,7 @@ RelationGetNotNullConstraints(Oid relid, bool cooked)
 															 false)));
 			constr->skip_validation = false;
 			constr->initially_valid = true;
+			constr->is_no_inherit = conForm->connoinherit;
 			notnulls = lappend(notnulls, constr);
 		}
 	}

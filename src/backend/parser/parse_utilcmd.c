@@ -1219,7 +1219,8 @@ transformTableLikeClause(CreateStmtContext *cxt, TableLikeClause *table_like_cla
 	{
 		List	   *lst;
 
-		lst = RelationGetNotNullConstraints(RelationGetRelid(relation), false);
+		lst = RelationGetNotNullConstraints(RelationGetRelid(relation), false,
+											true);
 		cxt->nnconstraints = list_concat(cxt->nnconstraints, lst);
 	}
 
