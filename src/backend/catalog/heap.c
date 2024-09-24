@@ -2815,13 +2815,22 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * each, so we must scan the old_notnulls list and increment inhcount for
 	 * each element with identical attnum.  We delete from there any element
 	 * that we process.
+	 *
+	 * We don't use foreach() here because we have two nested loops over the
+	 * constraint list, with possible element deletions in the inner one. If
+	 * we used foreach_delete_current() it could only fix up the state of one
+	 * of the loops, so it seems cleaner to use looping over list indexes for
+	 * both loops.  Note that any deletion will happen beyond where the outer
+	 * loop is, so its index never needs adjustment.
 	 */
-	foreach_node(Constraint, constr, constraints)
+	for (int outerpos = 0; outerpos < list_length(constraints); outerpos++)
 	{
+		Constraint *constr;
 		AttrNumber	attnum;
 		char	   *conname;
-		bool		is_local = true;
 		int			inhcount = 0;
+
+		constr = list_nth_node(Constraint, constraints, outerpos);
 
 		Assert(constr->contype == CONSTR_NOTNULL);
 
@@ -2841,10 +2850,28 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		/*
 		 * A column can only have one not-null constraint, so discard any
-		 * additional ones that appear for columns we already saw.
+		 * additional ones that appear for columns we already saw; but check
+		 * that the NO INHERIT flags match.
 		 */
-		if (list_member_int(nncols, attnum))
-			continue;
+		for (int restpos = outerpos + 1; restpos < list_length(constraints);)
+		{
+			Constraint *other;
+
+			other = list_nth_node(Constraint, constraints, restpos);
+			if (strcmp(strVal(linitial(constr->keys)),
+					   strVal(linitial(other->keys))) == 0)
+			{
+				if (other->is_no_inherit != constr->is_no_inherit)
+					ereport(ERROR,
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("conflicting NO INHERIT declaration for not-null constraint on column \"%s\"",
+								   strVal(linitial(constr->keys))));
+				/* XXX do we need to verify any other fields? */
+				constraints = list_delete_nth_cell(constraints, restpos);
+			}
+			else
+				restpos++;
+		}
 
 		/*
 		 * Search in the list of inherited constraints for any entries on the

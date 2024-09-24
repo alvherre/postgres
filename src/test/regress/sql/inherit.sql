@@ -879,14 +879,16 @@ DROP TABLE inh_nn_parent cascade;
 CREATE TABLE inh_nn_lvl1 (a int);
 CREATE TABLE inh_nn_lvl2 () INHERITS (inh_nn_lvl1);
 CREATE TABLE inh_nn_lvl3 (CONSTRAINT foo NOT NULL a NO INHERIT) INHERITS (inh_nn_lvl2);
-CREATE TABLE inh_nn_lvl4 () INHERITS (inh_nn_lvl3);
-CREATE TABLE inh_nn_lvl5 () INHERITS (inh_nn_lvl4);
-INSERT INTO inh_nn_lvl2 VALUES (NULL);
 ALTER TABLE inh_nn_lvl1 ADD PRIMARY KEY (a);
-DELETE FROM inh_nn_lvl2;
-INSERT INTO inh_nn_lvl5 VALUES (NULL);
-ALTER TABLE inh_nn_lvl1 ADD PRIMARY KEY (a);
-DROP TABLE inh_nn_lvl1 CASCADE;
+DROP TABLE inh_nn_lvl1, inh_nn_lvl2, inh_nn_lvl3;
+
+-- Disallow specifying conflicting NO INHERIT flags for the same constraint
+CREATE TABLE inh_nn1 (a int primary key, b int, not null a no inherit);
+CREATE TABLE inh_nn1 (a int not null);
+CREATE TABLE inh_nn2 (a int not null no inherit) INHERITS (inh_nn1);
+CREATE TABLE inh_nn3 (a int not null, b int,  not null a no inherit);
+CREATE TABLE inh_nn4 (a int not null no inherit, b int,  not null a);
+DROP TABLE inh_nn1, inh_nn2, inh_nn3, inh_nn4;
 
 --
 -- test inherit/deinherit
