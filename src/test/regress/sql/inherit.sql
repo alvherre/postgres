@@ -946,6 +946,12 @@ alter table inh_child inherit inh_parent; -- now it works
 \d+ inh_child
 drop table inh_parent, inh_child;
 
+-- ALTER TABLE INHERIT ensures that the child has not-null constraints
+create table inh_parent (a int not null);
+create table inh_child (a int);
+alter table inh_child inherit inh_parent; -- nope
+drop table inh_parent, inh_child;
+
 -- a PK in parent must have a not-null in child that it can mark inherited
 create table inh_parent (a int primary key);
 create table inh_child (a int primary key);
