@@ -16372,6 +16372,8 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
+
+			/* Also reset connoinherit for not-null, if the child has that */
 			if (child_con->contype == CONSTRAINT_NOTNULL &&
 				child_con->connoinherit)
 			{
