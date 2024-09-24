@@ -2874,8 +2874,6 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 			Assert(nn->contype == CONSTR_NOTNULL);
 
 			nn->attnum = newattmap->attnums[nn->attnum - 1];
-			nn->is_local = false;
-			nn->inhcount = 1;
 
 			nnconstraints = lappend(nnconstraints, nn);
 		}

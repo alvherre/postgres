@@ -2927,7 +2927,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 		nnnames = lappend(nnnames, conname);
 
 		StoreRelNotNull(rel, conname,
-						attnum, true, is_local,
+						attnum, true, true,
 						inhcount, constr->is_no_inherit);
 
 		nncols = lappend_int(nncols, attnum);
@@ -2951,7 +2951,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	{
 		CookedConstraint *cooked;
 		char	   *conname = NULL;
-		int			add_inhcount = 0;
+		int			inhcount = 1;
 
 		cooked = (CookedConstraint *) list_nth(old_notnulls, outerpos);
 		Assert(cooked->contype == CONSTR_NOTNULL);
@@ -2974,7 +2974,7 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 				if (conname == NULL)
 					conname = other->name;
 
-				add_inhcount++;
+				inhcount++;
 				old_notnulls = list_delete_nth_cell(old_notnulls, restpos);
 			}
 			else
@@ -3004,9 +3004,9 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 										   nnnames);
 		nnnames = lappend(nnnames, conname);
 
+		/* ignore the origin constraint's is_local and inhcount */
 		StoreRelNotNull(rel, conname, cooked->attnum, true,
-						cooked->is_local, cooked->inhcount + add_inhcount,
-						cooked->is_no_inherit);
+						false, inhcount, false);
 
 		nncols = lappend_int(nncols, cooked->attnum);
 	}
