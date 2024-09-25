@@ -2164,10 +2164,7 @@ transformIndexConstraints(CreateStmtContext *cxt)
 	/*
 	 * Run through the constraints that need to generate an index, and do so.
 	 *
-	 * For PRIMARY KEY, in addition we set each column's attnotnull flag true.
-	 * We do not create a separate not-null constraint, as that would be
-	 * redundant: the PRIMARY KEY constraint itself fulfills that role.  Other
-	 * constraint types don't need any not-null markings.
+	 * For PRIMARY KEY, we queue not-null constraints for each column.
 	 */
 	foreach(lc, cxt->ixconstraints)
 	{
