@@ -701,6 +701,16 @@ insert into cnn_part1 values (null);
 alter table cnn2_parted add primary key (a);
 drop table cnn2_parted;
 
+-- Unique constraints don't give raise to not-null constraints, however.
+create table cnn_uq (a int);
+alter table cnn_uq add unique (a);
+\d+ cnn_uq
+drop table cnn_uq;
+create table cnn_uq (a int);
+create unique index cnn_uq_idx on cnn_uq (a);
+alter table cnn_uq add unique using index cnn_uq_idx;
+\d+ cnn_uq
+
 -- columns in regular and LIKE inheritance should be marked not-nullable
 -- for primary keys, even if those are deferred
 CREATE TABLE notnull_tbl4 (a INTEGER PRIMARY KEY INITIALLY DEFERRED);

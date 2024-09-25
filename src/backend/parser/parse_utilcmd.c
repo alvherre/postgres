@@ -2477,10 +2477,11 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 							 errdetail("Cannot create a primary key or unique constraint using such an index."),
 							 parser_errposition(cxt->pstate, constraint->location)));
 
-				/* Ensure these columns get a NOT NULL constraint */
-				cxt->nnconstraints =
-					lappend(cxt->nnconstraints,
-							makeNotNullConstraint(makeString(attname)));
+				/* If a PK, ensure the columns get not null constraints */
+				if (constraint->contype == CONSTR_PRIMARY)
+					cxt->nnconstraints =
+						lappend(cxt->nnconstraints,
+								makeNotNullConstraint(makeString(attname)));
 
 				constraint->keys = lappend(constraint->keys, makeString(attname));
 			}
