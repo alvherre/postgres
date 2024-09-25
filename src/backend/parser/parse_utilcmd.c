@@ -2548,14 +2548,16 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 			if (found)
 			{
 				/*
-				 * column is defined in the new table.  For PRIMARY KEY, we
-				 * can apply the not-null constraint cheaply here.  Note that
-				 * this isn't effective in ALTER TABLE, unless the column is
-				 * being added in the same command.
+				 * column is defined in the new table.  For CREATE TABLE with
+				 * a PRIMARY KEY, we can apply the not-null constraint cheaply
+				 * here.  Note that ALTER TABLE never needs this, because
+				 * those constraints have already been added by
+				 * ATPrepAddPrimaryKey.
 				 */
 				if (constraint->contype == CONSTR_PRIMARY &&
 					!column->is_not_null)
 				{
+					Assert(!cxt->isalter);	/* doesn't occur in ALTER TABLE */
 					column->is_not_null = true;
 					cxt->nnconstraints =
 						lappend(cxt->nnconstraints,
