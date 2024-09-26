@@ -2866,6 +2866,22 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 							errcode(ERRCODE_SYNTAX_ERROR),
 							errmsg("conflicting NO INHERIT declaration for not-null constraint on column \"%s\"",
 								   strVal(linitial(constr->keys))));
+
+				/*
+				 * Preserve constraint name if one is specified, but raise an
+				 * error if conflicting ones are specified.
+				 */
+				if (other->conname)
+				{
+					if (!constr->conname)
+						constr->conname = pstrdup(other->conname);
+					else if (strcmp(constr->conname, other->conname) != 0)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("conflicting not-null constraint names \"%s\" and \"%s\"",
+									   constr->conname, other->conname));
+				}
+
 				/* XXX do we need to verify any other fields? */
 				constraints = list_delete_nth_cell(constraints, restpos);
 			}

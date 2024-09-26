@@ -739,7 +739,39 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 									column->colname, cxt->relation->relname),
 							 parser_errposition(cxt->pstate,
 												constraint->location)));
-				/* Ignore redundant NOT NULL markings */
+
+				/*
+				 * Disallow NOT NULL markings with conflicting names or NO
+				 * INHERIT flags.  If there already is a not-null constraint
+				 * on this column, it'll be the last item on the nnconstraints
+				 * list.
+				 *
+				 * We don't worry about conflicts with table constraints:
+				 * those will be verified in AddRelationNotNullConstraints().
+				 */
+				if (column->is_not_null)
+				{
+					Constraint *other = lfirst(list_tail(cxt->nnconstraints));
+
+					if (other && strcmp(strVal(linitial(other->keys)),
+										column->colname) == 0)
+					{
+						if (constraint->conname &&
+							other->conname &&
+							strcmp(other->conname, constraint->conname) != 0)
+							elog(ERROR, "conflicting not-null constraint names \"%s\" and \"%s\"",
+								 other->conname, constraint->conname);
+
+						if (other->is_no_inherit != constraint->is_no_inherit)
+							ereport(ERROR,
+									errcode(ERRCODE_SYNTAX_ERROR),
+									errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
+										   column->colname));
+
+						if (!other->conname && constraint->conname)
+							other->conname = constraint->conname;
+					}
+				}
 
 				/*
 				 * If this is the first time we see this column being marked
