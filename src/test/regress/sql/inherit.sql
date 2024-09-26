@@ -952,14 +952,9 @@ create table inh_child (a int);
 alter table inh_child inherit inh_parent; -- nope
 drop table inh_parent, inh_child;
 
--- a PK in parent must have a not-null in child that it can mark inherited
-create table inh_parent (a int primary key);
-create table inh_child (a int primary key);
-alter table inh_child inherit inh_parent;		-- nope
-alter table inh_child alter a set not null;
-alter table inh_child inherit inh_parent;		-- now it works
-
 -- don't interfere with other types of constraints
+create table inh_parent (a int primary key);
+create table inh_child (a int primary key) inherits (inh_parent);
 alter table inh_parent add constraint inh_parent_excl exclude ((1) with =);
 alter table inh_parent add constraint inh_parent_uq unique (a);
 alter table inh_parent add constraint inh_parent_fk foreign key (a) references inh_parent (a);
