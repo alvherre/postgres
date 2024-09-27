@@ -910,18 +910,30 @@ create table notnull_tbl5 (a int constraint foo not null constraint foo not null
 Not-null constraints:
     "foo" NOT NULL "a"
 
+create table notnull_tbl6 (like notnull_tbl1, constraint foo not null a);
+\d+ notnull_tbl6
+                               Table "public.notnull_tbl6"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+Not-null constraints:
+    "foo" NOT NULL "a"
+
+drop table notnull_tbl2, notnull_tbl3, notnull_tbl4, notnull_tbl5, notnull_tbl6;
 -- error cases:
-create table notnull_tbl6 (a serial constraint foo not null constraint bar not null);
+create table notnull_tbl_fail (a serial constraint foo not null constraint bar not null);
 ERROR:  conflicting not-null constraint names "foo" and "bar"
-create table notnull_tbl6 (a serial constraint foo not null no inherit constraint foo not null);
+create table notnull_tbl_fail (a serial constraint foo not null no inherit constraint foo not null);
+ERROR:  conflicting NO INHERIT declarations for not-null constraints on column "a"
+create table notnull_tbl_fail (a int constraint foo not null, constraint foo not null a no inherit);
 ERROR:  conflicting NO INHERIT declaration for not-null constraint on column "a"
-create table notnull_tbl6 (a int constraint foo not null, constraint foo not null a no inherit);
-ERROR:  conflicting NO INHERIT declaration for not-null constraint on column "a"
-create table notnull_tbl6 (a serial constraint foo not null, constraint bar not null a);
+create table notnull_tbl_fail (a serial constraint foo not null, constraint bar not null a);
 ERROR:  conflicting not-null constraint names "foo" and "bar"
-create table notnull_tbl6 (a serial, constraint foo not null a, constraint bar not null a);
+create table notnull_tbl_fail (a serial, constraint foo not null a, constraint bar not null a);
 ERROR:  conflicting not-null constraint names "foo" and "bar"
-drop table notnull_tbl1, notnull_tbl2, notnull_tbl3, notnull_tbl4, notnull_tbl5;
+create table notnull_tbl_fail (like notnull_tbl1, constraint foo2 not null a);
+ERROR:  conflicting not-null constraint names "foo" and "foo2"
+drop table notnull_tbl1;
 -- NOT NULL NO INHERIT
 CREATE TABLE ATACC1 (a int, not null a no inherit);
 CREATE TABLE ATACC2 () INHERITS (ATACC1);
@@ -1133,13 +1145,6 @@ Not-null constraints:
 Inherits: cnn_pk
 
 DROP TABLE cnn_pk, cnn_pk_child;
--- Ensure partitions are scanned for null values when adding a PK
-create table cnn2_parted(a int) partition by list (a);
-create table cnn_part1 partition of cnn2_parted for values in (1, null);
-insert into cnn_part1 values (null);
-alter table cnn2_parted add primary key (a);
-ERROR:  column "a" of relation "cnn_part1" contains null values
-drop table cnn2_parted;
 -- Unique constraints don't give raise to not-null constraints, however.
 create table cnn_uq (a int);
 alter table cnn_uq add unique (a);
@@ -1163,6 +1168,13 @@ alter table cnn_uq add unique using index cnn_uq_idx;
 Indexes:
     "cnn_uq_idx" UNIQUE CONSTRAINT, btree (a)
 
+-- Ensure partitions are scanned for null values when adding a PK
+create table cnn2_parted(a int) partition by list (a);
+create table cnn_part1 partition of cnn2_parted for values in (1, null);
+insert into cnn_part1 values (null);
+alter table cnn2_parted add primary key (a);
+ERROR:  column "a" of relation "cnn_part1" contains null values
+drop table cnn2_parted;
 -- columns in regular and LIKE inheritance should be marked not-nullable
 -- for primary keys, even if those are deferred
 CREATE TABLE notnull_tbl4 (a INTEGER PRIMARY KEY INITIALLY DEFERRED);
@@ -1246,6 +1258,48 @@ Not-null constraints:
 Inherits: notnull_tbl4
 
 -- leave these tables around for pg_upgrade testing
+-- It's possible to remove a constraint from parents without affecting children
+CREATE TABLE notnull_tbl5 (a int CONSTRAINT ann NOT NULL,
+	b int CONSTRAINT bnn NOT NULL);
+CREATE TABLE notnull_tbl5_child () INHERITS (notnull_tbl5);
+ALTER TABLE ONLY notnull_tbl5 DROP CONSTRAINT ann;
+ALTER TABLE ONLY notnull_tbl5 ALTER b DROP NOT NULL;
+ERROR:  not-null constraint on column "b" must be removed in child tables too
+HINT:  Do not specify the ONLY keyword.
+\d+ notnull_tbl5_child
+                            Table "public.notnull_tbl5_child"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+Not-null constraints:
+    "ann" NOT NULL "a"
+    "bnn" NOT NULL "b" (inherited)
+Inherits: notnull_tbl5
+
+CREATE TABLE notnull_tbl6 (a int CONSTRAINT ann NOT NULL,
+	b int CONSTRAINT bnn NOT NULL, check (a > 0)) PARTITION BY LIST (a);
+CREATE TABLE notnull_tbl6_1 PARTITION OF notnull_tbl6 FOR VALUES IN (1);
+ALTER TABLE ONLY notnull_tbl6 DROP CONSTRAINT ann;
+ERROR:  cannot remove constraint from only the partitioned table when partitions exist
+HINT:  Do not specify the ONLY keyword.
+ALTER TABLE ONLY notnull_tbl6 ALTER b DROP NOT NULL;
+ERROR:  cannot remove constraint from only the partitioned table when partitions exist
+HINT:  Do not specify the ONLY keyword.
+\d+ notnull_tbl6_1
+                              Table "public.notnull_tbl6_1"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+Partition of: notnull_tbl6 FOR VALUES IN (1)
+Partition constraint: ((a IS NOT NULL) AND (a = 1))
+Check constraints:
+    "notnull_tbl6_a_check" CHECK (a > 0)
+Not-null constraints:
+    "ann" NOT NULL "a" (inherited)
+    "bnn" NOT NULL "b" (inherited)
+
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
 CREATE ROLE regress_constraint_comments;

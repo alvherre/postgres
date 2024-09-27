@@ -635,14 +635,18 @@ create table notnull_tbl4 (a int not null constraint foo not null);
 \d+ notnull_tbl4
 create table notnull_tbl5 (a int constraint foo not null constraint foo not null);
 \d+ notnull_tbl5
+create table notnull_tbl6 (like notnull_tbl1, constraint foo not null a);
+\d+ notnull_tbl6
+drop table notnull_tbl2, notnull_tbl3, notnull_tbl4, notnull_tbl5, notnull_tbl6;
 
 -- error cases:
-create table notnull_tbl6 (a serial constraint foo not null constraint bar not null);
-create table notnull_tbl6 (a serial constraint foo not null no inherit constraint foo not null);
-create table notnull_tbl6 (a int constraint foo not null, constraint foo not null a no inherit);
-create table notnull_tbl6 (a serial constraint foo not null, constraint bar not null a);
-create table notnull_tbl6 (a serial, constraint foo not null a, constraint bar not null a);
-drop table notnull_tbl1, notnull_tbl2, notnull_tbl3, notnull_tbl4, notnull_tbl5;
+create table notnull_tbl_fail (a serial constraint foo not null constraint bar not null);
+create table notnull_tbl_fail (a serial constraint foo not null no inherit constraint foo not null);
+create table notnull_tbl_fail (a int constraint foo not null, constraint foo not null a no inherit);
+create table notnull_tbl_fail (a serial constraint foo not null, constraint bar not null a);
+create table notnull_tbl_fail (a serial, constraint foo not null a, constraint bar not null a);
+create table notnull_tbl_fail (like notnull_tbl1, constraint foo2 not null a);
+drop table notnull_tbl1;
 
 -- NOT NULL NO INHERIT
 CREATE TABLE ATACC1 (a int, not null a no inherit);
@@ -717,13 +721,6 @@ ALTER TABLE cnn_pk ADD CONSTRAINT cnn_primarykey PRIMARY KEY USING INDEX cnn_uq;
 \d+ cnn_pk*
 DROP TABLE cnn_pk, cnn_pk_child;
 
--- Ensure partitions are scanned for null values when adding a PK
-create table cnn2_parted(a int) partition by list (a);
-create table cnn_part1 partition of cnn2_parted for values in (1, null);
-insert into cnn_part1 values (null);
-alter table cnn2_parted add primary key (a);
-drop table cnn2_parted;
-
 -- Unique constraints don't give raise to not-null constraints, however.
 create table cnn_uq (a int);
 alter table cnn_uq add unique (a);
@@ -733,6 +730,13 @@ create table cnn_uq (a int);
 create unique index cnn_uq_idx on cnn_uq (a);
 alter table cnn_uq add unique using index cnn_uq_idx;
 \d+ cnn_uq
+
+-- Ensure partitions are scanned for null values when adding a PK
+create table cnn2_parted(a int) partition by list (a);
+create table cnn_part1 partition of cnn2_parted for values in (1, null);
+insert into cnn_part1 values (null);
+alter table cnn2_parted add primary key (a);
+drop table cnn2_parted;
 
 -- columns in regular and LIKE inheritance should be marked not-nullable
 -- for primary keys, even if those are deferred
@@ -752,6 +756,20 @@ CREATE TABLE notnull_tbl4_cld3 (PRIMARY KEY (a) DEFERRABLE, CONSTRAINT a_nn NOT 
 \d+ notnull_tbl4_cld2
 \d+ notnull_tbl4_cld3
 -- leave these tables around for pg_upgrade testing
+
+-- It's possible to remove a constraint from parents without affecting children
+CREATE TABLE notnull_tbl5 (a int CONSTRAINT ann NOT NULL,
+	b int CONSTRAINT bnn NOT NULL);
+CREATE TABLE notnull_tbl5_child () INHERITS (notnull_tbl5);
+ALTER TABLE ONLY notnull_tbl5 DROP CONSTRAINT ann;
+ALTER TABLE ONLY notnull_tbl5 ALTER b DROP NOT NULL;
+\d+ notnull_tbl5_child
+CREATE TABLE notnull_tbl6 (a int CONSTRAINT ann NOT NULL,
+	b int CONSTRAINT bnn NOT NULL, check (a > 0)) PARTITION BY LIST (a);
+CREATE TABLE notnull_tbl6_1 PARTITION OF notnull_tbl6 FOR VALUES IN (1);
+ALTER TABLE ONLY notnull_tbl6 DROP CONSTRAINT ann;
+ALTER TABLE ONLY notnull_tbl6 ALTER b DROP NOT NULL;
+\d+ notnull_tbl6_1
 
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
