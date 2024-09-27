@@ -1297,14 +1297,15 @@ report_newlocale_failure(const char *localename)
 }
 
 /*
- * Initialize the locale_t field.
+ * Create a locale_t with the given collation and ctype.
  *
- * The "C" and "POSIX" locales are not actually handled by libc, so set the
- * locale_t to zero in that case.
+ * The "C" and "POSIX" locales are not actually handled by libc, so return
+ * NULL.
+ *
+ * Ensure that no path leaks a locale_t.
  */
-static void
-make_libc_collator(const char *collate, const char *ctype,
-				   pg_locale_t result)
+static locale_t
+make_libc_collator(const char *collate, const char *ctype)
 {
 	locale_t	loc = 0;
 
@@ -1343,7 +1344,11 @@ make_libc_collator(const char *collate, const char *ctype,
 			errno = 0;
 			loc = newlocale(LC_CTYPE_MASK, ctype, loc1);
 			if (!loc)
+			{
+				if (loc1)
+					freelocale(loc1);
 				report_newlocale_failure(ctype);
+			}
 		}
 		else
 			loc = loc1;
@@ -1360,60 +1365,78 @@ make_libc_collator(const char *collate, const char *ctype,
 #endif
 	}
 
-	result->info.lt = loc;
+	return loc;
 }
 
-void
-make_icu_collator(const char *iculocstr,
-				  const char *icurules,
-				  struct pg_locale_struct *resultp)
-{
+/*
+ * Create a UCollator with the given locale string and rules.
+ *
+ * Ensure that no path leaks a UCollator.
+ */
 #ifdef USE_ICU
-	UCollator  *collator;
-
-	collator = pg_ucol_open(iculocstr);
-
-	/*
-	 * If rules are specified, we extract the rules of the standard collation,
-	 * add our own rules, and make a new collator with the combined rules.
-	 */
-	if (icurules)
+static UCollator *
+make_icu_collator(const char *iculocstr, const char *icurules)
+{
+	if (!icurules)
 	{
-		const UChar *default_rules;
-		UChar	   *agg_rules;
+		/* simple case without rules */
+		return pg_ucol_open(iculocstr);
+	}
+	else
+	{
+		UCollator  *collator_std_rules;
+		UCollator  *collator_all_rules;
+		const UChar *std_rules;
 		UChar	   *my_rules;
-		UErrorCode	status;
+		UChar	   *all_rules;
 		int32_t		length;
+		int32_t		total;
+		UErrorCode	status;
 
-		default_rules = ucol_getRules(collator, &length);
+		/*
+		 * If rules are specified, we extract the rules of the standard
+		 * collation, add our own rules, and make a new collator with the
+		 * combined rules.
+		 */
 		icu_to_uchar(&my_rules, icurules, strlen(icurules));
 
-		agg_rules = palloc_array(UChar, u_strlen(default_rules) + u_strlen(my_rules) + 1);
-		u_strcpy(agg_rules, default_rules);
-		u_strcat(agg_rules, my_rules);
+		collator_std_rules = pg_ucol_open(iculocstr);
 
-		ucol_close(collator);
+		std_rules = ucol_getRules(collator_std_rules, &length);
+
+		total = u_strlen(std_rules) + u_strlen(my_rules) + 1;
+
+		/* avoid leaking collator on OOM */
+		all_rules = palloc_extended(sizeof(UChar) * total, MCXT_ALLOC_NO_OOM);
+		if (!all_rules)
+		{
+			ucol_close(collator_std_rules);
+			ereport(ERROR,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("out of memory")));
+		}
+
+		u_strcpy(all_rules, std_rules);
+		u_strcat(all_rules, my_rules);
+
+		ucol_close(collator_std_rules);
 
 		status = U_ZERO_ERROR;
-		collator = ucol_openRules(agg_rules, u_strlen(agg_rules),
-								  UCOL_DEFAULT, UCOL_DEFAULT_STRENGTH, NULL, &status);
+		collator_all_rules = ucol_openRules(all_rules, u_strlen(all_rules),
+											UCOL_DEFAULT, UCOL_DEFAULT_STRENGTH,
+											NULL, &status);
 		if (U_FAILURE(status))
+		{
 			ereport(ERROR,
 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					 errmsg("could not open collator for locale \"%s\" with rules \"%s\": %s",
 							iculocstr, icurules, u_errorName(status))));
-	}
+		}
 
-	/* We will leak this string if the caller errors later :-( */
-	resultp->info.icu.locale = MemoryContextStrdup(TopMemoryContext, iculocstr);
-	resultp->info.icu.ucol = collator;
-#else							/* not USE_ICU */
-	/* could get here if a collation was created by a build with ICU */
-	ereport(ERROR,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-			 errmsg("ICU is not supported in this build")));
-#endif							/* not USE_ICU */
+		return collator_all_rules;
+	}
 }
+#endif							/* not USE_ICU */
 
 /*
  * Initialize default_locale with database locale settings.
@@ -1424,7 +1447,6 @@ init_database_collation(void)
 	HeapTuple	tup;
 	Form_pg_database dbform;
 	Datum		datum;
-	bool		isnull;
 
 	/* Fetch our pg_database row normally, via syscache */
 	tup = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(MyDatabaseId));
@@ -1449,8 +1471,10 @@ init_database_collation(void)
 	}
 	else if (dbform->datlocprovider == COLLPROVIDER_ICU)
 	{
+#ifdef USE_ICU
 		char	   *datlocale;
 		char	   *icurules;
+		bool		isnull;
 
 		datum = SysCacheGetAttrNotNull(DATABASEOID, tup, Anum_pg_database_datlocale);
 		datlocale = TextDatumGetCString(datum);
@@ -1464,14 +1488,19 @@ init_database_collation(void)
 		else
 			icurules = NULL;
 
-		make_icu_collator(datlocale, icurules, &default_locale);
+		default_locale.info.icu.locale = MemoryContextStrdup(TopMemoryContext, datlocale);
+		default_locale.info.icu.ucol = make_icu_collator(datlocale, icurules);
+#else
+		/* could get here if a collation was created by a build with ICU */
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("ICU is not supported in this build")));
+#endif
 	}
-	else
+	else if (dbform->datlocprovider == COLLPROVIDER_LIBC)
 	{
 		const char *datcollate;
 		const char *datctype;
-
-		Assert(dbform->datlocprovider == COLLPROVIDER_LIBC);
 
 		datum = SysCacheGetAttrNotNull(DATABASEOID, tup, Anum_pg_database_datcollate);
 		datcollate = TextDatumGetCString(datum);
@@ -1483,8 +1512,12 @@ init_database_collation(void)
 		default_locale.ctype_is_c = (strcmp(datctype, "C") == 0) ||
 			(strcmp(datctype, "POSIX") == 0);
 
-		make_libc_collator(datcollate, datctype, &default_locale);
+		default_locale.info.lt = make_libc_collator(datcollate, datctype);
 	}
+	else
+		/* shouldn't happen */
+		PGLOCALE_SUPPORT_ERROR(dbform->datlocprovider);
+
 
 	default_locale.provider = dbform->datlocprovider;
 
@@ -1557,25 +1590,9 @@ pg_newlocale_from_collation(Oid collid)
 			result.info.builtin.locale = MemoryContextStrdup(TopMemoryContext,
 															 locstr);
 		}
-		else if (collform->collprovider == COLLPROVIDER_LIBC)
-		{
-			const char *collcollate;
-			const char *collctype;
-
-			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collcollate);
-			collcollate = TextDatumGetCString(datum);
-			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collctype);
-			collctype = TextDatumGetCString(datum);
-
-			result.collate_is_c = (strcmp(collcollate, "C") == 0) ||
-				(strcmp(collcollate, "POSIX") == 0);
-			result.ctype_is_c = (strcmp(collctype, "C") == 0) ||
-				(strcmp(collctype, "POSIX") == 0);
-
-			make_libc_collator(collcollate, collctype, &result);
-		}
 		else if (collform->collprovider == COLLPROVIDER_ICU)
 		{
+#ifdef USE_ICU
 			const char *iculocstr;
 			const char *icurules;
 
@@ -1591,8 +1608,35 @@ pg_newlocale_from_collation(Oid collid)
 			else
 				icurules = NULL;
 
-			make_icu_collator(iculocstr, icurules, &result);
+			result.info.icu.locale = MemoryContextStrdup(TopMemoryContext, iculocstr);
+			result.info.icu.ucol = make_icu_collator(iculocstr, icurules);
+#else
+			/* could get here if a collation was created by a build with ICU */
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("ICU is not supported in this build")));
+#endif
 		}
+		else if (collform->collprovider == COLLPROVIDER_LIBC)
+		{
+			const char *collcollate;
+			const char *collctype;
+
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collcollate);
+			collcollate = TextDatumGetCString(datum);
+			datum = SysCacheGetAttrNotNull(COLLOID, tp, Anum_pg_collation_collctype);
+			collctype = TextDatumGetCString(datum);
+
+			result.collate_is_c = (strcmp(collcollate, "C") == 0) ||
+				(strcmp(collcollate, "POSIX") == 0);
+			result.ctype_is_c = (strcmp(collctype, "C") == 0) ||
+				(strcmp(collctype, "POSIX") == 0);
+
+			result.info.lt = make_libc_collator(collcollate, collctype);
+		}
+		else
+			/* shouldn't happen */
+			PGLOCALE_SUPPORT_ERROR(collform->collprovider);
 
 		datum = SysCacheGetAttr(COLLOID, tp, Anum_pg_collation_collversion,
 								&isnull);
@@ -1759,30 +1803,37 @@ get_collation_actual_version(char collprovider, const char *collcollate)
 }
 
 /*
- * pg_strncoll_libc_win32_utf8
+ * strncoll_libc_win32_utf8
  *
  * Win32 does not have UTF-8. Convert UTF8 arguments to wide characters and
  * invoke wcscoll_l().
+ *
+ * An input string length of -1 means that it's NUL-terminated.
  */
 #ifdef WIN32
 static int
-pg_strncoll_libc_win32_utf8(const char *arg1, size_t len1, const char *arg2,
-							size_t len2, pg_locale_t locale)
+strncoll_libc_win32_utf8(const char *arg1, ssize_t len1, const char *arg2,
+						 ssize_t len2, pg_locale_t locale)
 {
 	char		sbuf[TEXTBUFLEN];
 	char	   *buf = sbuf;
 	char	   *a1p,
 			   *a2p;
-	int			a1len = len1 * 2 + 2;
-	int			a2len = len2 * 2 + 2;
+	int			a1len;
+	int			a2len;
 	int			r;
 	int			result;
 
 	Assert(locale->provider == COLLPROVIDER_LIBC);
 	Assert(GetDatabaseEncoding() == PG_UTF8);
-#ifndef WIN32
-	Assert(false);
-#endif
+
+	if (len1 == -1)
+		len1 = strlen(arg1);
+	if (len2 == -1)
+		len2 = strlen(arg2);
+
+	a1len = len1 * 2 + 2;
+	a2len = len2 * 2 + 2;
 
 	if (a1len + a2len > TEXTBUFLEN)
 		buf = palloc(a1len + a2len);
@@ -1831,50 +1882,22 @@ pg_strncoll_libc_win32_utf8(const char *arg1, size_t len1, const char *arg2,
 #endif							/* WIN32 */
 
 /*
- * pg_strcoll_libc
+ * strncoll_libc
  *
- * Call strcoll_l() or wcscoll_l() as appropriate for the given locale,
- * platform, and database encoding. If the locale is NULL, use the database
- * collation.
+ * NUL-terminate arguments, if necessary, and pass to strcoll_l().
  *
- * Arguments must be encoded in the database encoding and nul-terminated.
+ * An input string length of -1 means that it's already NUL-terminated.
  */
 static int
-pg_strcoll_libc(const char *arg1, const char *arg2, pg_locale_t locale)
-{
-	int			result;
-
-	Assert(locale->provider == COLLPROVIDER_LIBC);
-#ifdef WIN32
-	if (GetDatabaseEncoding() == PG_UTF8)
-	{
-		size_t		len1 = strlen(arg1);
-		size_t		len2 = strlen(arg2);
-
-		result = pg_strncoll_libc_win32_utf8(arg1, len1, arg2, len2, locale);
-	}
-	else
-#endif							/* WIN32 */
-		result = strcoll_l(arg1, arg2, locale->info.lt);
-
-	return result;
-}
-
-/*
- * pg_strncoll_libc
- *
- * Nul-terminate the arguments and call pg_strcoll_libc().
- */
-static int
-pg_strncoll_libc(const char *arg1, size_t len1, const char *arg2, size_t len2,
-				 pg_locale_t locale)
+strncoll_libc(const char *arg1, ssize_t len1, const char *arg2, ssize_t len2,
+			  pg_locale_t locale)
 {
 	char		sbuf[TEXTBUFLEN];
 	char	   *buf = sbuf;
-	size_t		bufsize1 = len1 + 1;
-	size_t		bufsize2 = len2 + 1;
-	char	   *arg1n;
-	char	   *arg2n;
+	size_t		bufsize1 = (len1 == -1) ? 0 : len1 + 1;
+	size_t		bufsize2 = (len2 == -1) ? 0 : len2 + 1;
+	const char *arg1n;
+	const char *arg2n;
 	int			result;
 
 	Assert(locale->provider == COLLPROVIDER_LIBC);
@@ -1882,22 +1905,40 @@ pg_strncoll_libc(const char *arg1, size_t len1, const char *arg2, size_t len2,
 #ifdef WIN32
 	/* check for this case before doing the work for nul-termination */
 	if (GetDatabaseEncoding() == PG_UTF8)
-		return pg_strncoll_libc_win32_utf8(arg1, len1, arg2, len2, locale);
+		return strncoll_libc_win32_utf8(arg1, len1, arg2, len2, locale);
 #endif							/* WIN32 */
 
 	if (bufsize1 + bufsize2 > TEXTBUFLEN)
 		buf = palloc(bufsize1 + bufsize2);
 
-	arg1n = buf;
-	arg2n = buf + bufsize1;
+	/* nul-terminate arguments if necessary */
+	if (len1 == -1)
+	{
+		arg1n = arg1;
+	}
+	else
+	{
+		char	   *buf1 = buf;
 
-	/* nul-terminate arguments */
-	memcpy(arg1n, arg1, len1);
-	arg1n[len1] = '\0';
-	memcpy(arg2n, arg2, len2);
-	arg2n[len2] = '\0';
+		memcpy(buf1, arg1, len1);
+		buf1[len1] = '\0';
+		arg1n = buf1;
+	}
 
-	result = pg_strcoll_libc(arg1n, arg2n, locale);
+	if (len2 == -1)
+	{
+		arg2n = arg2;
+	}
+	else
+	{
+		char	   *buf2 = buf + bufsize1;
+
+		memcpy(buf2, arg2, len2);
+		buf2[len2] = '\0';
+		arg2n = buf2;
+	}
+
+	result = strcoll_l(arg1n, arg2n, locale->info.lt);
 
 	if (buf != sbuf)
 		pfree(buf);
@@ -1908,7 +1949,7 @@ pg_strncoll_libc(const char *arg1, size_t len1, const char *arg2, size_t len2,
 #ifdef USE_ICU
 
 /*
- * pg_strncoll_icu_no_utf8
+ * strncoll_icu_no_utf8
  *
  * Convert the arguments from the database encoding to UChar strings, then
  * call ucol_strcoll(). An argument length of -1 means that the string is
@@ -1918,8 +1959,8 @@ pg_strncoll_libc(const char *arg1, size_t len1, const char *arg2, size_t len2,
  * caller should call that instead.
  */
 static int
-pg_strncoll_icu_no_utf8(const char *arg1, int32_t len1,
-						const char *arg2, int32_t len2, pg_locale_t locale)
+strncoll_icu_no_utf8(const char *arg1, ssize_t len1,
+					 const char *arg2, ssize_t len2, pg_locale_t locale)
 {
 	char		sbuf[TEXTBUFLEN];
 	char	   *buf = sbuf;
@@ -1964,17 +2005,15 @@ pg_strncoll_icu_no_utf8(const char *arg1, int32_t len1,
 }
 
 /*
- * pg_strncoll_icu
+ * strncoll_icu
  *
  * Call ucol_strcollUTF8() or ucol_strcoll() as appropriate for the given
  * database encoding. An argument length of -1 means the string is
  * NUL-terminated.
- *
- * Arguments must be encoded in the database encoding.
  */
 static int
-pg_strncoll_icu(const char *arg1, int32_t len1, const char *arg2, int32_t len2,
-				pg_locale_t locale)
+strncoll_icu(const char *arg1, ssize_t len1, const char *arg2, ssize_t len2,
+			 pg_locale_t locale)
 {
 	int			result;
 
@@ -1997,7 +2036,7 @@ pg_strncoll_icu(const char *arg1, int32_t len1, const char *arg2, int32_t len2,
 	else
 #endif
 	{
-		result = pg_strncoll_icu_no_utf8(arg1, len1, arg2, len2, locale);
+		result = strncoll_icu_no_utf8(arg1, len1, arg2, len2, locale);
 	}
 
 	return result;
@@ -2008,15 +2047,7 @@ pg_strncoll_icu(const char *arg1, int32_t len1, const char *arg2, int32_t len2,
 /*
  * pg_strcoll
  *
- * Call ucol_strcollUTF8(), ucol_strcoll(), strcoll_l() or wcscoll_l() as
- * appropriate for the given locale, platform, and database encoding. If the
- * locale is not specified, use the database collation.
- *
- * Arguments must be encoded in the database encoding and nul-terminated.
- *
- * The caller is responsible for breaking ties if the collation is
- * deterministic; this maintains consistency with pg_strxfrm(), which cannot
- * easily account for deterministic collations.
+ * Like pg_strncoll for NUL-terminated input strings.
  */
 int
 pg_strcoll(const char *arg1, const char *arg2, pg_locale_t locale)
@@ -2024,10 +2055,10 @@ pg_strcoll(const char *arg1, const char *arg2, pg_locale_t locale)
 	int			result;
 
 	if (locale->provider == COLLPROVIDER_LIBC)
-		result = pg_strcoll_libc(arg1, arg2, locale);
+		result = strncoll_libc(arg1, -1, arg2, -1, locale);
 #ifdef USE_ICU
 	else if (locale->provider == COLLPROVIDER_ICU)
-		result = pg_strncoll_icu(arg1, -1, arg2, -1, locale);
+		result = strncoll_icu(arg1, -1, arg2, -1, locale);
 #endif
 	else
 		/* shouldn't happen */
@@ -2043,27 +2074,24 @@ pg_strcoll(const char *arg1, const char *arg2, pg_locale_t locale)
  * appropriate for the given locale, platform, and database encoding. If the
  * locale is not specified, use the database collation.
  *
- * Arguments must be encoded in the database encoding.
- *
- * This function may need to nul-terminate the arguments for libc functions;
- * so if the caller already has nul-terminated strings, it should call
- * pg_strcoll() instead.
+ * The input strings must be encoded in the database encoding. If an input
+ * string is NUL-terminated, its length may be specified as -1.
  *
  * The caller is responsible for breaking ties if the collation is
  * deterministic; this maintains consistency with pg_strnxfrm(), which cannot
  * easily account for deterministic collations.
  */
 int
-pg_strncoll(const char *arg1, size_t len1, const char *arg2, size_t len2,
+pg_strncoll(const char *arg1, ssize_t len1, const char *arg2, ssize_t len2,
 			pg_locale_t locale)
 {
 	int			result;
 
 	if (locale->provider == COLLPROVIDER_LIBC)
-		result = pg_strncoll_libc(arg1, len1, arg2, len2, locale);
+		result = strncoll_libc(arg1, len1, arg2, len2, locale);
 #ifdef USE_ICU
 	else if (locale->provider == COLLPROVIDER_ICU)
-		result = pg_strncoll_icu(arg1, len1, arg2, len2, locale);
+		result = strncoll_icu(arg1, len1, arg2, len2, locale);
 #endif
 	else
 		/* shouldn't happen */
@@ -2072,18 +2100,16 @@ pg_strncoll(const char *arg1, size_t len1, const char *arg2, size_t len2,
 	return result;
 }
 
-
+/*
+ * strnxfrm_libc
+ *
+ * NUL-terminate src, if necessary, and pass to strxfrm_l().
+ *
+ * A source length of -1 means that it's already NUL-terminated.
+ */
 static size_t
-pg_strxfrm_libc(char *dest, const char *src, size_t destsize,
-				pg_locale_t locale)
-{
-	Assert(locale->provider == COLLPROVIDER_LIBC);
-	return strxfrm_l(dest, src, destsize, locale->info.lt);
-}
-
-static size_t
-pg_strnxfrm_libc(char *dest, const char *src, size_t srclen, size_t destsize,
-				 pg_locale_t locale)
+strnxfrm_libc(char *dest, size_t destsize, const char *src, ssize_t srclen,
+			  pg_locale_t locale)
 {
 	char		sbuf[TEXTBUFLEN];
 	char	   *buf = sbuf;
@@ -2092,14 +2118,17 @@ pg_strnxfrm_libc(char *dest, const char *src, size_t srclen, size_t destsize,
 
 	Assert(locale->provider == COLLPROVIDER_LIBC);
 
+	if (srclen == -1)
+		return strxfrm_l(dest, src, destsize, locale->info.lt);
+
 	if (bufsize > TEXTBUFLEN)
 		buf = palloc(bufsize);
 
-	/* nul-terminate arguments */
+	/* nul-terminate argument */
 	memcpy(buf, src, srclen);
 	buf[srclen] = '\0';
 
-	result = pg_strxfrm_libc(dest, buf, destsize, locale);
+	result = strxfrm_l(dest, buf, destsize, locale->info.lt);
 
 	if (buf != sbuf)
 		pfree(buf);
@@ -2114,8 +2143,8 @@ pg_strnxfrm_libc(char *dest, const char *src, size_t srclen, size_t destsize,
 
 /* 'srclen' of -1 means the strings are NUL-terminated */
 static size_t
-pg_strnxfrm_icu(char *dest, const char *src, int32_t srclen, int32_t destsize,
-				pg_locale_t locale)
+strnxfrm_icu(char *dest, size_t destsize, const char *src, ssize_t srclen,
+			 pg_locale_t locale)
 {
 	char		sbuf[TEXTBUFLEN];
 	char	   *buf = sbuf;
@@ -2161,8 +2190,9 @@ pg_strnxfrm_icu(char *dest, const char *src, int32_t srclen, int32_t destsize,
 
 /* 'srclen' of -1 means the strings are NUL-terminated */
 static size_t
-pg_strnxfrm_prefix_icu_no_utf8(char *dest, const char *src, int32_t srclen,
-							   int32_t destsize, pg_locale_t locale)
+strnxfrm_prefix_icu_no_utf8(char *dest, size_t destsize,
+							const char *src, ssize_t srclen,
+							pg_locale_t locale)
 {
 	char		sbuf[TEXTBUFLEN];
 	char	   *buf = sbuf;
@@ -2209,8 +2239,9 @@ pg_strnxfrm_prefix_icu_no_utf8(char *dest, const char *src, int32_t srclen,
 
 /* 'srclen' of -1 means the strings are NUL-terminated */
 static size_t
-pg_strnxfrm_prefix_icu(char *dest, const char *src, int32_t srclen,
-					   int32_t destsize, pg_locale_t locale)
+strnxfrm_prefix_icu(char *dest, size_t destsize,
+					const char *src, ssize_t srclen,
+					pg_locale_t locale)
 {
 	size_t		result;
 
@@ -2237,8 +2268,8 @@ pg_strnxfrm_prefix_icu(char *dest, const char *src, int32_t srclen,
 							u_errorName(status))));
 	}
 	else
-		result = pg_strnxfrm_prefix_icu_no_utf8(dest, src, srclen, destsize,
-												locale);
+		result = strnxfrm_prefix_icu_no_utf8(dest, destsize, src, srclen,
+											 locale);
 
 	return result;
 }
@@ -2280,20 +2311,7 @@ pg_strxfrm_enabled(pg_locale_t locale)
 /*
  * pg_strxfrm
  *
- * Transforms 'src' to a nul-terminated string stored in 'dest' such that
- * ordinary strcmp() on transformed strings is equivalent to pg_strcoll() on
- * untransformed strings.
- *
- * The provided 'src' must be nul-terminated. If 'destsize' is zero, 'dest'
- * may be NULL.
- *
- * Not all providers support pg_strxfrm() safely. The caller should check
- * pg_strxfrm_enabled() first, otherwise this function may return wrong
- * results or an error.
- *
- * Returns the number of bytes needed (or more) to store the transformed
- * string, excluding the terminating nul byte. If the value returned is
- * 'destsize' or greater, the resulting contents of 'dest' are undefined.
+ * Like pg_strnxfrm for a NUL-terminated input string.
  */
 size_t
 pg_strxfrm(char *dest, const char *src, size_t destsize, pg_locale_t locale)
@@ -2301,10 +2319,10 @@ pg_strxfrm(char *dest, const char *src, size_t destsize, pg_locale_t locale)
 	size_t		result = 0;		/* keep compiler quiet */
 
 	if (locale->provider == COLLPROVIDER_LIBC)
-		result = pg_strxfrm_libc(dest, src, destsize, locale);
+		result = strnxfrm_libc(dest, destsize, src, -1, locale);
 #ifdef USE_ICU
 	else if (locale->provider == COLLPROVIDER_ICU)
-		result = pg_strnxfrm_icu(dest, src, -1, destsize, locale);
+		result = strnxfrm_icu(dest, destsize, src, -1, locale);
 #endif
 	else
 		/* shouldn't happen */
@@ -2320,8 +2338,9 @@ pg_strxfrm(char *dest, const char *src, size_t destsize, pg_locale_t locale)
  * ordinary strcmp() on transformed strings is equivalent to pg_strcoll() on
  * untransformed strings.
  *
- * 'src' does not need to be nul-terminated. If 'destsize' is zero, 'dest' may
- * be NULL.
+ * The input string must be encoded in the database encoding. If the input
+ * string is NUL-terminated, its length may be specified as -1. If 'destsize'
+ * is zero, 'dest' may be NULL.
  *
  * Not all providers support pg_strnxfrm() safely. The caller should check
  * pg_strxfrm_enabled() first, otherwise this function may return wrong
@@ -2330,22 +2349,18 @@ pg_strxfrm(char *dest, const char *src, size_t destsize, pg_locale_t locale)
  * Returns the number of bytes needed (or more) to store the transformed
  * string, excluding the terminating nul byte. If the value returned is
  * 'destsize' or greater, the resulting contents of 'dest' are undefined.
- *
- * This function may need to nul-terminate the argument for libc functions;
- * so if the caller already has a nul-terminated string, it should call
- * pg_strxfrm() instead.
  */
 size_t
-pg_strnxfrm(char *dest, size_t destsize, const char *src, size_t srclen,
+pg_strnxfrm(char *dest, size_t destsize, const char *src, ssize_t srclen,
 			pg_locale_t locale)
 {
 	size_t		result = 0;		/* keep compiler quiet */
 
 	if (locale->provider == COLLPROVIDER_LIBC)
-		result = pg_strnxfrm_libc(dest, src, srclen, destsize, locale);
+		result = strnxfrm_libc(dest, destsize, src, srclen, locale);
 #ifdef USE_ICU
 	else if (locale->provider == COLLPROVIDER_ICU)
-		result = pg_strnxfrm_icu(dest, src, srclen, destsize, locale);
+		result = strnxfrm_icu(dest, destsize, src, srclen, locale);
 #endif
 	else
 		/* shouldn't happen */
@@ -2375,44 +2390,24 @@ pg_strxfrm_prefix_enabled(pg_locale_t locale)
 /*
  * pg_strxfrm_prefix
  *
- * Transforms 'src' to a byte sequence stored in 'dest' such that ordinary
- * memcmp() on the byte sequence is equivalent to pg_strcoll() on
- * untransformed strings. The result is not nul-terminated.
- *
- * The provided 'src' must be nul-terminated.
- *
- * Not all providers support pg_strxfrm_prefix() safely. The caller should
- * check pg_strxfrm_prefix_enabled() first, otherwise this function may return
- * wrong results or an error.
- *
- * If destsize is not large enough to hold the resulting byte sequence, stores
- * only the first destsize bytes in 'dest'. Returns the number of bytes
- * actually copied to 'dest'.
+ * Like pg_strnxfrm_prefix for a NUL-terminated input string.
  */
 size_t
 pg_strxfrm_prefix(char *dest, const char *src, size_t destsize,
 				  pg_locale_t locale)
 {
-	size_t		result = 0;		/* keep compiler quiet */
-
-#ifdef USE_ICU
-	if (locale->provider == COLLPROVIDER_ICU)
-		result = pg_strnxfrm_prefix_icu(dest, src, -1, destsize, locale);
-	else
-#endif
-		PGLOCALE_SUPPORT_ERROR(locale->provider);
-
-	return result;
+	return pg_strnxfrm_prefix(dest, destsize, src, -1, locale);
 }
 
 /*
  * pg_strnxfrm_prefix
  *
  * Transforms 'src' to a byte sequence stored in 'dest' such that ordinary
- * memcmp() on the byte sequence is equivalent to pg_strcoll() on
+ * memcmp() on the byte sequence is equivalent to pg_strncoll() on
  * untransformed strings. The result is not nul-terminated.
  *
- * The provided 'src' must be nul-terminated.
+ * The input string must be encoded in the database encoding. If the input
+ * string is NUL-terminated, its length may be specified as -1.
  *
  * Not all providers support pg_strnxfrm_prefix() safely. The caller should
  * check pg_strxfrm_prefix_enabled() first, otherwise this function may return
@@ -2421,20 +2416,16 @@ pg_strxfrm_prefix(char *dest, const char *src, size_t destsize,
  * If destsize is not large enough to hold the resulting byte sequence, stores
  * only the first destsize bytes in 'dest'. Returns the number of bytes
  * actually copied to 'dest'.
- *
- * This function may need to nul-terminate the argument for libc functions;
- * so if the caller already has a nul-terminated string, it should call
- * pg_strxfrm_prefix() instead.
  */
 size_t
 pg_strnxfrm_prefix(char *dest, size_t destsize, const char *src,
-				   size_t srclen, pg_locale_t locale)
+				   ssize_t srclen, pg_locale_t locale)
 {
 	size_t		result = 0;		/* keep compiler quiet */
 
 #ifdef USE_ICU
 	if (locale->provider == COLLPROVIDER_ICU)
-		result = pg_strnxfrm_prefix_icu(dest, src, -1, destsize, locale);
+		result = strnxfrm_prefix_icu(dest, destsize, src, -1, locale);
 	else
 #endif
 		PGLOCALE_SUPPORT_ERROR(locale->provider);
@@ -2500,6 +2491,8 @@ builtin_validate_locale(int encoding, const char *locale)
 /*
  * Wrapper around ucol_open() to handle API differences for older ICU
  * versions.
+ *
+ * Ensure that no path leaks a UCollator.
  */
 static UCollator *
 pg_ucol_open(const char *loc_str)
@@ -2615,6 +2608,8 @@ init_icu_converter(void)
 
 /*
  * Find length, in UChars, of given string if converted to UChar string.
+ *
+ * A length of -1 indicates that the input string is NUL-terminated.
  */
 static size_t
 uchar_length(UConverter *converter, const char *str, int32_t len)
@@ -2632,6 +2627,8 @@ uchar_length(UConverter *converter, const char *str, int32_t len)
 /*
  * Convert the given source string into a UChar string, stored in dest, and
  * return the length (in UChars).
+ *
+ * A srclen of -1 indicates that the input string is NUL-terminated.
  */
 static int32_t
 uchar_convert(UConverter *converter, UChar *dest, int32_t destlen,
