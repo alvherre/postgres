@@ -7573,35 +7573,6 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 						colName, RelationGetRelationName(rel))));
 
 	/*
-	 * It's not OK to remove a constraint only for the parent and leave it in
-	 * the children, so disallow that.
-	 */
-	if (!recurse)
-	{
-		if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
-		{
-			PartitionDesc partdesc;
-
-			partdesc = RelationGetPartitionDesc(rel, true);
-
-			if (partdesc->nparts > 0)
-				ereport(ERROR,
-						errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-						errmsg("cannot remove constraint from only the partitioned table when partitions exist"),
-						errhint("Do not specify the ONLY keyword."));
-		}
-		else if (rel->rd_rel->relhassubclass &&
-				 find_inheritance_children(RelationGetRelid(rel), NoLock) != NIL)
-		{
-			ereport(ERROR,
-					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-					errmsg("not-null constraint on column \"%s\" must be removed in child tables too",
-						   colName),
-					errhint("Do not specify the ONLY keyword."));
-		}
-	}
-
-	/*
 	 * If rel is partition, shouldn't drop NOT NULL if parent has the same.
 	 */
 	if (rel->rd_rel->relispartition)
@@ -12898,18 +12869,6 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		children = find_inheritance_children(RelationGetRelid(rel), lockmode);
 	else
 		children = NIL;
-
-	/*
-	 * For a partitioned table, if partitions exist and we are told not to
-	 * recurse, it's a user error.  It doesn't make sense to have a constraint
-	 * be defined only on the parent, especially if it's a partitioned table.
-	 */
-	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE &&
-		children != NIL && !recurse)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-				 errmsg("cannot remove constraint from only the partitioned table when partitions exist"),
-				 errhint("Do not specify the ONLY keyword.")));
 
 	foreach_oid(childrelid, children)
 	{

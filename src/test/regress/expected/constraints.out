@@ -1264,8 +1264,6 @@ CREATE TABLE notnull_tbl5 (a int CONSTRAINT ann NOT NULL,
 CREATE TABLE notnull_tbl5_child () INHERITS (notnull_tbl5);
 ALTER TABLE ONLY notnull_tbl5 DROP CONSTRAINT ann;
 ALTER TABLE ONLY notnull_tbl5 ALTER b DROP NOT NULL;
-ERROR:  not-null constraint on column "b" must be removed in child tables too
-HINT:  Do not specify the ONLY keyword.
 \d+ notnull_tbl5_child
                             Table "public.notnull_tbl5_child"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -1274,18 +1272,14 @@ HINT:  Do not specify the ONLY keyword.
  b      | integer |           | not null |         | plain   |              | 
 Not-null constraints:
     "ann" NOT NULL "a"
-    "bnn" NOT NULL "b" (inherited)
+    "bnn" NOT NULL "b"
 Inherits: notnull_tbl5
 
 CREATE TABLE notnull_tbl6 (a int CONSTRAINT ann NOT NULL,
 	b int CONSTRAINT bnn NOT NULL, check (a > 0)) PARTITION BY LIST (a);
 CREATE TABLE notnull_tbl6_1 PARTITION OF notnull_tbl6 FOR VALUES IN (1);
 ALTER TABLE ONLY notnull_tbl6 DROP CONSTRAINT ann;
-ERROR:  cannot remove constraint from only the partitioned table when partitions exist
-HINT:  Do not specify the ONLY keyword.
 ALTER TABLE ONLY notnull_tbl6 ALTER b DROP NOT NULL;
-ERROR:  cannot remove constraint from only the partitioned table when partitions exist
-HINT:  Do not specify the ONLY keyword.
 \d+ notnull_tbl6_1
                               Table "public.notnull_tbl6_1"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
@@ -1297,8 +1291,8 @@ Partition constraint: ((a IS NOT NULL) AND (a = 1))
 Check constraints:
     "notnull_tbl6_a_check" CHECK (a > 0)
 Not-null constraints:
-    "ann" NOT NULL "a" (inherited)
-    "bnn" NOT NULL "b" (inherited)
+    "ann" NOT NULL "a"
+    "bnn" NOT NULL "b"
 
 -- Comments
 -- Setup a low-level role to enforce non-superuser checks.
