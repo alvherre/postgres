@@ -838,9 +838,14 @@ drop table inh_parent, inh_child, inh_grandchild;
 -- Test the same constraint name for different columns in different parents
 create table inh_parent1(a int constraint nn not null);
 create table inh_parent2(b int constraint nn not null);
-create table inh_child () inherits (inh_parent1, inh_parent2);
-\d+ inh_child
-drop table inh_parent1, inh_parent2, inh_child;
+create table inh_child1 () inherits (inh_parent1, inh_parent2);
+\d+ inh_child1
+
+create table inh_child2 (constraint foo not null a) inherits (inh_parent1, inh_parent2);
+alter table inh_child2 no inherit inh_parent2;
+\d+ inh_child2
+
+drop table inh_parent1, inh_parent2, inh_child1, inh_child2;
 
 -- Test multiple parents with overlapping primary keys
 create table inh_parent1(a int, b int, c int, primary key (a, b));

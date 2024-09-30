@@ -2246,20 +2246,33 @@ drop table inh_parent, inh_child, inh_grandchild;
 -- Test the same constraint name for different columns in different parents
 create table inh_parent1(a int constraint nn not null);
 create table inh_parent2(b int constraint nn not null);
-create table inh_child () inherits (inh_parent1, inh_parent2);
-\d+ inh_child
-                                 Table "public.inh_child"
+create table inh_child1 () inherits (inh_parent1, inh_parent2);
+\d+ inh_child1
+                                Table "public.inh_child1"
  Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
 --------+---------+-----------+----------+---------+---------+--------------+-------------
  a      | integer |           | not null |         | plain   |              | 
  b      | integer |           | not null |         | plain   |              | 
 Not-null constraints:
     "nn" NOT NULL "a" (inherited)
-    "inh_child_b_not_null" NOT NULL "b" (inherited)
+    "inh_child1_b_not_null" NOT NULL "b" (inherited)
 Inherits: inh_parent1,
           inh_parent2
 
-drop table inh_parent1, inh_parent2, inh_child;
+create table inh_child2 (constraint foo not null a) inherits (inh_parent1, inh_parent2);
+alter table inh_child2 no inherit inh_parent2;
+\d+ inh_child2
+                                Table "public.inh_child2"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+ b      | integer |           | not null |         | plain   |              | 
+Not-null constraints:
+    "foo" NOT NULL "a" (local, inherited)
+    "nn" NOT NULL "b"
+Inherits: inh_parent1
+
+drop table inh_parent1, inh_parent2, inh_child1, inh_child2;
 -- Test multiple parents with overlapping primary keys
 create table inh_parent1(a int, b int, c int, primary key (a, b));
 create table inh_parent2(d int, e int, b int, primary key (d, b));

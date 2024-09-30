@@ -16547,6 +16547,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	ScanKeyData key[3];
 	HeapTuple	attributeTuple,
 				constraintTuple;
+	AttrMap	   *attmap;
 	List	   *connames;
 	List	   *nncolumns;
 	bool		found;
@@ -16618,8 +16619,13 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	 * constraints.  (We cheat a bit by only checking for name matches,
 	 * assuming that the expressions will match.)
 	 *
-	 * For NOT NULL columns, we store column numbers to match.
+	 * For NOT NULL columns, we store column numbers to match, mapping them in
+	 * to the child rel's attribute numbers.
 	 */
+	attmap = build_attrmap_by_name(RelationGetDescr(child_rel),
+								   RelationGetDescr(parent_rel),
+								   false);
+
 	catalogRelation = table_open(ConstraintRelationId, RowExclusiveLock);
 	ScanKeyInit(&key[0],
 				Anum_pg_constraint_conrelid,
@@ -16638,12 +16644,16 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 		if (con->contype == CONSTRAINT_CHECK)
 			connames = lappend(connames, pstrdup(NameStr(con->conname)));
 		if (con->contype == CONSTRAINT_NOTNULL)
-			nncolumns = lappend_int(nncolumns, extractNotNullColumn(constraintTuple));
+		{
+			AttrNumber	parent_attno = extractNotNullColumn(constraintTuple);
+
+			nncolumns = lappend_int(nncolumns, attmap->attnums[parent_attno - 1]);
+		}
 	}
 
 	systable_endscan(scan);
 
-	/* Now scan the child's constraints */
+	/* Now scan the child's constraints to find matches */
 	ScanKeyInit(&key[0],
 				Anum_pg_constraint_conrelid,
 				BTEqualStrategyNumber, F_OIDEQ,
@@ -16668,6 +16678,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 					strcmp(NameStr(con->conname), chkname) == 0)
 				{
 					match = true;
+					connames = foreach_delete_current(connames, chkname);
 					break;
 				}
 			}
@@ -16681,6 +16692,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 				if (prevattno == child_attno)
 				{
 					match = true;
+					nncolumns = foreach_delete_current(nncolumns, prevattno);
 					break;
 				}
 			}
@@ -16706,6 +16718,12 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 			heap_freetuple(copyTuple);
 		}
 	}
+
+	/* We should have matched all constraints */
+	if (connames != NIL || nncolumns != NIL)
+		elog(ERROR, "%d unmatched constraints while removing inheritance from \"%s\" to \"%s\"",
+			 list_length(connames) + list_length(nncolumns),
+			 RelationGetRelationName(child_rel), RelationGetRelationName(parent_rel));
 
 	systable_endscan(scan);
 	table_close(catalogRelation, RowExclusiveLock);
