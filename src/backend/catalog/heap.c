@@ -2891,7 +2891,11 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 		/*
 		 * Search in the list of inherited constraints for any entries on the
-		 * same column.
+		 * same column; determine an inheritance count from that.  Also, if at
+		 * least one parent has a constraint for this column, then we must not
+		 * accept a user specification for a NO INHERIT one.  Any constraint
+		 * from parents that we process here is deleted from the list: we no
+		 * longer need to process it in the loop below.
 		 */
 		foreach_ptr(CookedConstraint, old, old_notnulls)
 		{
@@ -2951,10 +2955,10 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 
 	/*
 	 * If any column remains in the old_notnulls list, we must create a not-
-	 * null constraint marked not-local.  Because multiple parents could
-	 * specify a not-null constraint for the same column, we must count how
-	 * many there are and add to the original inhcount accordingly, deleting
-	 * elements we've already processed.
+	 * null constraint marked not-local for that column.  Because multiple
+	 * parents could specify a not-null constraint for the same column, we
+	 * must count how many there are and set an appropriate inhcount
+	 * accordingly, deleting elements we've already processed.
 	 *
 	 * We don't use foreach() here because we have two nested loops over the
 	 * constraint list, with possible element deletions in the inner one. If
