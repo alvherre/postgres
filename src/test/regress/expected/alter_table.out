@@ -4411,6 +4411,20 @@ ALTER TABLE list_parted2 ALTER b SET NOT NULL;
 ALTER TABLE ONLY list_parted2 ALTER b DROP NOT NULL;
 ALTER TABLE list_parted2 ADD CONSTRAINT check_b CHECK (b <> 'zz');
 ALTER TABLE ONLY list_parted2 DROP CONSTRAINT check_b;
+-- ... and the partitions should still have both
+\d+ part_2
+                                     Table "public.part_2"
+ Column |     Type     | Collation | Nullable | Default | Storage  | Stats target | Description 
+--------+--------------+-----------+----------+---------+----------+--------------+-------------
+ a      | integer      |           |          |         | plain    |              | 
+ b      | character(1) |           | not null |         | extended |              | 
+Partition of: list_parted2 FOR VALUES IN (2)
+Partition constraint: ((a IS NOT NULL) AND (a = 2))
+Check constraints:
+    "check_b" CHECK (b <> 'zz'::bpchar)
+Not-null constraints:
+    "list_parted2_b_not_null" NOT NULL "b"
+
 -- It's alright though, if no partitions are yet created
 CREATE TABLE parted_no_parts (a int) PARTITION BY LIST (a);
 ALTER TABLE ONLY parted_no_parts ALTER a SET NOT NULL;

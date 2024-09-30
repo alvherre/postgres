@@ -2822,6 +2822,8 @@ ALTER TABLE list_parted2 ALTER b SET NOT NULL;
 ALTER TABLE ONLY list_parted2 ALTER b DROP NOT NULL;
 ALTER TABLE list_parted2 ADD CONSTRAINT check_b CHECK (b <> 'zz');
 ALTER TABLE ONLY list_parted2 DROP CONSTRAINT check_b;
+-- ... and the partitions should still have both
+\d+ part_2
 
 -- It's alright though, if no partitions are yet created
 CREATE TABLE parted_no_parts (a int) PARTITION BY LIST (a);
