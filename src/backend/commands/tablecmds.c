@@ -16263,6 +16263,8 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 
 		if (parent_con->contype == CONSTRAINT_NOTNULL)
 			parent_attno = extractNotNullColumn(parent_tuple);
+		else
+			parent_attno = InvalidAttrNumber;
 
 		/* Search for a child constraint matching this one */
 		ScanKeyInit(&child_key,
