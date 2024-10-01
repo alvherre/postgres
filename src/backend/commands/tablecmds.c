@@ -16423,11 +16423,6 @@ ATExecDropInherit(Relation rel, RangeVar *parent, LOCKMODE lockmode)
 	/* Off to RemoveInheritance() where most of the work happens */
 	RemoveInheritance(rel, parent_rel, false);
 
-	/*
-	 * If the parent has a primary key, then we decrement counts for all NOT
-	 * NULL constraints
-	 */
-
 	ObjectAddressSet(address, RelationRelationId,
 					 RelationGetRelid(parent_rel));
 
