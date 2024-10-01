@@ -16441,7 +16441,8 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			/*
 			 * Fix up not-null constraints that come from inheritance.  As
 			 * above, do the pg_constraint manipulations in a single SQL
-			 * command.
+			 * command.  (Actually, two in special cases, if we're doing an
+			 * upgrade from < 18).
 			 */
 			firstitem = true;
 			firstitem_extra = true;
@@ -16451,19 +16452,17 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 				/*
 				 * If a not-null constraint comes from inheritance, reset
 				 * conislocal.  The inhcount is fixed by ALTER TABLE INHERIT,
-				 * below.  In versions < 18, columns with no local definition
-				 * need their constraint to be matched by column number in
-				 * conkeys, because no constraint name is available.
+				 * below.  Special hack: in versions < 18, columns with no
+				 * local definition need their constraint to be matched by
+				 * column number in conkeys instead of by contraint name,
+				 * because the latter is not available.  (We distinguish the
+				 * case because the constraint name is the empty string.)
 				 */
 				if (tbinfo->notnull_constrs[j] != NULL &&
 					!tbinfo->notnull_islocal[j])
 				{
 					if (tbinfo->notnull_constrs[j][0] != '\0')
 					{
-						/*
-						 * XXX in binary upgrade <18 we must match constraints
-						 * by conkeys
-						 */
 						if (firstitem)
 						{
 							appendPQExpBufferStr(q, "UPDATE pg_catalog.pg_constraint\n"
@@ -16494,7 +16493,6 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 							appendPQExpBufferStr(extra, ", ");
 						appendPQExpBuffer(extra, "'{%d}'", j + 1);
 					}
-
 				}
 			}
 			if (!firstitem)
@@ -16502,8 +16500,8 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			if (!firstitem_extra)
 				appendPQExpBufferStr(extra, ");\n");
 
-			appendBinaryPQExpBuffer(q, extra->data, extra->len);
-			resetPQExpBuffer(extra);
+			if (extra->len > 0)
+				appendBinaryPQExpBuffer(q, extra->data, extra->len);
 
 			/*
 			 * Add inherited CHECK constraints, if any.
