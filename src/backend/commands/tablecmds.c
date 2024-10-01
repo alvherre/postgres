@@ -16302,6 +16302,7 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 					continue;
 
 				child_attr = TupleDescAttr(child_rel->rd_att, child_attno - 1);
+				/* there shouldn't be constraints on dropped columns */
 				if (parent_attr->attisdropped || child_attr->attisdropped)
 					elog(ERROR, "found not-null constraint on dropped columns");
 
