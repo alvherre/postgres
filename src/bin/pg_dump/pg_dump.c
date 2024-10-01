@@ -16167,6 +16167,10 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 											  tbinfo->attrdefs[j]->adef_expr);
 					}
 
+					print_notnull = (tbinfo->notnull_constrs[j] != NULL &&
+									 (tbinfo->notnull_islocal[j] ||
+									  dopt->binary_upgrade ||
+									  tbinfo->ispartition));
 
 					if (print_notnull)
 					{
@@ -16356,6 +16360,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			 tbinfo->relkind == RELKIND_PARTITIONED_TABLE))
 		{
 			bool		firstitem;
+			bool		firstitem_extra;
 
 			/*
 			 * Drop any dropped columns.  Merge the pg_attribute manipulations
@@ -16439,34 +16444,66 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			 * command.
 			 */
 			firstitem = true;
+			firstitem_extra = true;
+			resetPQExpBuffer(extra);
 			for (j = 0; j < tbinfo->numatts; j++)
 			{
 				/*
 				 * If a not-null constraint comes from inheritance, reset
 				 * conislocal.  The inhcount is fixed by ALTER TABLE INHERIT,
-				 * below.
+				 * below.  In versions < 18, columns with no local definition
+				 * need their constraint to be matched by column number in
+				 * conkeys, because no constraint name is available.
 				 */
 				if (tbinfo->notnull_constrs[j] != NULL &&
-					tbinfo->notnull_constrs[j][0] != '\0' &&
 					!tbinfo->notnull_islocal[j])
 				{
-					if (firstitem)
+					if (tbinfo->notnull_constrs[j][0] != '\0')
 					{
-						appendPQExpBufferStr(q, "UPDATE pg_catalog.pg_constraint\n"
-											 "SET conislocal = false\n"
-											 "WHERE contype = 'n' AND conrelid = ");
-						appendStringLiteralAH(q, qualrelname, fout);
-						appendPQExpBufferStr(q, "::pg_catalog.regclass AND\n"
-											 "conname IN (");
-						firstitem = false;
+						/*
+						 * XXX in binary upgrade <18 we must match constraints
+						 * by conkeys
+						 */
+						if (firstitem)
+						{
+							appendPQExpBufferStr(q, "UPDATE pg_catalog.pg_constraint\n"
+												 "SET conislocal = false\n"
+												 "WHERE contype = 'n' AND conrelid = ");
+							appendStringLiteralAH(q, qualrelname, fout);
+							appendPQExpBufferStr(q, "::pg_catalog.regclass AND\n"
+												 "conname IN (");
+							firstitem = false;
+						}
+						else
+							appendPQExpBufferStr(q, ", ");
+						appendStringLiteralAH(q, tbinfo->notnull_constrs[j], fout);
 					}
 					else
-						appendPQExpBufferStr(q, ", ");
-					appendStringLiteralAH(q, tbinfo->notnull_constrs[j], fout);
+					{
+						if (firstitem_extra)
+						{
+							appendPQExpBufferStr(extra, "UPDATE pg_catalog.pg_constraint\n"
+												 "SET conislocal = false\n"
+												 "WHERE contype = 'n' AND conrelid = ");
+							appendStringLiteralAH(extra, qualrelname, fout);
+							appendPQExpBufferStr(extra, "::pg_catalog.regclass AND\n"
+												 "conkey IN (");
+							firstitem_extra = false;
+						}
+						else
+							appendPQExpBufferStr(extra, ", ");
+						appendPQExpBuffer(extra, "'{%d}'", j + 1);
+					}
+
 				}
 			}
 			if (!firstitem)
 				appendPQExpBufferStr(q, ");\n");
+			if (!firstitem_extra)
+				appendPQExpBufferStr(extra, ");\n");
+
+			appendBinaryPQExpBuffer(q, extra->data, extra->len);
+			resetPQExpBuffer(extra);
 
 			/*
 			 * Add inherited CHECK constraints, if any.
