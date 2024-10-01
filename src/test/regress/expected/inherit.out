@@ -539,6 +539,9 @@ CREATE TEMP TABLE z (b TEXT, PRIMARY KEY(aa, b)) inherits (a);
 INSERT INTO z VALUES (NULL, 'text'); -- should fail
 ERROR:  null value in column "aa" of relation "z" violates not-null constraint
 DETAIL:  Failing row contains (null, text).
+-- ... but not UNIQUE.
+CREATE TEMP TABLE z2 (b TEXT, UNIQUE(aa, b)) inherits (a);
+INSERT INTO z2 VALUES (NULL, 'text'); -- should work
 -- Check inherited UPDATE with first child excluded
 create table some_tab (f1 int, f2 int, f3 int, check (f1 < 10) no inherit);
 create table some_tab_child () inherits(some_tab);

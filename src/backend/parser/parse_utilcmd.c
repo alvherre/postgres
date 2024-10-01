@@ -2638,9 +2638,10 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 							found = true;
 							typid = inhattr->atttypid;
 
-							cxt->nnconstraints =
-								lappend(cxt->nnconstraints,
-										makeNotNullConstraint(makeString(pstrdup(inhname))));
+							if (constraint->contype == CONSTR_PRIMARY)
+								cxt->nnconstraints =
+									lappend(cxt->nnconstraints,
+											makeNotNullConstraint(makeString(pstrdup(inhname))));
 							break;
 						}
 					}
