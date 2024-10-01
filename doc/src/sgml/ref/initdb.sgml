@@ -267,7 +267,7 @@ PostgreSQL documentation
        <para>
         Use checksums on data pages to help detect corruption by the
         I/O system that would otherwise be silent. Enabling checksums
-        may incur a noticeable performance penalty. If set, checksums
+        might incur a small performance penalty. If set, checksums
         are calculated for all objects, in all databases. All checksum
         failures will be reported in the
         <link linkend="monitoring-pg-stat-database-view">
@@ -339,6 +339,16 @@ PostgreSQL documentation
         DATABASE</command> command when new databases are subsequently
         created.  The default is <literal>libc</literal> (see <xref
         linkend="locale-providers"/>).
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry id="app-initdb-no-data-checksums" xreflabel="no data checksums">
+      <term><option>--no-data-checksums</option></term>
+      <listitem>
+       <para>
+        Do not enable data checksums.  This can be used to override a
+        <option>--data-checksums</option> option.
        </para>
       </listitem>
      </varlistentry>
