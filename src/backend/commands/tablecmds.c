@@ -16228,6 +16228,7 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 	ScanKeyData parent_key;
 	HeapTuple	parent_tuple;
 	Oid			parent_relid = RelationGetRelid(parent_rel);
+	AttrMap    *attmap;
 
 	constraintrel = table_open(ConstraintRelationId, RowExclusiveLock);
 
@@ -16239,12 +16240,17 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 	parent_scan = systable_beginscan(constraintrel, ConstraintRelidTypidNameIndexId,
 									 true, NULL, 1, &parent_key);
 
+	attmap = build_attrmap_by_name(RelationGetDescr(parent_rel),
+								   RelationGetDescr(child_rel),
+								   true);
+
 	while (HeapTupleIsValid(parent_tuple = systable_getnext(parent_scan)))
 	{
 		Form_pg_constraint parent_con = (Form_pg_constraint) GETSTRUCT(parent_tuple);
 		SysScanDesc child_scan;
 		ScanKeyData child_key;
 		HeapTuple	child_tuple;
+		AttrNumber	parent_attno;
 		bool		found = false;
 
 		if (parent_con->contype != CONSTRAINT_CHECK &&
@@ -16254,6 +16260,9 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 		/* if the parent's constraint is marked NO INHERIT, it's not inherited */
 		if (parent_con->connoinherit)
 			continue;
+
+		if (parent_con->contype == CONSTRAINT_NOTNULL)
+			parent_attno = extractNotNullColumn(parent_tuple);
 
 		/* Search for a child constraint matching this one */
 		ScanKeyInit(&child_key,
@@ -16272,8 +16281,8 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 				continue;
 
 			/*
-			 * CHECK constraint are matched by name, NOT NULL ones by
-			 * attribute number
+			 * CHECK constraint are matched by constraint name, NOT NULL ones
+			 * by attribute number.
 			 */
 			if (child_con->contype == CONSTRAINT_CHECK)
 			{
@@ -16283,13 +16292,22 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			}
 			else if (child_con->contype == CONSTRAINT_NOTNULL)
 			{
-				AttrNumber	parent_attno = extractNotNullColumn(parent_tuple);
-				AttrNumber	child_attno = extractNotNullColumn(child_tuple);
+				Form_pg_attribute parent_attr;
+				Form_pg_attribute child_attr;
+				AttrNumber	child_attno;
 
-				if (strcmp(get_attname(parent_relid, parent_attno, false),
-						   get_attname(RelationGetRelid(child_rel), child_attno,
-									   false)) != 0)
+				parent_attr = TupleDescAttr(parent_rel->rd_att, parent_attno - 1);
+				child_attno = extractNotNullColumn(child_tuple);
+				if (parent_attno != attmap->attnums[child_attno - 1])
 					continue;
+
+				child_attr = TupleDescAttr(child_rel->rd_att, child_attno - 1);
+				if (parent_attr->attisdropped || child_attr->attisdropped)
+					elog(ERROR, "found not-null constraint on dropped columns");
+
+				Assert(strcmp(get_attname(parent_relid, parent_attno, false),
+							  get_attname(RelationGetRelid(child_rel), child_attno,
+										  false)) == 0);
 			}
 
 			if (child_con->contype == CONSTRAINT_CHECK &&
@@ -16516,7 +16534,7 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	ScanKeyData key[3];
 	HeapTuple	attributeTuple,
 				constraintTuple;
-	AttrMap	   *attmap;
+	AttrMap    *attmap;
 	List	   *connames;
 	List	   *nncolumns;
 	bool		found;
