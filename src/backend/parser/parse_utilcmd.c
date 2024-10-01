@@ -596,7 +596,8 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	bool		saw_identity;
 	bool		saw_generated;
 	bool		need_notnull = false;
-	ListCell   *clist;
+	bool		need_pk_notnull = false;
+	Constraint *notnull_constraint = NULL;
 
 	cxt->columns = lappend(cxt->columns, column);
 
@@ -705,10 +706,8 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	saw_identity = false;
 	saw_generated = false;
 
-	foreach(clist, column->constraints)
+	foreach_node(Constraint, constraint, column->constraints)
 	{
-		Constraint *constraint = lfirst_node(Constraint, clist);
-
 		switch (constraint->contype)
 		{
 			case CONSTR_NULL:
@@ -729,9 +728,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 							errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							errmsg("not-null constraints on partitioned tables cannot be NO INHERIT"));
 
-				/*
-				 * Disallow conflicting [NOT] NULL markings
-				 */
+				/* Disallow conflicting [NOT] NULL markings */
 				if (saw_nullable && !column->is_not_null)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
@@ -741,53 +738,49 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 												constraint->location)));
 
 				/*
-				 * Disallow NOT NULL markings with conflicting names or NO
-				 * INHERIT flags.  If there already is a not-null constraint
-				 * on this column, it'll be the last item on the nnconstraints
-				 * list.
-				 *
-				 * We don't worry about conflicts with table constraints:
-				 * those will be verified in AddRelationNotNullConstraints().
-				 */
-				if (column->is_not_null)
-				{
-					Constraint *other = lfirst(list_tail(cxt->nnconstraints));
-
-					if (other && strcmp(strVal(linitial(other->keys)),
-										column->colname) == 0)
-					{
-						if (constraint->conname &&
-							other->conname &&
-							strcmp(other->conname, constraint->conname) != 0)
-							elog(ERROR, "conflicting not-null constraint names \"%s\" and \"%s\"",
-								 other->conname, constraint->conname);
-
-						if (other->is_no_inherit != constraint->is_no_inherit)
-							ereport(ERROR,
-									errcode(ERRCODE_SYNTAX_ERROR),
-									errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
-										   column->colname));
-
-						if (!other->conname && constraint->conname)
-							other->conname = constraint->conname;
-					}
-				}
-
-				/*
 				 * If this is the first time we see this column being marked
-				 * not null, add the constraint entry; and get rid of any
-				 * previous markings to mark the column NOT NULL.
+				 * not-null, add the constraint entry and keep track of it.
+				 * Also, remove previous markings that we need one.
+				 *
+				 * If this is a redundant not-null specification, just check
+				 * that it doesn't conflict with what was specified earlier.
+				 *
+				 * Any conflicts with table constraints will be further
+				 * checked in AddRelationNotNullConstraints().
 				 */
 				if (!column->is_not_null)
 				{
+					/* We can't use a NO INHERIT constraint with a PK. */
+					if (need_pk_notnull && constraint->is_no_inherit)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
+									   column->colname));
+
 					column->is_not_null = true;
 					saw_nullable = true;
+					need_notnull = false;
 
 					constraint->keys = list_make1(makeString(column->colname));
+					notnull_constraint = constraint;
 					cxt->nnconstraints = lappend(cxt->nnconstraints, constraint);
+				}
+				else if (notnull_constraint)
+				{
+					if (constraint->conname &&
+						notnull_constraint->conname &&
+						strcmp(notnull_constraint->conname, constraint->conname) != 0)
+						elog(ERROR, "conflicting not-null constraint names \"%s\" and \"%s\"",
+							 notnull_constraint->conname, constraint->conname);
 
-					/* Don't need this anymore, if we had it */
-					need_notnull = false;
+					if (notnull_constraint->is_no_inherit != constraint->is_no_inherit)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
+									   column->colname));
+
+					if (!notnull_constraint->conname && constraint->conname)
+						notnull_constraint->conname = constraint->conname;
 				}
 
 				break;
@@ -879,15 +872,25 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 
 			case CONSTR_PRIMARY:
 				/* primary key columns need a NOT NULL constraint */
-				if (!saw_nullable)
-					need_notnull = true;
-				else if (!column->is_not_null)
+				if (notnull_constraint)
+				{
+					/* we have one -- but check it's not NO INHERIT */
+					if (notnull_constraint->is_no_inherit)
+						ereport(ERROR,
+								errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
+									   column->colname));
+				}
+				else if (saw_nullable && !column->is_not_null)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("conflicting NULL/NOT NULL declarations for column \"%s\" of table \"%s\"",
 									column->colname, cxt->relation->relname),
 							 parser_errposition(cxt->pstate,
 												constraint->location)));
+				else
+					need_notnull = need_pk_notnull = true;
+
 				if (cxt->isforeign)
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -974,9 +977,8 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	if (need_notnull && !(saw_nullable && column->is_not_null))
 	{
 		column->is_not_null = true;
-		cxt->nnconstraints =
-			lappend(cxt->nnconstraints,
-					makeNotNullConstraint(makeString(column->colname)));
+		notnull_constraint = makeNotNullConstraint(makeString(column->colname));
+		cxt->nnconstraints = lappend(cxt->nnconstraints, notnull_constraint);
 	}
 
 	/*

@@ -646,6 +646,10 @@ create table notnull_tbl_fail (a int constraint foo not null, constraint foo not
 create table notnull_tbl_fail (a serial constraint foo not null, constraint bar not null a);
 create table notnull_tbl_fail (a serial, constraint foo not null a, constraint bar not null a);
 create table notnull_tbl_fail (like notnull_tbl1, constraint foo2 not null a);
+create table notnull_tbl_fail (a int primary key constraint foo not null no inherit);
+create table notnull_tbl_fail (a int not null no inherit primary key);
+create table notnull_tbl_fail (a int primary key, not null a no inherit);
+
 drop table notnull_tbl1;
 
 -- NOT NULL NO INHERIT

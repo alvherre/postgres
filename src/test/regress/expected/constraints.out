@@ -933,6 +933,12 @@ create table notnull_tbl_fail (a serial, constraint foo not null a, constraint b
 ERROR:  conflicting not-null constraint names "foo" and "bar"
 create table notnull_tbl_fail (like notnull_tbl1, constraint foo2 not null a);
 ERROR:  conflicting not-null constraint names "foo" and "foo2"
+create table notnull_tbl_fail (a int primary key constraint foo not null no inherit);
+ERROR:  conflicting NO INHERIT declarations for not-null constraints on column "a"
+create table notnull_tbl_fail (a int not null no inherit primary key);
+ERROR:  conflicting NO INHERIT declarations for not-null constraints on column "a"
+create table notnull_tbl_fail (a int primary key, not null a no inherit);
+ERROR:  conflicting NO INHERIT declaration for not-null constraint on column "a"
 drop table notnull_tbl1;
 -- NOT NULL NO INHERIT
 CREATE TABLE ATACC1 (a int, not null a no inherit);
