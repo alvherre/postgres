@@ -942,22 +942,16 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
  order by 2, 1;
 drop table inh_parent, inh_child1, inh_child2, inh_child3;
 
--- Can turn a NO INHERIT constraint on children into normal, but only if
--- there aren't children
-create table inh_parent (a int not null);
-create table inh_child (a int not null no inherit);
-create table inh_grandchild () inherits (inh_child);
-alter table inh_child inherit inh_parent; -- nope
-drop table inh_child, inh_grandchild;
-create table inh_child (a int not null no inherit);
-alter table inh_child inherit inh_parent; -- now it works
-\d+ inh_child
-drop table inh_parent, inh_child;
-
 -- ALTER TABLE INHERIT ensures that the child has not-null constraints
 create table inh_parent (a int not null);
 create table inh_child (a int);
 alter table inh_child inherit inh_parent; -- nope
+drop table inh_parent, inh_child;
+
+-- Can't merge a NO INHERIT constraint with a normal one
+create table inh_parent (a int not null);
+create table inh_child (a int not null no inherit);
+alter table inh_child inherit inh_parent;
 drop table inh_parent, inh_child;
 
 -- don't interfere with other types of constraints

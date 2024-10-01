@@ -16302,16 +16302,8 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			/*
 			 * If the CHECK child constraint is "no inherit" then cannot
 			 * merge.
-			 *
-			 * This is not desirable for not-null constraints, mostly because
-			 * it breaks our pg_upgrade strategy, but it also makes sense on
-			 * its own: if a child has its own not-null constraint and then
-			 * acquires a parent with the same constraint, then we start to
-			 * enforce that constraint for all the descendants of that child
-			 * too, if any.
 			 */
-			if (child_con->contype == CONSTRAINT_CHECK &&
-				child_con->connoinherit)
+			if (child_con->connoinherit)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
 						 errmsg("constraint \"%s\" conflicts with non-inherited constraint on child table \"%s\"",
@@ -16338,29 +16330,6 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
-
-			/* Also reset connoinherit for not-null, if the child has that */
-			if (child_con->contype == CONSTRAINT_NOTNULL &&
-				child_con->connoinherit)
-			{
-				/*
-				 * If the child has children, it's not possible to turn a NO
-				 * INHERIT constraint into an inheritable one: we would need
-				 * to recurse to create constraints in those children, but
-				 * this is not a good place to do that.
-				 */
-				if (child_rel->rd_rel->relhassubclass)
-					ereport(ERROR,
-							errmsg("cannot add NOT NULL constraint to column \"%s\" of relation \"%s\" with inheritance children",
-								   get_attname(RelationGetRelid(child_rel),
-											   extractNotNullColumn(child_tuple),
-											   false),
-								   RelationGetRelationName(child_rel)),
-							errdetail("Existing constraint \"%s\" is marked NO INHERIT.",
-									  NameStr(child_con->conname)));
-
-				child_con->connoinherit = false;
-			}
 
 			/*
 			 * In case of partitions, an inherited constraint must be

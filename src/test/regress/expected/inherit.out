@@ -2485,32 +2485,17 @@ select conrelid::regclass, conname, contype, coninhcount, conislocal
 (4 rows)
 
 drop table inh_parent, inh_child1, inh_child2, inh_child3;
--- Can turn a NO INHERIT constraint on children into normal, but only if
--- there aren't children
-create table inh_parent (a int not null);
-create table inh_child (a int not null no inherit);
-create table inh_grandchild () inherits (inh_child);
-alter table inh_child inherit inh_parent; -- nope
-ERROR:  cannot add NOT NULL constraint to column "a" of relation "inh_child" with inheritance children
-DETAIL:  Existing constraint "inh_child_a_not_null" is marked NO INHERIT.
-drop table inh_child, inh_grandchild;
-create table inh_child (a int not null no inherit);
-alter table inh_child inherit inh_parent; -- now it works
-\d+ inh_child
-                                 Table "public.inh_child"
- Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
---------+---------+-----------+----------+---------+---------+--------------+-------------
- a      | integer |           | not null |         | plain   |              | 
-Not-null constraints:
-    "inh_child_a_not_null" NOT NULL "a" (local, inherited)
-Inherits: inh_parent
-
-drop table inh_parent, inh_child;
 -- ALTER TABLE INHERIT ensures that the child has not-null constraints
 create table inh_parent (a int not null);
 create table inh_child (a int);
 alter table inh_child inherit inh_parent; -- nope
 ERROR:  column "a" in child table "inh_child" must be marked NOT NULL
+drop table inh_parent, inh_child;
+-- Can't merge a NO INHERIT constraint with a normal one
+create table inh_parent (a int not null);
+create table inh_child (a int not null no inherit);
+alter table inh_child inherit inh_parent;
+ERROR:  constraint "inh_child_a_not_null" conflicts with non-inherited constraint on child table "inh_child"
 drop table inh_parent, inh_child;
 -- don't interfere with other types of constraints
 create table inh_parent (a int primary key);
