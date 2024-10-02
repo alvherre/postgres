@@ -943,7 +943,7 @@ create table notnull_tbl_fail (a int, primary key(a), not null a no inherit);
 ERROR:  conflicting NO INHERIT declaration for not-null constraint on column "a"
 drop table notnull_tbl1;
 -- NOT NULL NO INHERIT
-CREATE TABLE ATACC1 (a int, not null a no inherit);
+CREATE TABLE ATACC1 (a int, NOT NULL a NO INHERIT);
 CREATE TABLE ATACC2 () INHERITS (ATACC1);
 \d+ ATACC2
                                   Table "public.atacc2"
@@ -974,7 +974,19 @@ ALTER TABLE ATACC1 ADD NOT NULL a NO INHERIT;
  a      | integer |           |          |         | plain   |              | 
 Inherits: atacc1
 
-DROP TABLE ATACC1, ATACC2;
+CREATE TABLE ATACC3 (PRIMARY KEY (a)) INHERITS (ATACC1);
+\d+ ATACC3
+                                  Table "public.atacc3"
+ Column |  Type   | Collation | Nullable | Default | Storage | Stats target | Description 
+--------+---------+-----------+----------+---------+---------+--------------+-------------
+ a      | integer |           | not null |         | plain   |              | 
+Indexes:
+    "atacc3_pkey" PRIMARY KEY, btree (a)
+Not-null constraints:
+    "atacc3_a_not_null" NOT NULL "a"
+Inherits: atacc1
+
+DROP TABLE ATACC1, ATACC2, ATACC3;
 -- NOT NULL NO INHERIT is not possible on partitioned tables
 CREATE TABLE ATACC1 (a int NOT NULL NO INHERIT) PARTITION BY LIST (a);
 ERROR:  not-null constraints on partitioned tables cannot be NO INHERIT
