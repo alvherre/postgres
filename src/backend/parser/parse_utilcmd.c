@@ -2198,7 +2198,8 @@ transformIndexConstraints(CreateStmtContext *cxt)
 	/*
 	 * Run through the constraints that need to generate an index, and do so.
 	 *
-	 * For PRIMARY KEY, we queue not-null constraints for each column.
+	 * For PRIMARY KEY, this queues not-null constraints for each column, if
+	 * needed.
 	 */
 	foreach(lc, cxt->ixconstraints)
 	{
