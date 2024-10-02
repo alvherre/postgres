@@ -2603,7 +2603,7 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 							{
 								if (nn->is_no_inherit)
 									ereport(ERROR,
-											errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+											errcode(ERRCODE_SYNTAX_ERROR),
 											errmsg("conflicting NO INHERIT declaration for not-null constraint on column \"%s\"",
 												   key));
 								break;
