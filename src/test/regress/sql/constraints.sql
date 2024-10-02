@@ -649,6 +649,7 @@ create table notnull_tbl_fail (like notnull_tbl1, constraint foo2 not null a);
 create table notnull_tbl_fail (a int primary key constraint foo not null no inherit);
 create table notnull_tbl_fail (a int not null no inherit primary key);
 create table notnull_tbl_fail (a int primary key, not null a no inherit);
+create table notnull_tbl_fail (a int, primary key(a), not null a no inherit);
 
 drop table notnull_tbl1;
 

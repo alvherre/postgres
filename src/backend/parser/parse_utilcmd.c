@@ -2582,20 +2582,41 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 			if (found)
 			{
 				/*
-				 * column is defined in the new table.  For CREATE TABLE with
-				 * a PRIMARY KEY, we can apply the not-null constraint cheaply
-				 * here.  Note that ALTER TABLE never needs this, because
+				 * column is defined in the new table.  For CREATE TABLE with a
+				 * PRIMARY KEY, we can apply the not-null constraint cheaply
+				 * here.  If the not-null constraint already exists, we can
+				 * (albeit not so cheaply) verify that it's not a NO INHERIT
+				 * constraint.
+				 *
+				 * Note that ALTER TABLE never needs either check, because
 				 * those constraints have already been added by
 				 * ATPrepAddPrimaryKey.
 				 */
-				if (constraint->contype == CONSTR_PRIMARY &&
-					!column->is_not_null)
+				if (constraint->contype == CONSTR_PRIMARY)
 				{
-					Assert(!cxt->isalter);	/* doesn't occur in ALTER TABLE */
-					column->is_not_null = true;
-					cxt->nnconstraints =
-						lappend(cxt->nnconstraints,
-								makeNotNullConstraint(makeString(key)));
+					if (column->is_not_null)
+					{
+						foreach_node(Constraint, nn, cxt->nnconstraints)
+						{
+							if (strcmp(strVal(linitial(nn->keys)), key) == 0)
+							{
+								if (nn->is_no_inherit)
+									ereport(ERROR,
+											errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+											errmsg("conflicting NO INHERIT declaration for not-null constraint on column \"%s\"",
+												   key));
+								break;
+							}
+						}
+					}
+					else
+					{
+						Assert(!cxt->isalter);	/* doesn't occur in ALTER TABLE */
+						column->is_not_null = true;
+						cxt->nnconstraints =
+							lappend(cxt->nnconstraints,
+									makeNotNullConstraint(makeString(key)));
+					}
 				}
 			}
 			else if (SystemAttributeByName(key) != NULL)
