@@ -183,7 +183,8 @@ ALTER FOREIGN TABLE [ IF EXISTS ] <replaceable class="parameter">name</replaceab
       declares that some new condition should be assumed to hold for all rows
       in the foreign table.  (See the discussion
       in <link linkend="sql-createforeigntable"><command>CREATE FOREIGN TABLE</command></link>.)
-      If the constraint is marked <literal>NOT VALID</literal>, then it isn't
+      If the constraint is marked <literal>NOT VALID</literal> (allowed only for
+      the <literal>CHECK</literal> case), then it isn't
       assumed to hold, but is only recorded for possible future use.
      </para>
     </listitem>
