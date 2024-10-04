@@ -4294,8 +4294,6 @@ getPublications(Archive *fout)
 
 	query = createPQExpBuffer();
 
-	resetPQExpBuffer(query);
-
 	/* Get the publications. */
 	if (fout->remoteVersion >= 130000)
 		appendPQExpBufferStr(query,
@@ -4319,6 +4317,9 @@ getPublications(Archive *fout)
 	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
 	ntups = PQntuples(res);
+
+	if (ntups == 0)
+		goto cleanup;
 
 	i_tableoid = PQfnumber(res, "tableoid");
 	i_oid = PQfnumber(res, "oid");
@@ -4358,6 +4359,8 @@ getPublications(Archive *fout)
 		/* Decide whether we want to dump it */
 		selectDumpableObject(&(pubinfo[i].dobj), fout);
 	}
+
+cleanup:
 	PQclear(res);
 
 	destroyPQExpBuffer(query);
@@ -5823,7 +5826,7 @@ getExtensions(Archive *fout, int *numExtensions)
 	int			ntups;
 	int			i;
 	PQExpBuffer query;
-	ExtensionInfo *extinfo;
+	ExtensionInfo *extinfo = NULL;
 	int			i_tableoid;
 	int			i_oid;
 	int			i_extname;
@@ -5843,6 +5846,8 @@ getExtensions(Archive *fout, int *numExtensions)
 	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
 
 	ntups = PQntuples(res);
+	if (ntups == 0)
+		goto cleanup;
 
 	extinfo = (ExtensionInfo *) pg_malloc(ntups * sizeof(ExtensionInfo));
 
@@ -5872,6 +5877,7 @@ getExtensions(Archive *fout, int *numExtensions)
 		selectDumpableExtension(&(extinfo[i]), dopt);
 	}
 
+cleanup:
 	PQclear(res);
 	destroyPQExpBuffer(query);
 
@@ -16063,8 +16069,13 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			binary_upgrade_set_pg_class_oids(fout, q,
 											 tbinfo->dobj.catId.oid);
 
+		/*
+		 * PostgreSQL 18 has disabled UNLOGGED for partitioned tables, so
+		 * ignore it when dumping if it was set in this case.
+		 */
 		appendPQExpBuffer(q, "CREATE %s%s %s",
-						  tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED ?
+						  (tbinfo->relpersistence == RELPERSISTENCE_UNLOGGED &&
+						   tbinfo->relkind != RELKIND_PARTITIONED_TABLE) ?
 						  "UNLOGGED " : "",
 						  reltypename,
 						  qualrelname);
