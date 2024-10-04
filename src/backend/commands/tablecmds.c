@@ -6102,8 +6102,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap, LOCKMODE lockmode)
 		/*
 		 * If we are rebuilding the tuples OR if we added any new but not
 		 * verified not-null constraints, check all not-null constraints. This
-		 * is a bit of overkill but it minimizes risk of bugs, and
-		 * heap_attisnull is a pretty cheap test anyway.
+		 * is a bit of overkill but it minimizes risk of bugs.
 		 */
 		for (i = 0; i < newTupDesc->natts; i++)
 		{
