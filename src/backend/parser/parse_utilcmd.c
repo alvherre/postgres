@@ -2593,7 +2593,8 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 				 * those constraints have already been added by
 				 * ATPrepAddPrimaryKey.
 				 */
-				if (constraint->contype == CONSTR_PRIMARY)
+				if (constraint->contype == CONSTR_PRIMARY &&
+					!cxt->isalter)
 				{
 					if (column->is_not_null)
 					{
@@ -2612,13 +2613,14 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 					}
 					else
 					{
-						Assert(!cxt->isalter);	/* doesn't occur in ALTER TABLE */
 						column->is_not_null = true;
 						cxt->nnconstraints =
 							lappend(cxt->nnconstraints,
 									makeNotNullConstraint(makeString(key)));
 					}
 				}
+				else if (constraint->contype == CONSTR_PRIMARY)
+					Assert(column->is_not_null);
 			}
 			else if (SystemAttributeByName(key) != NULL)
 			{
