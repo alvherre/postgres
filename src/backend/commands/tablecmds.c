@@ -7631,27 +7631,40 @@ static void
 set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 			   LOCKMODE lockmode)
 {
-	Oid			reloid = RelationGetRelid(rel);
-	HeapTuple	tuple;
-	Form_pg_attribute attForm;
+	Form_pg_attribute attr;
 
 	CheckAlterTableIsSafe(rel);
 
-	tuple = SearchSysCacheCopyAttNum(reloid, attnum);
-	if (!HeapTupleIsValid(tuple))
-		elog(ERROR, "cache lookup failed for attribute %d of relation %u",
-			 attnum, reloid);
-	attForm = (Form_pg_attribute) GETSTRUCT(tuple);
-	if (!attForm->attnotnull)
+	/*
+	 * Exit quickly by testing attnotnull from the tupledesc's copy of
+	 * the attribute.
+	 */
+	attr = TupleDescAttr(RelationGetDescr(rel), attnum - 1);
+	if (attr->attisdropped)
+		return;
+
+	if (!attr->attnotnull)
 	{
 		Relation	attr_rel;
+		HeapTuple	tuple;
 
 		attr_rel = table_open(AttributeRelationId, RowExclusiveLock);
 
-		attForm->attnotnull = true;
+		tuple = SearchSysCacheCopyAttNum(RelationGetRelid(rel), attnum);
+		if (!HeapTupleIsValid(tuple))
+			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
+				 attnum, RelationGetRelid(rel));
+
+		attr = (Form_pg_attribute) GETSTRUCT(tuple);
+		Assert(!attr->attnotnull);
+		attr->attnotnull = true;
 		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
 
-		if (wqueue && !NotNullImpliedByRelConstraints(rel, attForm))
+		/*
+		 * If the nullness isn't already proven by validated constraints, have
+		 * ALTER TABLE phase 3 test for it.
+		 */
+		if (wqueue && !NotNullImpliedByRelConstraints(rel, attr))
 		{
 			AlteredTableInfo *tab;
 
@@ -7662,9 +7675,8 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 		CommandCounterIncrement();
 
 		table_close(attr_rel, RowExclusiveLock);
+		heap_freetuple(tuple);
 	}
-
-	heap_freetuple(tuple);
 }
 
 /*
