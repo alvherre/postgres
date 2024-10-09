@@ -596,7 +596,7 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 	bool		saw_identity;
 	bool		saw_generated;
 	bool		need_notnull = false;
-	bool		need_pk_notnull = false;
+	bool		disallow_noinherit_notnull = false;
 	Constraint *notnull_constraint = NULL;
 
 	cxt->columns = lappend(cxt->columns, column);
@@ -696,11 +696,41 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 
 		/* have a not-null constraint added later */
 		need_notnull = true;
+		disallow_noinherit_notnull = true;
 	}
 
 	/* Process column constraints, if any... */
 	transformConstraintAttrs(cxt, column->constraints);
 
+	/*
+	 * First, scan the column's constraints to see if a not-null constraint
+	 * that we add must be prevented from being NO INHERIT.  This should be
+	 * enforced only for PRIMARY KEY, not IDENTITY or SERIAL.  However, if the
+	 * not-null constraint is specified as a table constraint rather than as a
+	 * column constraint, AddRelationNotNullConstraints would raise an error
+	 * if a NO INHERIT mismatch is found.  To avoid inconsistently disallowing
+	 * it in the table constraint case but not the column constraint case, we
+	 * disallow it here as well.  Maybe AddRelationNotNullConstraints can be
+	 * improved someday, so that it doesn't complain, and then we can remove
+	 * the restriction for SERIAL and IDENTITY here as well.
+	 */
+	if (!disallow_noinherit_notnull)
+	{
+		foreach_node(Constraint, constraint, column->constraints)
+		{
+			switch (constraint->contype)
+			{
+				case CONSTR_IDENTITY:
+				case CONSTR_PRIMARY:
+					disallow_noinherit_notnull = true;
+					break;
+				default:
+					break;
+			}
+		}
+	}
+
+	/* Now scan them again to do full processing */
 	saw_nullable = false;
 	saw_default = false;
 	saw_identity = false;
@@ -737,6 +767,12 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 							 parser_errposition(cxt->pstate,
 												constraint->location)));
 
+				if (disallow_noinherit_notnull && constraint->is_no_inherit)
+					ereport(ERROR,
+							errcode(ERRCODE_SYNTAX_ERROR),
+							errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
+								   column->colname));
+
 				/*
 				 * If this is the first time we see this column being marked
 				 * not-null, add the constraint entry and keep track of it.
@@ -750,13 +786,6 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 				 */
 				if (!column->is_not_null)
 				{
-					/* We can't use a NO INHERIT constraint with a PK. */
-					if (need_pk_notnull && constraint->is_no_inherit)
-						ereport(ERROR,
-								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
-									   column->colname));
-
 					column->is_not_null = true;
 					saw_nullable = true;
 					need_notnull = false;
@@ -871,25 +900,14 @@ transformColumnDefinition(CreateStmtContext *cxt, ColumnDef *column)
 				break;
 
 			case CONSTR_PRIMARY:
-				/* primary key columns need a NOT NULL constraint */
-				if (notnull_constraint)
-				{
-					/* we have one -- but check it's not NO INHERIT */
-					if (notnull_constraint->is_no_inherit)
-						ereport(ERROR,
-								errcode(ERRCODE_SYNTAX_ERROR),
-								errmsg("conflicting NO INHERIT declarations for not-null constraints on column \"%s\"",
-									   column->colname));
-				}
-				else if (saw_nullable && !column->is_not_null)
+				if (saw_nullable && !column->is_not_null)
 					ereport(ERROR,
 							(errcode(ERRCODE_SYNTAX_ERROR),
 							 errmsg("conflicting NULL/NOT NULL declarations for column \"%s\" of table \"%s\"",
 									column->colname, cxt->relation->relname),
 							 parser_errposition(cxt->pstate,
 												constraint->location)));
-				else
-					need_notnull = need_pk_notnull = true;
+				need_notnull = true;
 
 				if (cxt->isforeign)
 					ereport(ERROR,
