@@ -7814,7 +7814,6 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 
 	constraint = makeNotNullConstraint(makeString(colName));
 	constraint->is_no_inherit = is_no_inherit;
-	constraint->inhcount = recursing ? 1 : 0;
 	constraint->conname = conName;
 
 	/* and do it */
@@ -9213,7 +9212,6 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		Constraint *nnconstr;
 
 		nnconstr = makeNotNullConstraint(lfirst(lc));
-		nnconstr->inhcount = 0;
 
 		newcmd = makeNode(AlterTableCmd);
 		newcmd->subtype = AT_AddConstraint;
@@ -9636,11 +9634,8 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 				 errmsg("constraint must be added to child tables too")));
 
 	/*
-	 * The constraint must appear as inherited in children, so create a
-	 * modified constraint object to use.
+	 * Recurse to create the constraint on each child.
 	 */
-	constr = copyObject(constr);
-	constr->inhcount = 1;
 	foreach(child, children)
 	{
 		Oid			childrelid = lfirst_oid(child);

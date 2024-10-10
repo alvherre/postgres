@@ -715,23 +715,21 @@ extractNotNullColumn(HeapTuple constrTup)
 
 /*
  * AdjustNotNullInheritance
- *		Adjust inheritance count for a single not-null constraint
+ *		Adjust inheritance status for a single not-null constraint
  *
  * If no not-null constraint is found for the column, return false.
  * Caller can create one.
- *
- * If the constraint does exist and matches the requested inheritability
- * status, adjust its inheritance count and islocal status as requested, and
- * return true.  If the inheritability status doesn't match, an error is
- * raised.
+ * If a constraint exists but the connoinherit flag is not what the caller
+ * wants, throw an error about the incompatibility.  Otherwise, we adjust
+ * conislocal/coninhcount and return true.
+ * In the latter case, if is_local is true we flip conislocal true, or do
+ * nothing if it's already true; otherwise we increment coninhcount by 1.
  */
 bool
-AdjustNotNullInheritance(Oid relid, AttrNumber attnum, int count,
+AdjustNotNullInheritance(Oid relid, AttrNumber attnum,
 						 bool is_local, bool is_no_inherit)
 {
 	HeapTuple	tup;
-
-	Assert(count == 0 || count == 1);
 
 	tup = findNotNullConstraintAttnum(relid, attnum);
 	if (HeapTupleIsValid(tup))
@@ -753,12 +751,12 @@ AdjustNotNullInheritance(Oid relid, AttrNumber attnum, int count,
 					errmsg("cannot change NO INHERIT status of NOT NULL constraint \"%s\" on relation \"%s\"",
 						   NameStr(conform->conname), get_rel_name(relid)));
 
-		if (count > 0)
+		if (!is_local)
 		{
-			conform->coninhcount += count;
+			conform->coninhcount += 1;
 			changed = true;
 		}
-		if (is_local)
+		else if (!conform->conislocal)
 		{
 			conform->conislocal = true;
 			changed = true;

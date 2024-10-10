@@ -449,7 +449,6 @@ makeNotNullConstraint(String *colname)
 	notnull->contype = CONSTR_NOTNULL;
 	notnull->conname = NULL;
 	notnull->is_no_inherit = false;
-	notnull->inhcount = 0;
 	notnull->deferrable = false;
 	notnull->initdeferred = false;
 	notnull->location = -1;

@@ -2543,6 +2543,7 @@ AddRelationNewConstraints(Relation rel,
 		{
 			CookedConstraint *nncooked;
 			AttrNumber	colnum;
+			int16		inhcount = is_local ? 0 : 1;
 			char	   *nnname;
 
 			/* Determine which column to modify */
@@ -2563,7 +2564,7 @@ AddRelationNewConstraints(Relation rel,
 			 * to add another one; just adjust inheritance status as needed.
 			 */
 			if (AdjustNotNullInheritance(RelationGetRelid(rel), colnum,
-										 cdef->inhcount, is_local, cdef->is_no_inherit))
+										 is_local, cdef->is_no_inherit))
 				continue;
 
 			/*
@@ -2592,8 +2593,8 @@ AddRelationNewConstraints(Relation rel,
 			constrOid =
 				StoreRelNotNull(rel, nnname, colnum,
 								cdef->initially_valid,
-								cdef->inhcount == 0,
-								cdef->inhcount,
+								is_local,
+								inhcount,
 								cdef->is_no_inherit);
 
 			nncooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
@@ -2604,7 +2605,7 @@ AddRelationNewConstraints(Relation rel,
 			nncooked->expr = NULL;
 			nncooked->skip_validation = cdef->skip_validation;
 			nncooked->is_local = is_local;
-			nncooked->inhcount = cdef->inhcount;
+			nncooked->inhcount = inhcount;
 			nncooked->is_no_inherit = cdef->is_no_inherit;
 
 			cookedConstraints = lappend(cookedConstraints, nncooked);
