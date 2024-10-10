@@ -66,6 +66,7 @@
 #include "commands/typecmds.h"
 #include "commands/user.h"
 #include "commands/vacuum.h"
+#include "common/int.h"
 #include "executor/executor.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
@@ -3099,8 +3100,8 @@ MergeCheckConstraint(List *constraints, const char *name, Node *expr)
 		if (equal(expr, ccon->expr))
 		{
 			/* OK to merge constraint with existing */
-			ccon->inhcount++;
-			if (ccon->inhcount < 0)
+			if (pg_add_s16_overflow(ccon->inhcount, 1,
+									&ccon->inhcount))
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
@@ -3397,8 +3398,8 @@ MergeInheritedAttribute(List *inh_columns,
 	 * Default and other constraints are handled by the caller.
 	 */
 
-	prevdef->inhcount++;
-	if (prevdef->inhcount < 0)
+	if (pg_add_s16_overflow(prevdef->inhcount, 1,
+							&prevdef->inhcount))
 		ereport(ERROR,
 				errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 				errmsg("too many inheritance parents"));
@@ -7119,8 +7120,8 @@ ATExecAddColumn(List **wqueue, AlteredTableInfo *tab, Relation rel,
 								   get_collation_name(childatt->attcollation))));
 
 			/* Bump the existing child att's inhcount */
-			childatt->attinhcount++;
-			if (childatt->attinhcount < 0)
+			if (pg_add_s16_overflow(childatt->attinhcount, 1,
+									&childatt->attinhcount))
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
@@ -10293,7 +10294,7 @@ addFkRecurseReferenced(List **wqueue, Constraint *fkconstraint, Relation rel,
 	Oid			constrOid;
 	char	   *conname;
 	bool		conislocal;
-	int			coninhcount;
+	int16		coninhcount;
 	bool		connoinherit;
 	Oid			deleteTriggerOid,
 				updateTriggerOid;
@@ -10672,9 +10673,9 @@ addFkRecurseReferencing(List **wqueue, Constraint *fkconstraint, Relation rel,
 									  NULL,
 									  NULL,
 									  NULL,
-									  false,
-									  1,
-									  false,
+									  false,	/* islocal */
+									  1,	/* inhcount */
+									  false,	/* conNoInherit */
 									  with_period,	/* conPeriod */
 									  false);
 
@@ -16188,8 +16189,8 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel, bool ispart
 			 * OK, bump the child column's inheritance count.  (If we fail
 			 * later on, this change will just roll back.)
 			 */
-			child_att->attinhcount++;
-			if (child_att->attinhcount < 0)
+			if (pg_add_s16_overflow(child_att->attinhcount, 1,
+									&child_att->attinhcount))
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
@@ -16362,8 +16363,9 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 			 */
 			child_copy = heap_copytuple(child_tuple);
 			child_con = (Form_pg_constraint) GETSTRUCT(child_copy);
-			child_con->coninhcount++;
-			if (child_con->coninhcount < 0)
+
+			if (pg_add_s16_overflow(child_con->coninhcount, 1,
+									&child_con->coninhcount))
 				ereport(ERROR,
 						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("too many inheritance parents"));
