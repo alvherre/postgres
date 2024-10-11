@@ -10668,8 +10668,8 @@ addFkRecurseReferencing(List **wqueue, Constraint *fkconstraint, Relation rel,
 									  NULL,
 									  NULL,
 									  NULL,
-									  false,	/* islocal */
-									  1,	/* inhcount */
+									  false,	/* conIsLocal */
+									  1,	/* conInhCount */
 									  false,	/* conNoInherit */
 									  with_period,	/* conPeriod */
 									  false);
@@ -11195,8 +11195,8 @@ CloneFkReferencing(List **wqueue, Relation parentRel, Relation partRel)
 								  NULL,
 								  NULL,
 								  NULL,
-								  false,	/* islocal */
-								  1,	/* inhcount */
+								  false,	/* conIsLocal */
+								  1,	/* conInhCount */
 								  false,	/* conNoInherit */
 								  with_period,	/* conPeriod */
 								  true);
