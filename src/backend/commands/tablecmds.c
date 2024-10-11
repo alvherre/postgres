@@ -7641,8 +7641,8 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 	CheckAlterTableIsSafe(rel);
 
 	/*
-	 * Exit quickly by testing attnotnull from the tupledesc's copy of
-	 * the attribute.
+	 * Exit quickly by testing attnotnull from the tupledesc's copy of the
+	 * attribute.
 	 */
 	attr = TupleDescAttr(RelationGetDescr(rel), attnum - 1);
 	if (attr->attisdropped)
@@ -12800,9 +12800,34 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 		/* save column name for recursion step */
 		colname = get_attname(RelationGetRelid(rel), attnum, false);
 
-		/* Disallow if it's in the primary key */
+		/*
+		 * Disallow if it's in the primary key.  For partitioned tables we
+		 * cannot rely solely on RelationGetIndexAttrBitmap, because it'll
+		 * return NULL if the primary key is invalid; but we still need to
+		 * protect not-null constraints under such a constraint, so check the
+		 * slow way.
+		 */
 		pkattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_PRIMARY_KEY);
-		if (bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, pkattrs))
+
+		if (pkattrs == NULL &&
+			rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		{
+			Oid			pkindex = RelationGetPrimaryKeyIndex(rel, true);
+
+			if (OidIsValid(pkindex))
+			{
+				Relation	pk = relation_open(pkindex, AccessShareLock);
+
+				pkattrs = NULL;
+				for (int i = 0; i < pk->rd_index->indnkeyatts; i++)
+					pkattrs = bms_add_member(pkattrs, pk->rd_index->indkey.values[i]);
+
+				relation_close(pk, AccessShareLock);
+			}
+		}
+
+		if (pkattrs &&
+			bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, pkattrs))
 			ereport(ERROR,
 					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
 					errmsg("column \"%s\" is in a primary key",
