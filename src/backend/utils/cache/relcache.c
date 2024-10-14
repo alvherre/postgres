@@ -4864,17 +4864,14 @@ RelationGetIndexList(Relation relation)
 			continue;
 
 		/*
-		 * Remember primary key index, if any.  We do this only if the index
-		 * is valid; but if the table is partitioned, then we do it even if
-		 * it's invalid.
+		 * Remember primary key index, if any.  For regular tables we do this
+		 * only if the index is valid; but for partitioned tables, then we do
+		 * it even if it's invalid.
 		 *
-		 * The reason for returning invalid primary keys for foreign tables is
-		 * that we need it to prevent drop of not-null constraints that may
-		 * underlie such a primary key, which is only a problem for
+		 * The reason for returning invalid primary keys for partitioned
+		 * tables is that we need it to prevent drop of not-null constraints
+		 * that may underlie such a primary key, which is only a problem for
 		 * partitioned tables.
-		 *
-		 * Also, this doesn't harm anything, because rd_pkindex is not a
-		 * "real" index anyway, but a RELKIND_PARTITIONED_INDEX.
 		 */
 		if (index->indisprimary &&
 			(index->indisvalid ||
