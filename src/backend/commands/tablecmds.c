@@ -9649,11 +9649,7 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		/* Find or create work queue entry for this table */
 		childtab = ATGetQueueEntry(wqueue, childrel);
 
-		/*
-		 * Recurse to child.  XXX if we didn't create a constraint on the
-		 * parent because it already existed, and we do create one on a child,
-		 * should we return that child's constraint ObjectAddress here?
-		 */
+		/* Recurse to this child */
 		ATAddCheckNNConstraint(wqueue, childtab, childrel,
 							   constr, recurse, true, is_readd, lockmode);
 
