@@ -16354,8 +16354,7 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 								RelationGetRelationName(child_rel), NameStr(parent_con->conname))));
 
 			/*
-			 * If the CHECK child constraint is "no inherit" then cannot
-			 * merge.
+			 * If the child constraint is "no inherit" then cannot merge
 			 */
 			if (child_con->connoinherit)
 				ereport(ERROR,
