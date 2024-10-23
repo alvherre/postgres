@@ -16439,10 +16439,6 @@ MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel)
 				/* there shouldn't be constraints on dropped columns */
 				if (parent_attr->attisdropped || child_attr->attisdropped)
 					elog(ERROR, "found not-null constraint on dropped columns");
-
-				Assert(strcmp(get_attname(parent_relid, parent_attno, false),
-							  get_attname(RelationGetRelid(child_rel), child_attno,
-										  false)) == 0);
 			}
 
 			if (child_con->contype == CONSTRAINT_CHECK &&
