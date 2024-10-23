@@ -753,7 +753,11 @@ AdjustNotNullInheritance(Oid relid, AttrNumber attnum,
 
 		if (!is_local)
 		{
-			conform->coninhcount += 1;
+			if (pg_add_s16_overflow(conform->coninhcount, 1,
+									&conform->coninhcount))
+				ereport(ERROR,
+						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						errmsg("too many inheritance parents"));
 			changed = true;
 		}
 		else if (!conform->conislocal)
