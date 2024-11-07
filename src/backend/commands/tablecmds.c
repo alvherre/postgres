@@ -7772,7 +7772,11 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 		 */
 		if (recursing)
 		{
-			conForm->coninhcount++;
+			if (pg_add_s16_overflow(conForm->coninhcount, 1,
+									&conForm->coninhcount))
+				ereport(ERROR,
+						errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+						errmsg("too many inheritance parents"));
 			changed = true;
 		}
 		else if (!conForm->conislocal)
