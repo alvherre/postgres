@@ -821,6 +821,14 @@ alter table pp1 alter column f1 drop not null;
 alter table pp1 add primary key (f1);
 -- Leave these tables around, for pg_upgrade testing
 
+-- test that removing inheritance of NOT NULL NO INHERIT works correctly
+create table inh_parent (f1 int not null no inherit, f2 int not null no inherit);
+create table inh_child (f1 int not null no inherit, f2 int);
+alter table inh_child inherit inh_parent;
+alter table inh_child no inherit inh_parent;
+\d+ inh_child
+drop table inh_parent, inh_child;
+
 -- test that inhcount is updated correctly through multiple inheritance
 create table inh_pp1 (f1 int);
 create table inh_cc1 (f2 text, f3 int) inherits (inh_pp1);

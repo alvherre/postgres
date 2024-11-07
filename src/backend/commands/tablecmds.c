@@ -16731,9 +16731,9 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	table_close(catalogRelation, RowExclusiveLock);
 
 	/*
-	 * Likewise, find inherited check constraints and disinherit them. To do
-	 * this, we first need a list of the names of the parent's check
-	 * constraints.  (We cheat a bit by only checking for name matches,
+	 * Likewise, find inherited check and not-null constraints and disinherit
+	 * them. To do this, we first need a list of the names of the parent's
+	 * check constraints.  (We cheat a bit by only checking for name matches,
 	 * assuming that the expressions will match.)
 	 *
 	 * For NOT NULL columns, we store column numbers to match, mapping them in
@@ -16757,6 +16757,9 @@ RemoveInheritance(Relation child_rel, Relation parent_rel, bool expect_detached)
 	while (HeapTupleIsValid(constraintTuple = systable_getnext(scan)))
 	{
 		Form_pg_constraint con = (Form_pg_constraint) GETSTRUCT(constraintTuple);
+
+		if (con->connoinherit)
+			continue;
 
 		if (con->contype == CONSTRAINT_CHECK)
 			connames = lappend(connames, pstrdup(NameStr(con->conname)));
