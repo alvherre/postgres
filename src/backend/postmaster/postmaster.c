@@ -92,8 +92,6 @@
 #include "access/xlog.h"
 #include "access/xlogrecovery.h"
 #include "common/file_perm.h"
-#include "common/file_utils.h"
-#include "common/ip.h"
 #include "common/pg_prng.h"
 #include "lib/ilist.h"
 #include "libpq/libpq.h"
@@ -102,7 +100,6 @@
 #include "pgstat.h"
 #include "port/pg_bswap.h"
 #include "postmaster/autovacuum.h"
-#include "postmaster/auxprocess.h"
 #include "postmaster/bgworker_internals.h"
 #include "postmaster/pgarch.h"
 #include "postmaster/postmaster.h"
@@ -114,7 +111,6 @@
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
-#include "storage/proc.h"
 #include "tcop/backend_startup.h"
 #include "tcop/tcopprot.h"
 #include "utils/datetime.h"
@@ -124,6 +120,7 @@
 #include "utils/varlena.h"
 
 #ifdef EXEC_BACKEND
+#include "common/file_utils.h"
 #include "storage/pg_shmem.h"
 #endif
 
@@ -3148,7 +3145,7 @@ LaunchMissingBackgroundProcesses(void)
 	 * The checkpointer and the background writer are active from the start,
 	 * until shutdown is initiated.
 	 *
-	 * (If the checkpointer is not running when we enter the the PM_SHUTDOWN
+	 * (If the checkpointer is not running when we enter the PM_SHUTDOWN
 	 * state, it is launched one more time to perform the shutdown checkpoint.
 	 * That's done in PostmasterStateMachine(), not here.)
 	 */

@@ -161,6 +161,11 @@ attribute_statistics_update(FunctionCallInfo fcinfo, int elevel)
 	stats_check_required_arg(fcinfo, attarginfo, ATTNAME_ARG);
 	attname = PG_GETARG_NAME(ATTNAME_ARG);
 	attnum = get_attnum(reloid, NameStr(*attname));
+	if (attnum == InvalidAttrNumber)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_COLUMN),
+				 errmsg("column \"%s\" of relation \"%s\" does not exist",
+						NameStr(*attname), get_rel_name(reloid))));
 
 	stats_check_required_arg(fcinfo, attarginfo, INHERITED_ARG);
 	inherited = PG_GETARG_BOOL(INHERITED_ARG);
@@ -633,7 +638,7 @@ text_to_stavalues(const char *staname, FmgrInfo *array_in, Datum d, Oid typid,
 
 	pfree(s);
 
-	if (SOFT_ERROR_OCCURRED(&escontext))
+	if (escontext.error_occurred)
 	{
 		if (elevel != ERROR)
 			escontext.error_data->elevel = elevel;
@@ -747,6 +752,8 @@ upsert_pg_statistic(Relation starel, HeapTuple oldtup,
 	}
 
 	heap_freetuple(newtup);
+
+	CommandCounterIncrement();
 }
 
 /*
@@ -757,6 +764,7 @@ delete_pg_statistic(Oid reloid, AttrNumber attnum, bool stainherit)
 {
 	Relation	sd = table_open(StatisticRelationId, RowExclusiveLock);
 	HeapTuple	oldtup;
+	bool		result = false;
 
 	/* Is there already a pg_statistic tuple for this attribute? */
 	oldtup = SearchSysCache3(STATRELATTINH,
@@ -768,12 +776,14 @@ delete_pg_statistic(Oid reloid, AttrNumber attnum, bool stainherit)
 	{
 		CatalogTupleDelete(sd, &oldtup->t_self);
 		ReleaseSysCache(oldtup);
-		table_close(sd, RowExclusiveLock);
-		return true;
+		result = true;
 	}
 
 	table_close(sd, RowExclusiveLock);
-	return false;
+
+	CommandCounterIncrement();
+
+	return result;
 }
 
 /*
@@ -860,10 +870,34 @@ pg_clear_attribute_stats(PG_FUNCTION_ARGS)
 	stats_check_required_arg(fcinfo, attarginfo, ATTNAME_ARG);
 	attname = PG_GETARG_NAME(ATTNAME_ARG);
 	attnum = get_attnum(reloid, NameStr(*attname));
+	if (attnum == InvalidAttrNumber)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_COLUMN),
+				 errmsg("column \"%s\" of relation \"%s\" does not exist",
+						NameStr(*attname), get_rel_name(reloid))));
 
 	stats_check_required_arg(fcinfo, attarginfo, INHERITED_ARG);
 	inherited = PG_GETARG_BOOL(INHERITED_ARG);
 
 	delete_pg_statistic(reloid, attnum, inherited);
 	PG_RETURN_VOID();
+}
+
+Datum
+pg_restore_attribute_stats(PG_FUNCTION_ARGS)
+{
+	LOCAL_FCINFO(positional_fcinfo, NUM_ATTRIBUTE_STATS_ARGS);
+	bool		result = true;
+
+	InitFunctionCallInfoData(*positional_fcinfo, NULL, NUM_ATTRIBUTE_STATS_ARGS,
+							 InvalidOid, NULL, NULL);
+
+	if (!stats_fill_fcinfo_from_arg_pairs(fcinfo, positional_fcinfo,
+										  attarginfo, WARNING))
+		result = false;
+
+	if (!attribute_statistics_update(positional_fcinfo, WARNING))
+		result = false;
+
+	PG_RETURN_BOOL(result);
 }

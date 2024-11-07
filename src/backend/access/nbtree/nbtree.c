@@ -20,10 +20,8 @@
 
 #include "access/nbtree.h"
 #include "access/relscan.h"
-#include "access/xloginsert.h"
 #include "commands/progress.h"
 #include "commands/vacuum.h"
-#include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "pgstat.h"
 #include "storage/bulk_write.h"
@@ -31,7 +29,6 @@
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
 #include "utils/fmgrprotos.h"
 #include "utils/index_selfuncs.h"
 #include "utils/memutils.h"
@@ -765,13 +762,15 @@ _bt_parallel_done(IndexScanDesc scan)
 	BTParallelScanDesc btscan;
 	bool		status_changed = false;
 
+	Assert(!BTScanPosIsValid(so->currPos));
+
 	/* Do nothing, for non-parallel scans */
 	if (parallel_scan == NULL)
 		return;
 
 	/*
 	 * Should not mark parallel scan done when there's still a pending
-	 * primitive index scan
+	 * primitive index scan (defensive)
 	 */
 	if (so->needPrimScan)
 		return;

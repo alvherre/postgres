@@ -630,6 +630,7 @@ typedef struct _PublicationInfo
 	bool		pubdelete;
 	bool		pubtruncate;
 	bool		pubviaroot;
+	bool		pubgencols;
 } PublicationInfo;
 
 /*
