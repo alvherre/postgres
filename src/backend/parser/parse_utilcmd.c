@@ -2601,8 +2601,8 @@ transformIndexConstraint(Constraint *constraint, CreateStmtContext *cxt)
 			if (found)
 			{
 				/*
-				 * column is defined in the new table.  For CREATE TABLE with a
-				 * PRIMARY KEY, we can apply the not-null constraint cheaply
+				 * column is defined in the new table.  For CREATE TABLE with
+				 * a PRIMARY KEY, we can apply the not-null constraint cheaply
 				 * here.  If the not-null constraint already exists, we can
 				 * (albeit not so cheaply) verify that it's not a NO INHERIT
 				 * constraint.
