@@ -823,6 +823,7 @@ RelationGetNotNullConstraints(Oid relid, bool cooked, bool include_noinh)
 			cooked = (CookedConstraint *) palloc(sizeof(CookedConstraint));
 
 			cooked->contype = CONSTR_NOTNULL;
+			cooked->conoid = conForm->oid;
 			cooked->name = pstrdup(NameStr(conForm->conname));
 			cooked->attnum = colnum;
 			cooked->expr = NULL;
