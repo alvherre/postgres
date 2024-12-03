@@ -115,6 +115,7 @@ typedef struct
 	bool		redirection_done;
 	bool		IsBinaryUpgrade;
 	bool		query_id_enabled;
+	bool		query_id_squash_values;
 	int			max_safe_fds;
 	int			MaxBackends;
 	int			num_pmchild_slots;
@@ -775,6 +776,7 @@ save_backend_variables(BackendParameters *param,
 	param->redirection_done = redirection_done;
 	param->IsBinaryUpgrade = IsBinaryUpgrade;
 	param->query_id_enabled = query_id_enabled;
+	param->query_id_squash_values = query_id_squash_values;
 	param->max_safe_fds = max_safe_fds;
 
 	param->MaxBackends = MaxBackends;
@@ -1035,6 +1037,7 @@ restore_backend_variables(BackendParameters *param)
 	redirection_done = param->redirection_done;
 	IsBinaryUpgrade = param->IsBinaryUpgrade;
 	query_id_enabled = param->query_id_enabled;
+	query_id_squash_values = param->query_id_squash_values;
 	max_safe_fds = param->max_safe_fds;
 
 	MaxBackends = param->MaxBackends;

@@ -32,15 +32,22 @@
  */
 #include "postgres.h"
 
+#include "access/transam.h"
+#include "catalog/pg_proc.h"
 #include "common/hashfn.h"
 #include "miscadmin.h"
+#include "nodes/nodeFuncs.h"
 #include "nodes/queryjumble.h"
+#include "utils/lsyscache.h"
 #include "parser/scansup.h"
 
 #define JUMBLE_SIZE				1024	/* query serialization buffer size */
 
 /* GUC parameters */
 int			compute_query_id = COMPUTE_QUERY_ID_AUTO;
+
+/* Whether to merge constants in a list when computing query_id */
+bool		query_id_squash_values = false;
 
 /*
  * True when compute_query_id is ON or AUTO, and a module requests them.
@@ -53,8 +60,10 @@ bool		query_id_enabled = false;
 
 static void AppendJumble(JumbleState *jstate,
 						 const unsigned char *item, Size size);
-static void RecordConstLocation(JumbleState *jstate, int location);
+static void RecordConstLocation(JumbleState *jstate,
+								int location, bool merged);
 static void _jumbleNode(JumbleState *jstate, Node *node);
+static void _jumbleElements(JumbleState *jstate, List *elements);
 static void _jumbleA_Const(JumbleState *jstate, Node *node);
 static void _jumbleList(JumbleState *jstate, Node *node);
 static void _jumbleVariableSetStmt(JumbleState *jstate, Node *node);
@@ -198,11 +207,15 @@ AppendJumble(JumbleState *jstate, const unsigned char *item, Size size)
 }
 
 /*
- * Record location of constant within query string of query tree
- * that is currently being walked.
+ * Record location of constant within query string of query tree that is
+ * currently being walked.
+ *
+ * Merged argument signals that the constant represents the first or the last
+ * element in a series of merged constants, and everything but the first/last
+ * element contributes nothing to the jumble hash.
  */
 static void
-RecordConstLocation(JumbleState *jstate, int location)
+RecordConstLocation(JumbleState *jstate, int location, bool merged)
 {
 	/* -1 indicates unknown or undefined location */
 	if (location >= 0)
@@ -218,15 +231,127 @@ RecordConstLocation(JumbleState *jstate, int location)
 		}
 		jstate->clocations[jstate->clocations_count].location = location;
 		/* initialize lengths to -1 to simplify third-party module usage */
+		jstate->clocations[jstate->clocations_count].merged = merged;
 		jstate->clocations[jstate->clocations_count].length = -1;
 		jstate->clocations_count++;
 	}
 }
 
+/*
+ * Verify few simple cases where we can deduce that the expression is a
+ * constant:
+ *
+ * - Simplify the expression, if it's wrapped into RelabelType and CoerceViaIO.
+ * - If it's a FuncExpr, check if the function is an immutable builtin
+ *   function doing implicit cast with constant arguments.
+ * - Otherwise test if the expression is a simple Const.
+ *
+ * We could also handle some simple OpExpr here as well, but since such queries
+ * will also have opno jumbled, this might lead to a confusing situation where
+ * two different queries end up with the same normalized query but different
+ * query_id.
+ *
+ * The argument known_immutable_funcs contains known function OIDs that were
+ * already proven to be immutable. If the expression to verify is a FuncExpr,
+ * we first check this list, and only if not found, test the function
+ * volatility and store the result back. Since most of the time constants
+ * merging will be dealing with same type of expressions, this avoids
+ * performing func_volatile over and over for the same functions.
+ *
+ * Note that we intentionally do not recurse on the function arguments and only
+ * test them for being Const expression for simplicity.
+ */
+static bool
+IsMergeableConst(Node *element, List **known_immutable_funcs)
+{
+	if (IsA(element, RelabelType))
+		element = (Node *) ((RelabelType *) element)->arg;
+
+	if (IsA(element, CoerceViaIO))
+		element = (Node *) ((CoerceViaIO *) element)->arg;
+
+	if (IsA(element, FuncExpr))
+	{
+		FuncExpr   *func = (FuncExpr *) element;
+		ListCell   *temp;
+
+		if (func->funcid > FirstGenbkiObjectId)
+			return false;
+
+		if (func->funcformat != COERCE_IMPLICIT_CAST)
+			return false;
+
+		if (!list_member_oid(*known_immutable_funcs, func->funcid))
+		{
+			/* Not found in the cache, verify and add if needed */
+			if (func_volatile(func->funcid) != PROVOLATILE_IMMUTABLE)
+				return false;
+
+			*known_immutable_funcs = lappend_oid(*known_immutable_funcs,
+												 func->funcid);
+		}
+
+		foreach(temp, func->args)
+		{
+			Node	   *arg = lfirst(temp);
+
+			if (!IsA(arg, Const))
+				return false;
+		}
+
+		return true;
+	}
+
+	if (!IsA(element, Const))
+		return false;
+
+	return true;
+}
+
+/*
+ * Verify if the provided list could be merged down, which means it contains
+ * only constant expressions.
+ *
+ * Return value indicates if merging is possible.
+ *
+ * Note that this function searches only for explicit Const nodes and does not
+ * try to simplify expressions.
+ */
+static bool
+IsMergeableConstList(List *elements, Node **firstExpr, Node **lastExpr)
+{
+	ListCell   *temp;
+
+	/* To keep track of immutable functions in elements */
+	List	   *immutable_funcs = NIL;
+
+	/* A mergeable list needs to contain at least two elements */
+	if (elements == NIL || list_length(elements) < 2)
+		return false;
+
+	if (!query_id_squash_values)
+	{
+		/* Merging is disabled, process everything one by one */
+		return false;
+	}
+
+	foreach(temp, elements)
+	{
+		if (!IsMergeableConst(lfirst(temp), &immutable_funcs))
+			return false;
+	}
+	*firstExpr = linitial(elements);
+	*lastExpr = llast(elements);
+
+	return true;
+}
+
 #define JUMBLE_NODE(item) \
 	_jumbleNode(jstate, (Node *) expr->item)
-#define JUMBLE_LOCATION(location) \
-	RecordConstLocation(jstate, expr->location)
+#define JUMBLE_ELEMENTS(list) \
+	_jumbleElements(jstate, (List *) expr->list)
+#define JUMBLE_LOCATION(location, merged) \
+	RecordConstLocation(jstate, expr->location, merged)
 #define JUMBLE_FIELD(item) \
 	AppendJumble(jstate, (const unsigned char *) &(expr->item), sizeof(expr->item))
 #define JUMBLE_FIELD_SINGLE(item) \
@@ -238,6 +363,36 @@ do { \
 } while(0)
 
 #include "queryjumblefuncs.funcs.c"
+
+static void
+_jumbleElements(JumbleState *jstate, List *elements)
+{
+	Node	   *first,
+			   *last;
+
+	if (IsMergeableConstList(elements, &first, &last))
+	{
+		/*
+		 * Both first and last constants have to be recorded. The first one
+		 * will indicate the merged interval, the last one will tell us the
+		 * length of the interval within the query text.
+		 *
+		 * Note that for the last exression we actually need not the
+		 * expression location (which is the leftmost expression), but where
+		 * it ends. For the limited set of supported cases now (implicit
+		 * coerce via FuncExpr, Const) it's fine to use exprLocation, but if
+		 * more complex composite expressions will be supported, e.g. OpExpr
+		 * or FuncExpr as an explicit call, the rightmost expression will be
+		 * needed.
+		 */
+		RecordConstLocation(jstate, exprLocation(first), true);
+		RecordConstLocation(jstate, exprLocation(last), true);
+	}
+	else
+	{
+		_jumbleNode(jstate, (Node *) elements);
+	}
+}
 
 static void
 _jumbleNode(JumbleState *jstate, Node *node)
@@ -375,5 +530,5 @@ _jumbleVariableSetStmt(JumbleState *jstate, Node *node)
 	if (expr->jumble_args)
 		JUMBLE_NODE(args);
 	JUMBLE_FIELD(is_local);
-	JUMBLE_LOCATION(location);
+	JUMBLE_LOCATION(location, false);
 }
