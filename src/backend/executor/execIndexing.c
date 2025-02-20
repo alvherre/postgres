@@ -117,6 +117,7 @@
 #include "utils/multirangetypes.h"
 #include "utils/rangetypes.h"
 #include "utils/snapmgr.h"
+#include "utils/injection_point.h"
 
 /* waitMode argument to check_exclusion_or_unique_constraint() */
 typedef enum
@@ -942,6 +943,13 @@ retry:
 	econtext->ecxt_scantuple = save_scantuple;
 
 	ExecDropSingleTupleTableSlot(existing_slot);
+
+#ifdef USE_INJECTION_POINTS
+	if (conflict)
+		INJECTION_POINT("check_exclusion_or_unique_constraint_conflict", NULL);
+	else
+		INJECTION_POINT("check_exclusion_or_unique_constraint_no_conflict", NULL);
+#endif
 
 	return !conflict;
 }

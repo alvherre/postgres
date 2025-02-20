@@ -70,6 +70,7 @@
 #include "utils/datum.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
+#include "utils/injection_point.h"
 
 
 typedef struct MTTargetRelLookup
@@ -1186,6 +1187,7 @@ ExecInsert(ModifyTableContext *context,
 			 * if we're going to go ahead with the insertion, instead of
 			 * waiting for the whole transaction to complete.
 			 */
+			INJECTION_POINT("exec_insert_before_insert_speculative", NULL);
 			specToken = SpeculativeInsertionLockAcquire(GetCurrentTransactionId());
 
 			/* insert the tuple, with the speculative token */

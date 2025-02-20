@@ -123,6 +123,7 @@
 #include "utils/resowner.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
+#include "utils/injection_point.h"
 
 
 /*
@@ -458,6 +459,7 @@ InvalidateCatalogSnapshot(void)
 		pairingheap_remove(&RegisteredSnapshots, &CatalogSnapshot->ph_node);
 		CatalogSnapshot = NULL;
 		SnapshotResetXmin();
+		INJECTION_POINT("invalidate_catalog_snapshot_end", NULL);
 	}
 }
 
