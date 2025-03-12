@@ -189,7 +189,6 @@ static bool SlruScanDirCbDeleteCutoff(SlruCtl ctl, char *filename,
 static void SlruInternalDeleteSegment(SlruCtl ctl, int64 segno);
 static inline void SlruRecentlyUsed(SlruShared shared, int slotno);
 
-
 /*
  * Initialization of shared memory
  */
@@ -360,6 +359,32 @@ check_slru_buffers(const char *name, int *newval)
 	GUC_check_errdetail("\"%s\" must be a multiple of %d.", name,
 						SLRU_BANK_SIZE);
 	return false;
+}
+
+/*
+ * SimpleLruZeroPageExt performs:
+ * 		1. locking the page,
+ * 		2. nullifying the page,
+ * 		3. writing the page out,
+ * 		4. releasing the lock.
+ */
+void
+SimpleLruZeroPageExt(SlruCtl ctl, int64 pageno)
+{
+	int			slotno;
+	LWLock	   *lock;
+
+	lock = SimpleLruGetBankLock(ctl, pageno);
+	LWLockAcquire(lock, LW_EXCLUSIVE);
+
+	/* Create and zero the page*/
+	slotno = SimpleLruZeroPage(ctl, pageno);
+
+	/* Make sure it's written out */
+	SimpleLruWritePage(ctl, slotno);
+	Assert(!ctl->shared->page_dirty[slotno]);
+
+	LWLockRelease(lock);
 }
 
 /*
