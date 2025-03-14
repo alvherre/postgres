@@ -210,12 +210,12 @@ AppendJumble(JumbleState *jstate, const unsigned char *item, Size size)
  * Record location of constant within query string of query tree that is
  * currently being walked.
  *
- * Merged argument signals that the constant represents the first or the last
+ * 'squashed' signals that the constant represents the first or the last
  * element in a series of merged constants, and everything but the first/last
  * element contributes nothing to the jumble hash.
  */
 static void
-RecordConstLocation(JumbleState *jstate, int location, bool merged)
+RecordConstLocation(JumbleState *jstate, int location, bool squashed)
 {
 	/* -1 indicates unknown or undefined location */
 	if (location >= 0)
@@ -231,38 +231,23 @@ RecordConstLocation(JumbleState *jstate, int location, bool merged)
 		}
 		jstate->clocations[jstate->clocations_count].location = location;
 		/* initialize lengths to -1 to simplify third-party module usage */
-		jstate->clocations[jstate->clocations_count].merged = merged;
+		jstate->clocations[jstate->clocations_count].squashed = squashed;
 		jstate->clocations[jstate->clocations_count].length = -1;
 		jstate->clocations_count++;
 	}
 }
 
 /*
- * Verify few simple cases where we can deduce that the expression is a
- * constant:
+ * Subroutine for _jumbleElements: Verify a few simple cases where we can
+ * deduce that the expression is a constant:
  *
- * - Simplify the expression, if it's wrapped into RelabelType and CoerceViaIO.
- * - If it's a FuncExpr, check if the function is an immutable builtin
- *   function doing implicit cast with constant arguments.
+ * - Ignore a possible wrapping RelabelType and CoerceViaIO.
+ * - If it's a FuncExpr, check that the function is an implicit
+ *   cast and its arguments are Const.
  * - Otherwise test if the expression is a simple Const.
- *
- * We could also handle some simple OpExpr here as well, but since such queries
- * will also have opno jumbled, this might lead to a confusing situation where
- * two different queries end up with the same normalized query but different
- * query_id.
- *
- * The argument known_immutable_funcs contains known function OIDs that were
- * already proven to be immutable. If the expression to verify is a FuncExpr,
- * we first check this list, and only if not found, test the function
- * volatility and store the result back. Since most of the time constants
- * merging will be dealing with same type of expressions, this avoids
- * performing func_volatile over and over for the same functions.
- *
- * Note that we intentionally do not recurse on the function arguments and only
- * test them for being Const expression for simplicity.
  */
 static bool
-IsMergeableConst(Node *element, List **known_immutable_funcs)
+IsSquashableConst(Node *element)
 {
 	if (IsA(element, RelabelType))
 		element = (Node *) ((RelabelType *) element)->arg;
@@ -275,27 +260,17 @@ IsMergeableConst(Node *element, List **known_immutable_funcs)
 		FuncExpr   *func = (FuncExpr *) element;
 		ListCell   *temp;
 
-		if (func->funcid > FirstGenbkiObjectId)
-			return false;
-
 		if (func->funcformat != COERCE_IMPLICIT_CAST)
 			return false;
 
-		if (!list_member_oid(*known_immutable_funcs, func->funcid))
-		{
-			/* Not found in the cache, verify and add if needed */
-			if (func_volatile(func->funcid) != PROVOLATILE_IMMUTABLE)
-				return false;
-
-			*known_immutable_funcs = lappend_oid(*known_immutable_funcs,
-												 func->funcid);
-		}
+		if (func->funcid > FirstGenbkiObjectId)
+			return false;
 
 		foreach(temp, func->args)
 		{
 			Node	   *arg = lfirst(temp);
 
-			if (!IsA(arg, Const))
+			if (!IsA(arg, Const))	/* XXX we could recurse here instead */
 				return false;
 		}
 
@@ -309,37 +284,33 @@ IsMergeableConst(Node *element, List **known_immutable_funcs)
 }
 
 /*
- * Verify if the provided list could be merged down, which means it contains
- * only constant expressions.
+ * Subroutine for _jumbleElements: Verify whether the provided list
+ * can be squashed, meaning it contains only constant expressions.
  *
- * Return value indicates if merging is possible.
+ * Return value indicates if squashing is possible.
  *
- * Note that this function searches only for explicit Const nodes and does not
- * try to simplify expressions.
+ * Note that this function searches only for explicit Const nodes with
+ * possibly very simple decorations on top, and does not try to simplify
+ * expressions.
  */
 static bool
-IsMergeableConstList(List *elements, Node **firstExpr, Node **lastExpr)
+IsSquashableConstList(List *elements, Node **firstExpr, Node **lastExpr)
 {
 	ListCell   *temp;
 
-	/* To keep track of immutable functions in elements */
-	List	   *immutable_funcs = NIL;
-
-	/* A mergeable list needs to contain at least two elements */
-	if (elements == NIL || list_length(elements) < 2)
+	/*
+	 * If squashing is disabled, or the list is too short, we don't try to
+	 * squash it.
+	 */
+	if (!query_id_squash_values || list_length(elements) < 2)
 		return false;
-
-	if (!query_id_squash_values)
-	{
-		/* Merging is disabled, process everything one by one */
-		return false;
-	}
 
 	foreach(temp, elements)
 	{
-		if (!IsMergeableConst(lfirst(temp), &immutable_funcs))
+		if (!IsSquashableConst(lfirst(temp)))
 			return false;
 	}
+
 	*firstExpr = linitial(elements);
 	*lastExpr = llast(elements);
 
@@ -350,8 +321,8 @@ IsMergeableConstList(List *elements, Node **firstExpr, Node **lastExpr)
 	_jumbleNode(jstate, (Node *) expr->item)
 #define JUMBLE_ELEMENTS(list) \
 	_jumbleElements(jstate, (List *) expr->list)
-#define JUMBLE_LOCATION(location, merged) \
-	RecordConstLocation(jstate, expr->location, merged)
+#define JUMBLE_LOCATION(location) \
+	RecordConstLocation(jstate, expr->location, false)
 #define JUMBLE_FIELD(item) \
 	AppendJumble(jstate, (const unsigned char *) &(expr->item), sizeof(expr->item))
 #define JUMBLE_FIELD_SINGLE(item) \
@@ -364,26 +335,35 @@ do { \
 
 #include "queryjumblefuncs.funcs.c"
 
+/*
+ * When query_id_squash_values is enabled, we jumble lists of constant
+ * elements as one individual item regardless of how many elements are
+ * in the list.  This means different queries jumble to the same query_id,
+ * if the only difference is the number of elements in the list.
+ *
+ * If query_id_squash_values is disabled or the list is not "simple
+ * enough", we jumble each element normally.
+ */
 static void
 _jumbleElements(JumbleState *jstate, List *elements)
 {
 	Node	   *first,
 			   *last;
 
-	if (IsMergeableConstList(elements, &first, &last))
+	if (IsSquashableConstList(elements, &first, &last))
 	{
 		/*
-		 * Both first and last constants have to be recorded. The first one
-		 * will indicate the merged interval, the last one will tell us the
-		 * length of the interval within the query text.
+		 * If this list of elements is squashable, keep track of the location
+		 * of its first and last elements.  When reading back the locations
+		 * array, we'll see two consecutive locations with ->squashed set to
+		 * true, indicating the location of initial and final elements of this
+		 * list.
 		 *
-		 * Note that for the last exression we actually need not the
-		 * expression location (which is the leftmost expression), but where
-		 * it ends. For the limited set of supported cases now (implicit
-		 * coerce via FuncExpr, Const) it's fine to use exprLocation, but if
-		 * more complex composite expressions will be supported, e.g. OpExpr
-		 * or FuncExpr as an explicit call, the rightmost expression will be
-		 * needed.
+		 * For the limited set of cases we support now (implicit coerce via
+		 * FuncExpr, Const) it's fine to use exprLocation of the 'last'
+		 * expression, but if more complex composite expressions are to be
+		 * supported (e.g., OpExpr or FuncExpr as an explicit call), more
+		 * sophisticated tracking will be needed.
 		 */
 		RecordConstLocation(jstate, exprLocation(first), true);
 		RecordConstLocation(jstate, exprLocation(last), true);
@@ -530,5 +510,5 @@ _jumbleVariableSetStmt(JumbleState *jstate, Node *node)
 	if (expr->jumble_args)
 		JUMBLE_NODE(args);
 	JUMBLE_FIELD(is_local);
-	JUMBLE_LOCATION(location, false);
+	JUMBLE_LOCATION(location);
 }

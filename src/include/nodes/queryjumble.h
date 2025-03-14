@@ -25,10 +25,10 @@ typedef struct LocationLen
 	int			length;			/* length in bytes, or -1 to ignore */
 
 	/*
-	 * Indicates the constant represents the beginning or the end of a merged
-	 * constants interval.
+	 * Indicates that this location represents the beginning or end of a run
+	 * of squashed constants.
 	 */
-	bool		merged;
+	bool		squashed;
 } LocationLen;
 
 /*
@@ -67,6 +67,7 @@ enum ComputeQueryIdType
 
 /* GUC parameters */
 extern PGDLLIMPORT int compute_query_id;
+
 
 extern const char *CleanQuerytext(const char *query, int *location, int *len);
 extern JumbleState *JumbleQuery(Query *query);

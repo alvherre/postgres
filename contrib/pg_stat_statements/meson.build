@@ -56,7 +56,7 @@ tests += {
       'parallel',
       'cleanup',
       'oldextversions',
-      'merging',
+      'squashing',
     ],
     'regress_args': ['--temp-config', files('pg_stat_statements.conf')],
     # Disabled because these tests require

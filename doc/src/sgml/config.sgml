@@ -8634,23 +8634,24 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
       </term>
       <listitem>
        <para>
-        Specifies how an array of constants (e.g. for an <literal>IN</literal>
-        clause) contributes to the query identifier computation. Normally every
-        element of an array contributes to the query identifier, which means the
-        same query will get multiple different identifiers, one for each
-        occurrence with an array of different length.
-
-        If this parameter is on, an array of constants will contribute only the
-        first and the last elements to the query identifier. It means two
-        occurences of the same query, where the only difference is number of
-        constants in the array, are going to get the same query identifier.
-        Such queries are represented in form <literal>'($1 /*, ... */)'</literal>.
-
-        The parameter could be used to reduce amount of repeating data stored
-        via <xref linkend="pgstatstatements"/>. Only constants are affected,
-        bind parameters cannot benefit from this functionality. The default
-        value is <literal>off</literal>.
+        Specifies how a list of constants (e.g., for an <literal>IN</literal>
+        clause) contributes to the query identifier computation.
+        Normally, every element of such a list contributes to the query
+        identifier separately, which means that two queries that only differ
+        in the number of elements in such a list would get different query
+        identifiers.
+        If this parameter is on, a list of constants will not contribute
+        to the query identifier. This means that two queries whose only
+        difference is the number of constants in such a list are going to get the
+        same query identifier.
        </para>
+       <para>
+        Only constants are affected; bind parameters do not benefit from this
+        functionality. The default value is <literal>off</literal>.
+       </para>
+       <para>
+        This parameter also affects how <xref linkend="pgstatstatements"/>
+        generates normalized query texts.
       </listitem>
      </varlistentry>
 
