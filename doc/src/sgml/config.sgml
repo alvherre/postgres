@@ -8652,6 +8652,7 @@ COPY postgres_log FROM '/full/path/to/logfile.csv' WITH csv;
        <para>
         This parameter also affects how <xref linkend="pgstatstatements"/>
         generates normalized query texts.
+       </para>
       </listitem>
      </varlistentry>
 
