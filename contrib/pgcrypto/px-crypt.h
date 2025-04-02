@@ -108,6 +108,6 @@ char	   *px_crypt_md5(const char *pw, const char *salt,
 						 char *passwd, unsigned dstlen);
 
 /* crypt-sha.c */
-char       *px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstlen);
+char	   *px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstlen);
 
 #endif							/* _PX_CRYPT_H */

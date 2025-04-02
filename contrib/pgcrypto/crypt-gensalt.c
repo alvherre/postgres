@@ -190,9 +190,9 @@ static char *
 _crypt_gensalt_sha(unsigned long count,
 				   const char *input, int size, char *output, int output_size)
 {
-	char * s_ptr = output;
+	char	   *s_ptr = output;
 	unsigned int result_bufsize = PX_SHACRYPT_SALT_BUF_LEN;
-	int rc;
+	int			rc;
 
 	/* output buffer must be allocated with PX_MAX_SALT_LEN bytes */
 	if (PX_MAX_SALT_LEN < result_bufsize)
@@ -203,8 +203,8 @@ _crypt_gensalt_sha(unsigned long count,
 	}
 
 	/*
-	 * Care must be taken to not exceed the buffer size allocated for
-	 * the input character buffer.
+	 * Care must be taken to not exceed the buffer size allocated for the
+	 * input character buffer.
 	 */
 	if ((PX_SHACRYPT_SALT_MAX_LEN != size)
 		|| (output_size < size))
@@ -229,8 +229,8 @@ _crypt_gensalt_sha(unsigned long count,
 	/*
 	 * Normalize salt string
 	 *
-	 * size of input buffer was checked above to
-	 * not exceed PX_SHACRYPT_SALT_LEN_MAX.
+	 * size of input buffer was checked above to not exceed
+	 * PX_SHACRYPT_SALT_LEN_MAX.
 	 */
 	for (int i = 0; i < size; i++)
 	{

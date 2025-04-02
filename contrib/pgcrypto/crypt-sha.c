@@ -77,24 +77,25 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	int			err;
 
 	const char *dec_salt_binary;	/* pointer into the real salt string */
-	StringInfo decoded_salt = NULL; /* decoded salt string */
+	StringInfo	decoded_salt = NULL;	/* decoded salt string */
 
 	unsigned char sha_buf[PX_SHACRYPT_DIGEST_MAX_LEN];
 	unsigned char sha_buf_tmp[PX_SHACRYPT_DIGEST_MAX_LEN];	/* temporary buffer for
-																 * digests */
+															 * digests */
 
 	char		rounds_custom = 0;
 	char	   *p_bytes = NULL;
 	char	   *s_bytes = NULL;
 	char	   *cp = NULL;
-	const char *fp = NULL;				/* intermediate pointer within salt string */
-	const char *ep = NULL;				/* holds pointer to the end of the salt string */
+	const char *fp = NULL;		/* intermediate pointer within salt string */
+	const char *ep = NULL;		/* holds pointer to the end of the salt string */
 
 	size_t		buf_size = 0;	/* buffer size for sha256crypt/sha512crypt */
 	unsigned int block;			/* number of bytes processed */
 	unsigned long rounds = PX_SHACRYPT_ROUNDS_DEFAULT;
 
-	unsigned	len, salt_len = 0;
+	unsigned	len,
+				salt_len = 0;
 
 	/* Init result buffer */
 	out_buf = makeStringInfoExt(PX_SHACRYPT_BUF_LEN);
@@ -299,16 +300,16 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 
 	/*
 	 * We need the real decoded salt string from salt input, this is every
-	 * character before the last '$' in the preamble. Append every
-	 * compatible character up to PX_SHACRYPT_SALT_MAX_LEN to the result buffer.
-	 * Note that depending on the input, there might be no '$' marker after
-	 * the salt, when there is no password hash attached at the end.
+	 * character before the last '$' in the preamble. Append every compatible
+	 * character up to PX_SHACRYPT_SALT_MAX_LEN to the result buffer. Note
+	 * that depending on the input, there might be no '$' marker after the
+	 * salt, when there is no password hash attached at the end.
 	 *
 	 * We try hard to recognize mistakes, but since we might get an input
 	 * string which might also have the password hash after the salt string
 	 * section we give up as soon we reach the end of the input or if there
-	 * are any bytes consumed for the salt string until we reach the
-	 * first '$' marker thereafter.
+	 * are any bytes consumed for the salt string until we reach the first '$'
+	 * marker thereafter.
 	 */
 	for (ep = dec_salt_binary;
 		 *ep && ep < (dec_salt_binary + PX_SHACRYPT_SALT_MAX_LEN);
@@ -320,9 +321,9 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		 * First check for accidentally embedded magic strings here. We don't
 		 * support '$' in salt strings anyways and seeing a magic byte trying
 		 * to identify shacrypt hashes might indicate that something went
-		 * wrong when generating this salt string. Note that we later check for
-		 * non-supported literals anyways, but any '$' here confuses us
-		 * at this point.
+		 * wrong when generating this salt string. Note that we later check
+		 * for non-supported literals anyways, but any '$' here confuses us at
+		 * this point.
 		 */
 		fp = strstr(dec_salt_binary, magic_bytes[0]);
 
@@ -362,13 +363,14 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		}
 		else
 		{
-			/* We encountered a '$' marker. Check if we already absorbed
-			 * some bytes from input. If true, we are optimistic and
-			 * terminate at this stage. Of not, we try further.
+			/*
+			 * We encountered a '$' marker. Check if we already absorbed some
+			 * bytes from input. If true, we are optimistic and terminate at
+			 * this stage. Of not, we try further.
 			 *
-			 * If we already consumed enough bytes for the salt string, everything
-			 * that is after this marker is considered to be part of an
-			 * optionally specified password hash and ignored.
+			 * If we already consumed enough bytes for the salt string,
+			 * everything that is after this marker is considered to be part
+			 * of an optionally specified password hash and ignored.
 			 */
 			if (decoded_salt->len > 0)
 				break;
