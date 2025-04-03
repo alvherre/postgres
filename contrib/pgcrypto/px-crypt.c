@@ -139,10 +139,16 @@ static struct generator gen_list[] = {
 	{"md5", _crypt_gensalt_md5_rn, 6, 0, 0, 0},
 	{"xdes", _crypt_gensalt_extended_rn, 3, PX_XDES_ROUNDS, 1, 0xFFFFFF},
 	{"bf", _crypt_gensalt_blowfish_rn, 16, PX_BF_ROUNDS, 4, 31},
-	{"sha256crypt", _crypt_gensalt_sha256_rn, PX_SHACRYPT_SALT_MAX_LEN,
-	PX_SHACRYPT_ROUNDS_DEFAULT, PX_SHACRYPT_ROUNDS_MIN, PX_SHACRYPT_ROUNDS_MAX},
-	{"sha512crypt", _crypt_gensalt_sha512_rn, PX_SHACRYPT_SALT_MAX_LEN,
-	PX_SHACRYPT_ROUNDS_DEFAULT, PX_SHACRYPT_ROUNDS_MIN, PX_SHACRYPT_ROUNDS_MAX},
+	{
+		"sha256crypt", _crypt_gensalt_sha256_rn,
+		PX_SHACRYPT_SALT_MAX_LEN, PX_SHACRYPT_ROUNDS_DEFAULT,
+		PX_SHACRYPT_ROUNDS_MIN, PX_SHACRYPT_ROUNDS_MAX
+	},
+	{
+		"sha512crypt", _crypt_gensalt_sha512_rn,
+		PX_SHACRYPT_SALT_MAX_LEN, PX_SHACRYPT_ROUNDS_DEFAULT,
+		PX_SHACRYPT_ROUNDS_MIN, PX_SHACRYPT_ROUNDS_MAX
+	},
 	{NULL, NULL, 0, 0, 0, 0}
 };
 

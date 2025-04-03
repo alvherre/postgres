@@ -44,6 +44,8 @@
  *
  */
 #include "postgres.h"
+
+#include "common/string.h"
 #include "miscadmin.h"
 
 #include "px-crypt.h"
@@ -78,23 +80,20 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 
 	const char *dec_salt_binary;	/* pointer into the real salt string */
 	StringInfo	decoded_salt = NULL;	/* decoded salt string */
-
 	unsigned char sha_buf[PX_SHACRYPT_DIGEST_MAX_LEN];
-	unsigned char sha_buf_tmp[PX_SHACRYPT_DIGEST_MAX_LEN];	/* temporary buffer for
-															 * digests */
 
+	/* temporary buffer for digests */
+	unsigned char sha_buf_tmp[PX_SHACRYPT_DIGEST_MAX_LEN];
 	char		rounds_custom = 0;
 	char	   *p_bytes = NULL;
 	char	   *s_bytes = NULL;
 	char	   *cp = NULL;
 	const char *fp = NULL;		/* intermediate pointer within salt string */
 	const char *ep = NULL;		/* holds pointer to the end of the salt string */
-
 	size_t		buf_size = 0;	/* buffer size for sha256crypt/sha512crypt */
 	unsigned int block;			/* number of bytes processed */
-	unsigned long rounds = PX_SHACRYPT_ROUNDS_DEFAULT;
-
-	unsigned	len,
+	uint32		rounds = PX_SHACRYPT_ROUNDS_DEFAULT;
+	unsigned int len,
 				salt_len = 0;
 
 	/* Init result buffer */
@@ -106,22 +105,16 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		return NULL;
 
 	if (pw == NULL)
-	{
 		elog(ERROR, "null value for password rejected");
-	}
 
 	if (salt == NULL)
-	{
 		elog(ERROR, "null value for salt rejected");
-	}
 
 	/*
 	 * Make sure result buffers are large enough.
 	 */
 	if (dstlen < PX_SHACRYPT_BUF_LEN)
-	{
 		elog(ERROR, "insufficient result buffer size to encrypt password");
-	}
 
 	/* Init contents of buffers properly */
 	memset(&sha_buf, '\0', sizeof(sha_buf));
@@ -138,27 +131,22 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	 * Analyze and prepare the salt string
 	 *
 	 * The magic string should be specified in the first three bytes of the
-	 * salt string. But do some sanity checks before.
+	 * salt string.  Do some sanity checks first.
 	 */
 	if (strlen(dec_salt_binary) < 3)
-	{
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("invalid salt")));
-	}
+				errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("invalid salt"));
 
 	/*
 	 * Check format of magic bytes. These should define either 5=sha256crypt
 	 * or 6=sha512crypt in the second byte, enclosed by ascii dollar signs.
 	 */
-	if ((dec_salt_binary[0] != '$')
-		&& (dec_salt_binary[2] != '$'))
-	{
+	if ((dec_salt_binary[0] != '$') || (dec_salt_binary[2] != '$'))
 		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("invalid format of salt")),
+				errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				errmsg("invalid format of salt"),
 				errhint("magic byte format for shacrypt is either \"$5$\" or \"$6$\""));
-	}
 
 	/*
 	 * Check magic byte for supported shacrypt digest.
@@ -190,62 +178,54 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	 * string, we don't treat this special: This is just absorbed as part of
 	 * the salt with up to PX_SHACRYPT_SALT_LEN_MAX.
 	 *
-	 * Unknown magic byte is handled later below
+	 * Unknown magic byte is handled further below.
 	 */
 	if (strncmp(dec_salt_binary,
 				rounds_prefix, sizeof(rounds_prefix) - 1) == 0)
 	{
-
 		const char *num = dec_salt_binary + sizeof(rounds_prefix) - 1;
 		char	   *endp;
-		long		srounds = strtoul(num, &endp, 10);
+		int			srounds = strtoint(num, &endp, 10);
 
-		if (*endp == '$')
-		{
-			dec_salt_binary = endp + 1;
-
-			/*
-			 * We violate supported lower or upper bound of rounds, but in
-			 * this case we change this value to the supported lower or upper
-			 * value. We don't do this silently and print a NOTICE in such a
-			 * case.
-			 *
-			 * Note that a salt string generated with gen_salt() would never
-			 * generated such a salt string, since it would error out.
-			 *
-			 * But Drepper's upstream reference implementation supports this
-			 * when passing the salt string directly, so we maintain
-			 * compatibility here.
-			 */
-			if (srounds > PX_SHACRYPT_ROUNDS_MAX)
-			{
-				ereport(NOTICE,
-						errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-						errmsg("rounds=%ld exceeds maximum supported value (%ld), using %ld instead",
-							   srounds, PX_SHACRYPT_ROUNDS_MAX,
-							   PX_SHACRYPT_ROUNDS_MAX));
-				srounds = PX_SHACRYPT_ROUNDS_MAX;
-			}
-			else if (srounds < PX_SHACRYPT_ROUNDS_MIN)
-			{
-				ereport(NOTICE,
-						errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
-						errmsg("rounds=%ld is below supported value (%ld), using %ld instead",
-							   srounds, PX_SHACRYPT_ROUNDS_MIN,
-							   PX_SHACRYPT_ROUNDS_MIN));
-				srounds = PX_SHACRYPT_ROUNDS_MIN;
-			}
-
-			rounds = (unsigned long) srounds;
-			rounds_custom = 1;
-		}
-		else
-		{
+		if (*endp != '$')
 			ereport(ERROR,
 					errcode(ERRCODE_SYNTAX_ERROR),
 					errmsg("could not parse salt options"));
+
+		dec_salt_binary = endp + 1;
+
+		/*
+		 * We violate supported lower or upper bound of rounds, but in this
+		 * case we change this value to the supported lower or upper value. We
+		 * don't do this silently and print a NOTICE in such a case.
+		 *
+		 * Note that a salt string generated with gen_salt() would never
+		 * generated such a salt string, since it would error out.
+		 *
+		 * But Drepper's upstream reference implementation supports this when
+		 * passing the salt string directly, so we maintain compatibility.
+		 */
+		if (srounds > PX_SHACRYPT_ROUNDS_MAX)
+		{
+			ereport(NOTICE,
+					errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+					errmsg("rounds=%d exceeds maximum supported value (%d), using %d instead",
+						   srounds, PX_SHACRYPT_ROUNDS_MAX,
+						   PX_SHACRYPT_ROUNDS_MAX));
+			srounds = PX_SHACRYPT_ROUNDS_MAX;
+		}
+		else if (srounds < PX_SHACRYPT_ROUNDS_MIN)
+		{
+			ereport(NOTICE,
+					errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+					errmsg("rounds=%d is below supported value (%d), using %d instead",
+						   srounds, PX_SHACRYPT_ROUNDS_MIN,
+						   PX_SHACRYPT_ROUNDS_MIN));
+			srounds = PX_SHACRYPT_ROUNDS_MIN;
 		}
 
+		rounds = (uint32) srounds;
+		rounds_custom = 1;
 	}
 
 	/*
@@ -294,9 +274,7 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	}
 
 	if (rounds_custom > 0)
-	{
-		appendStringInfo(out_buf, "rounds=%lu$", rounds);
-	}
+		appendStringInfo(out_buf, "rounds=%u$", rounds);
 
 	/*
 	 * We need the real decoded salt string from salt input, this is every
@@ -326,47 +304,34 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		 * this point.
 		 */
 		fp = strstr(dec_salt_binary, magic_bytes[0]);
-
 		if (fp != NULL)
-		{
 			elog(ERROR, "bogus magic byte found in salt string");
-		}
 
 		fp = strstr(dec_salt_binary, magic_bytes[1]);
-
 		if (fp != NULL)
-		{
 			elog(ERROR, "bogus magic byte found in salt string");
-		}
 
 		/*
 		 * This looks very strict, but we assume the caller did something
 		 * wrong when we see a "rounds=" option here.
 		 */
 		fp = strstr(dec_salt_binary, rounds_prefix);
-
 		if (fp != NULL)
-		{
 			elog(ERROR, "invalid rounds option specified in salt string");
-		}
 
 		if (*ep != '$')
 		{
 			if (isalpha(*ep) || isdigit(*ep) || (*ep == '.') || (*ep == '/'))
-			{
 				appendStringInfoCharMacro(decoded_salt, *ep);
-			}
 			else
-			{
 				elog(ERROR, "invalid character in salt string: \"%c\"", *ep);
-			}
 		}
 		else
 		{
 			/*
 			 * We encountered a '$' marker. Check if we already absorbed some
 			 * bytes from input. If true, we are optimistic and terminate at
-			 * this stage. Of not, we try further.
+			 * this stage. If not, we try further.
 			 *
 			 * If we already consumed enough bytes for the salt string,
 			 * everything that is after this marker is considered to be part
@@ -375,23 +340,19 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 			if (decoded_salt->len > 0)
 				break;
 		}
-
 	}
 
 	salt_len = decoded_salt->len;
 	appendStringInfoString(out_buf, decoded_salt->data);
-	elog(DEBUG1, "using salt \"%s\", salt len = %d, rounds = %lu",
+	elog(DEBUG1, "using salt \"%s\", salt len = %d, rounds = %u",
 		 decoded_salt->data, decoded_salt->len, rounds);
 
 	/*
-	 * Sanity check:
-	 *
-	 * At this point the salt string buffer must not exceed expected size
+	 * Sanity check: at this point the salt string buffer must not exceed
+	 * expected size.
 	 */
 	if (out_buf->len > (3 + 17 * rounds_custom + salt_len))
-	{
 		elog(ERROR, "unexpected length of salt string");
-	}
 
 	/*-
 	 * 1. Start digest A
@@ -413,29 +374,26 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	px_md_update(digestB, (const unsigned char *) pw, len);
 	px_md_finish(digestB, sha_buf);
 
-	/*-
-	 * 9. For each block of (excluding the NULL byte), add
-	 *    digest B to digest A.
+	/*
+	 * 9. For each block (excluding the NULL byte), add digest B to digest A.
 	 */
 	for (block = len; block > buf_size; block -= buf_size)
-	{
 		px_md_update(digestA, sha_buf, buf_size);
-	}
 
 	/*-
-	 * 10 For the remaining N bytes of the password string, add
-	 * the first N bytes of digest B to A */
+	 * 10. For the remaining N bytes of the password string, add the first N
+	 * bytes of digest B to A.
+	 */
 	px_md_update(digestA, sha_buf, block);
 
 	/*-
-	 * 11 For each bit of the binary representation of the length of the
-	 * password string up to and including the highest 1-digit, starting
-	 * from to lowest bit position (numeric value 1)
+	 * 11. For each bit of the binary representation of the length of the
+	 * password string up to and including the highest 1-digit, starting from
+	 * to lowest bit position (numeric value 1)
 	 *
 	 * a) for a 1-digit add digest B (sha_buf) to digest A
 	 * b) for a 0-digit add the password string
 	 */
-
 	block = len;
 	while (block)
 	{
@@ -447,10 +405,10 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		block >>= 1;
 	}
 
-	/* 12 Finalize digest A */
+	/* 12. Finalize digest A */
 	px_md_finish(digestA, sha_buf);
 
-	/* 13 Start digest DP */
+	/* 13. Start digest DP */
 	px_md_reset(digestB);
 
 	/*-
@@ -458,20 +416,17 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	 * to the digest DP
 	 */
 	for (block = len; block > 0; block--)
-	{
 		px_md_update(digestB, (const unsigned char *) pw, len);
-	}
 
-	/* 15 Finalize digest DP */
+	/* 15. Finalize digest DP */
 	px_md_finish(digestB, sha_buf_tmp);
 
 	/*-
-	 * 16 produce byte sequence P with same length as password.
-	 *
+	 * 16. produce byte sequence P with same length as password.
 	 *     a) for each block of 32 or 64 bytes of length of the password
 	 *        string the entire digest DP is used
 	 *     b) for the remaining N (up to  31 or 63) bytes use the
-	 *         first N bytes of digest DP
+	 *        first N bytes of digest DP
 	 */
 	if ((p_bytes = palloc0(len)) == NULL)
 	{
@@ -484,30 +439,28 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	memcpy(cp, sha_buf_tmp, block);
 
 	/*
-	 * 17 Start digest DS
+	 * 17. Start digest DS
 	 */
 	px_md_reset(digestB);
 
 	/*-
-	 * 18 Repeat the following 16+A[0] times, where A[0] represents the first
+	 * 18. Repeat the following 16+A[0] times, where A[0] represents the first
 	 *    byte in digest A interpreted as an 8-bit unsigned value
 	 *    add the salt to digest DS
 	 */
 	for (block = 16 + sha_buf[0]; block > 0; block--)
-	{
 		px_md_update(digestB, (const unsigned char *) dec_salt_binary, salt_len);
-	}
 
 	/*
-	 * 19 Finalize digest DS
+	 * 19. Finalize digest DS
 	 */
 	px_md_finish(digestB, sha_buf_tmp);
 
 	/*-
-	 * 20 Produce byte sequence S of the same length as the salt string where
+	 * 20. Produce byte sequence S of the same length as the salt string where
 	 *
 	 * a) for each block of 32 or 64 bytes of length of the salt string the
-	 *     entire digest DS is used
+	 *    entire digest DS is used
 	 *
 	 * b) for the remaining N (up to  31 or 63) bytes use the first N
 	 *    bytes of digest DS
@@ -516,27 +469,24 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		goto error;
 
 	for (cp = s_bytes, block = salt_len; block > buf_size; block -= buf_size, cp += buf_size)
-	{
 		memcpy(cp, sha_buf_tmp, buf_size);
-	}
 	memcpy(cp, sha_buf_tmp, block);
 
 	/* Make sure we don't leave something important behind */
 	px_memset(&sha_buf_tmp, 0, sizeof sha_buf);
 
 	/*-
-	 * 21 Repeat a loop according to the number specified in the rounds=<N>
-	 *    specification in the salt (or the default value if none is
-	 *    present).  Each round is numbered, starting with 0 and up to N-1.
+	 * 21. Repeat a loop according to the number specified in the rounds=<N>
+	 *     specification in the salt (or the default value if none is
+	 *     present).  Each round is numbered, starting with 0 and up to N-1.
 	 *
-	 *    The loop uses a digest as input.  In the first round it is the
-	 *    digest produced in step 12.  In the latter steps it is the digest
-	 *    produced in step 21.h of the previous round.  The following text
-	 *    uses the notation "digest A/B" to describe this behavior.
+	 *     The loop uses a digest as input.  In the first round it is the
+	 *     digest produced in step 12.  In the latter steps it is the digest
+	 *     produced in step 21.h of the previous round.  The following text
+	 *     uses the notation "digest A/B" to describe this behavior.
 	 */
 	for (block = 0; block < rounds; block++)
 	{
-
 		/*
 		 * Make it possible to abort in case large values for "rounds" are
 		 * specified.
@@ -546,29 +496,25 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		/* a) start digest B */
 		px_md_reset(digestB);
 
-		/*
-		 * b) for odd round numbers add the byte sequense P to digest B c) for
-		 * even round numbers add digest A/B
+		/*-
+		 * b) for odd round numbers add the byte sequence P to digest B
+		 * c) for even round numbers add digest A/B
 		 */
 		px_md_update(digestB,
 					 (block & 1) ? (const unsigned char *) p_bytes : sha_buf,
 					 (block & 1) ? len : buf_size);
 
 		/* d) for all round numbers not divisible by 3 add the byte sequence S */
-		if (block % 3)
-		{
+		if ((block % 3) != 0)
 			px_md_update(digestB, (const unsigned char *) s_bytes, salt_len);
-		}
 
 		/* e) for all round numbers not divisible by 7 add the byte sequence P */
-		if (block % 7)
-		{
+		if ((block % 7) != 0)
 			px_md_update(digestB, (const unsigned char *) p_bytes, len);
-		}
 
-		/*
-		 * f) for odd round numbers add digest A/C g) for even round numbers
-		 * add the byte sequence P
+		/*-
+		 * f) for odd round numbers add digest A/C
+		 * g) for even round numbers add the byte sequence P
 		 */
 		px_md_update(digestB,
 					 (block & 1) ? sha_buf : (const unsigned char *) p_bytes,
@@ -576,7 +522,6 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 
 		/* h) finish digest C. */
 		px_md_finish(digestB, sha_buf);
-
 	}
 
 	px_md_free(digestA);
@@ -594,15 +539,15 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 	/* prepare final result buffer */
 	appendStringInfoCharMacro(out_buf, '$');
 
-#define b64_from_24bit(B2, B1, B0, N)                      \
-	do {                                                    \
-		unsigned int w = ((B2) << 16) | ((B1) << 8) | (B0); \
-		int i = (N);                                        \
-		while (i-- > 0)                                     \
-		{                                                   \
+#define b64_from_24bit(B2, B1, B0, N)                                    \
+	do {                                                                 \
+		unsigned int w = ((B2) << 16) | ((B1) << 8) | (B0);              \
+		int		i = (N);                                                 \
+		while (i-- > 0)                                                  \
+		{                                                                \
 			appendStringInfoCharMacro(out_buf, _crypt_itoa64[w & 0x3f]); \
-			w >>= 6;                                        \
-		}                                                   \
+			w >>= 6;                                                     \
+		}                                                                \
 	} while (0)
 
 	switch (type)
@@ -655,7 +600,6 @@ px_crypt_shacrypt(const char *pw, const char *salt, char *passwd, unsigned dstle
 		case PGCRYPTO_SHA_UNKOWN:
 			/* we shouldn't land here ... */
 			elog(ERROR, "unsupported digest length");
-
 	}
 
 	*cp = '\0';
@@ -690,7 +634,7 @@ error:
 		destroyStringInfo(out_buf);
 
 	ereport(ERROR,
-			(errcode(ERRCODE_INTERNAL_ERROR),
-			 errmsg("cannot create encrypted password")));
+			errcode(ERRCODE_INTERNAL_ERROR),
+			errmsg("cannot create encrypted password"));
 	return NULL;				/* keep compiler quiet */
 }

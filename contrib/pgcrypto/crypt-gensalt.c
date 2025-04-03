@@ -186,6 +186,9 @@ _crypt_gensalt_blowfish_rn(unsigned long count,
 	return output;
 }
 
+/*
+ * Helper for _crypt_gensalt_sha256_rn and _crypt_gensalt_sha512_rn
+ */
 static char *
 _crypt_gensalt_sha(unsigned long count,
 				   const char *input, int size, char *output, int output_size)
@@ -196,32 +199,25 @@ _crypt_gensalt_sha(unsigned long count,
 
 	/* output buffer must be allocated with PX_MAX_SALT_LEN bytes */
 	if (PX_MAX_SALT_LEN < result_bufsize)
-	{
 		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("invalid size of salt")));
-	}
+				errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("invalid size of salt"));
 
 	/*
 	 * Care must be taken to not exceed the buffer size allocated for the
 	 * input character buffer.
 	 */
-	if ((PX_SHACRYPT_SALT_MAX_LEN != size)
-		|| (output_size < size))
-	{
+	if ((PX_SHACRYPT_SALT_MAX_LEN != size) || (output_size < size))
 		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("invalid length of salt buffer")));
-	}
+				errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("invalid length of salt buffer"));
 
 	/* Skip magic bytes, set by callers */
 	s_ptr += 3;
 	if ((rc = pg_snprintf(s_ptr, 18, "rounds=%ld$", count)) <= 0)
-	{
 		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("cannot format salt string")));
-	}
+				errcode(ERRCODE_INTERNAL_ERROR),
+				errmsg("cannot format salt string"));
 
 	/* s_ptr should now be positioned at the start of the salt string */
 	s_ptr += rc;
@@ -242,6 +238,7 @@ _crypt_gensalt_sha(unsigned long count,
 	return output;
 }
 
+/* gen_list->gen function for sha512 */
 char *
 _crypt_gensalt_sha512_rn(unsigned long count,
 						 char const *input, int size,
@@ -256,6 +253,7 @@ _crypt_gensalt_sha512_rn(unsigned long count,
 	return _crypt_gensalt_sha(count, input, size, output, output_size);
 }
 
+/* gen_list->gen function for sha256 */
 char *
 _crypt_gensalt_sha256_rn(unsigned long count,
 						 const char *input, int size,

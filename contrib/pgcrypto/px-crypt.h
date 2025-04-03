@@ -61,13 +61,13 @@
 #define PX_SHACRYPT_BUF_LEN (PX_SHACRYPT_SALT_BUF_LEN + 86 + 1)
 
 /* Default number of rounds of shacrypt if not explicitly specified.  */
-#define PX_SHACRYPT_ROUNDS_DEFAULT 5000l
+#define PX_SHACRYPT_ROUNDS_DEFAULT 5000
 
 /* Minimum number of rounds of shacrypt.  */
-#define PX_SHACRYPT_ROUNDS_MIN 1000l
+#define PX_SHACRYPT_ROUNDS_MIN 1000
 
 /* Maximum number of rounds of shacrypt.  */
-#define PX_SHACRYPT_ROUNDS_MAX 999999999l
+#define PX_SHACRYPT_ROUNDS_MAX 999999999
 
 /*
  * main interface
