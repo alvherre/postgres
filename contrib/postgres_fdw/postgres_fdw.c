@@ -5549,7 +5549,15 @@ postgresImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 							   "SELECT relname, "
 							   "  attname, "
 							   "  format_type(atttypid, atttypmod), "
-							   "  attnotnull, "
+							   "  attnotnull, ");
+
+		/* NOT VALID NOT NULL columns are supported since Postgres 18 */
+		if (PQserverVersion(conn) >= 180000)
+			appendStringInfoString(&buf, "attnotnullvalid, ");
+		else
+			appendStringInfoString(&buf, "attnotnull AS attnotnullvalid, ");
+
+		appendStringInfoString(&buf,
 							   "  pg_get_expr(adbin, adrelid), ");
 
 		/* Generated columns are supported since Postgres 12 */
@@ -5651,6 +5659,7 @@ postgresImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				char	   *attname;
 				char	   *typename;
 				char	   *attnotnull;
+				char	   *attnotnullvalid;
 				char	   *attgenerated;
 				char	   *attdefault;
 				char	   *collname;
@@ -5663,14 +5672,15 @@ postgresImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 				attname = PQgetvalue(res, i, 1);
 				typename = PQgetvalue(res, i, 2);
 				attnotnull = PQgetvalue(res, i, 3);
-				attdefault = PQgetisnull(res, i, 4) ? NULL :
-					PQgetvalue(res, i, 4);
-				attgenerated = PQgetisnull(res, i, 5) ? NULL :
+				attnotnullvalid = PQgetvalue(res, i, 4);
+				attdefault = PQgetisnull(res, i, 5) ? NULL :
 					PQgetvalue(res, i, 5);
-				collname = PQgetisnull(res, i, 6) ? NULL :
+				attgenerated = PQgetisnull(res, i, 6) ? NULL :
 					PQgetvalue(res, i, 6);
-				collnamespace = PQgetisnull(res, i, 7) ? NULL :
+				collname = PQgetisnull(res, i, 7) ? NULL :
 					PQgetvalue(res, i, 7);
+				collnamespace = PQgetisnull(res, i, 8) ? NULL :
+					PQgetvalue(res, i, 8);
 
 				if (first_item)
 					first_item = false;
@@ -5714,7 +5724,11 @@ postgresImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 
 				/* Add NOT NULL if needed */
 				if (import_not_null && attnotnull[0] == 't')
+				{
 					appendStringInfoString(&buf, " NOT NULL");
+					if (attnotnullvalid[0] == 'f')
+						appendStringInfoString(&buf, " NOT VALID");
+				}
 			}
 			while (++i < numrows &&
 				   strcmp(PQgetvalue(res, i, 0), tablename) == 0);

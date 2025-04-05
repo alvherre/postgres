@@ -329,6 +329,21 @@ transformCreateStmt(CreateStmt *stmt, const char *queryString)
 			cd->is_not_null = true;
 			break;
 		}
+
+		if (!cxt.isforeign && !nn->initially_valid)
+		{
+			nn->initially_valid = true;
+			nn->skip_validation = false;
+
+			/*
+			 * not-null constraint created via CREATE TABLE will always be
+			 * valid.  since there is no data there while CREATE TABLE, make
+			 * it invalid does not make sense
+			 */
+			ereport(WARNING,
+					errcode(ERRCODE_WARNING),
+					errmsg("Ignoring NOT VALID flag for NOT NULL constraint on column \"%s\"", colname));
+		}
 	}
 
 	/*

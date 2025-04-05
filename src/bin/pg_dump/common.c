@@ -546,6 +546,10 @@ flagInhAttrs(Archive *fout, DumpOptions *dopt, TableInfo *tblinfo, int numTables
 						parent->notnull_constrs[inhAttrInd] != NULL)
 						foundNotNull = true;
 
+					if (fout->remoteVersion >= 180000 &&
+						parent->notnull_invalid[inhAttrInd])
+						tbinfo->notnull_parent_invalid[j] = true;
+
 					foundDefault |= (parentDef != NULL &&
 									 strcmp(parentDef->adef_expr, "NULL") != 0 &&
 									 !parent->attgenerated[inhAttrInd]);

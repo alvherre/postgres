@@ -1118,6 +1118,23 @@ my %tests = (
 		},
 	},
 
+	'CONSTRAINT NOT NULL / INVALID' => {
+		create_sql => 'CREATE TABLE dump_test.test_table_nn (
+							col1 int);
+			ALTER TABLE dump_test.test_table_nn ADD CONSTRAINT nn NOT NULL col1 NOT VALID;',
+		regexp => qr/^
+			\QALTER TABLE dump_test.test_table_nn\E \n^\s+
+			\QADD CONSTRAINT nn NOT NULL col1 NOT VALID;\E
+			/xm,
+		like => {
+			%full_runs, %dump_test_schema_runs, section_post_data => 1,
+		},
+		unlike => {
+			exclude_dump_test_schema => 1,
+			only_dump_measurement => 1,
+		},
+	},
+
 	'CONSTRAINT PRIMARY KEY / WITHOUT OVERLAPS' => {
 		create_sql => 'CREATE TABLE dump_test.test_table_tpk (
 							col1 int4range,

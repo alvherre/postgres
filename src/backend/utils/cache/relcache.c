@@ -592,7 +592,7 @@ RelationBuildTupleDesc(Relation relation)
 
 		/* Update constraint/default info */
 		if (attp->attnotnull)
-			constr->has_not_null = true;
+			constr->has_not_null = true;	/* invalid included */
 		if (attp->attgenerated == ATTRIBUTE_GENERATED_STORED)
 			constr->has_generated_stored = true;
 		if (attp->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
@@ -3573,6 +3573,7 @@ RelationBuildLocalRelation(const char *relname,
 		datt->attidentity = satt->attidentity;
 		datt->attgenerated = satt->attgenerated;
 		datt->attnotnull = satt->attnotnull;
+		datt->attnotnullvalid = satt->attnotnullvalid;
 		has_not_null |= satt->attnotnull;
 		populate_compact_attribute(rel->rd_att, i);
 	}

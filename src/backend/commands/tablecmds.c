@@ -435,6 +435,9 @@ static void QueueFKConstraintValidation(List **wqueue, Relation conrel, Relation
 static void QueueCheckConstraintValidation(List **wqueue, Relation conrel, Relation rel,
 										   char *constrName, HeapTuple contuple,
 										   bool recurse, bool recursing, LOCKMODE lockmode);
+static void QueueNNConstraintValidation(List **wqueue, Relation conrel, Relation rel,
+										HeapTuple contuple, bool recurse, bool recursing,
+										LOCKMODE lockmode);
 static int	transformColumnNameList(Oid relId, List *colList,
 									int16 *attnums, Oid *atttypids, Oid *attcollids);
 static int	transformFkeyGetPrimaryKey(Relation pkrel, Oid *indexOid,
@@ -498,7 +501,7 @@ static void add_column_collation_dependency(Oid relid, int32 attnum, Oid collid)
 static ObjectAddress ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 									   LOCKMODE lockmode);
 static void set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
-						   LOCKMODE lockmode);
+						   bool is_valid, bool queue_validation);
 static ObjectAddress ATExecSetNotNull(List **wqueue, Relation rel,
 									  char *constrname, char *colName,
 									  bool recurse, bool recursing,
@@ -1340,7 +1343,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	nncols = AddRelationNotNullConstraints(rel, stmt->nnconstraints,
 										   old_notnulls);
 	foreach_int(attrnum, nncols)
-		set_attnotnull(NULL, rel, attrnum, NoLock);
+		set_attnotnull(NULL, rel, attrnum, true, false);
 
 	ObjectAddressSet(address, RelationRelationId, relationId);
 
@@ -1424,7 +1427,7 @@ BuildDescForRelation(const List *columns)
 		TupleDescInitEntryCollation(desc, attnum, attcollation);
 
 		/* Fill in additional stuff not handled by TupleDescInitEntry */
-		att->attnotnull = entry->is_not_null;
+		att->attnotnull = att->attnotnullvalid = entry->is_not_null;
 		att->attislocal = entry->is_local;
 		att->attinhcount = entry->inhcount;
 		att->attidentity = entry->identity;
@@ -2738,7 +2741,7 @@ MergeAttributes(List *columns, const List *supers, char relpersistence,
 
 		/*
 		 * Request attnotnull on columns that have a not-null constraint
-		 * that's not marked NO INHERIT.
+		 * that's not marked NO INHERIT (even if not valid).
 		 */
 		nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation),
 												  true, false);
@@ -6207,18 +6210,22 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap)
 	{
 		/*
 		 * If we are rebuilding the tuples OR if we added any new but not
-		 * verified not-null constraints, check all not-null constraints. This
-		 * is a bit of overkill but it minimizes risk of bugs.
+		 * verified not-null constraints, check all valid not-null constraints.
+		 * This is a bit of overkill but it minimizes risk of bugs.
 		 *
 		 * notnull_attrs does *not* collect attribute numbers for not-null
 		 * constraints over virtual generated columns; instead, they are
 		 * collected in notnull_virtual_attrs.
+		 *
+		 * But we don't need check invalid not-null constraint! this is aligned
+		 * with check constraint behavior.
 		 */
 		for (i = 0; i < newTupDesc->natts; i++)
 		{
 			Form_pg_attribute attr = TupleDescAttr(newTupDesc, i);
 
-			if (attr->attnotnull && !attr->attisdropped)
+			if (attr->attnotnull && attr->attnotnullvalid &&
+				!attr->attisdropped)
 			{
 				if (attr->attgenerated != ATTRIBUTE_GENERATED_VIRTUAL)
 					notnull_attrs = lappend_int(notnull_attrs, attr->attnum);
@@ -7788,7 +7795,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 	/*
 	 * Find the constraint that makes this column NOT NULL, and drop it.
-	 * dropconstraint_internal() resets attnotnull.
+	 * dropconstraint_internal() resets attnotnull/attnotnullvalid.
 	 */
 	conTup = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
 	if (conTup == NULL)
@@ -7809,18 +7816,22 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 }
 
 /*
- * Helper to set pg_attribute.attnotnull if it isn't set, and to tell phase 3
- * to verify it.
+ * set_attnotnull
+ *		Helper to update/validate the pg_attribute status of a not-null
+ *		constraint
  *
- * When called to alter an existing table, 'wqueue' must be given so that we
- * can queue a check that existing tuples pass the constraint.  When called
- * from table creation, 'wqueue' should be passed as NULL.
+ * pg_attribute.attnotnull is set true, if it isn't already.  If is_valid
+ * is true, also set pg_attribute.attnotnullvalid.  If queue_validation is
+ * true, also set up wqueue to validate the constraint.  wqueue may be given
+ * as NULL when validation is not needed (e.g., on table creation).
  */
 static void
 set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
-			   LOCKMODE lockmode)
+			   bool is_valid, bool queue_validation)
 {
 	Form_pg_attribute attr;
+
+	Assert(!queue_validation || wqueue);
 
 	CheckAlterTableIsSafe(rel);
 
@@ -7832,7 +7843,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 	if (attr->attisdropped)
 		return;
 
-	if (!attr->attnotnull)
+	if (!attr->attnotnull || (is_valid && !attr->attnotnullvalid))
 	{
 		Relation	attr_rel;
 		HeapTuple	tuple;
@@ -7845,15 +7856,17 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 				 attnum, RelationGetRelid(rel));
 
 		attr = (Form_pg_attribute) GETSTRUCT(tuple);
-		Assert(!attr->attnotnull);
+
 		attr->attnotnull = true;
+		attr->attnotnullvalid = is_valid;
 		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
 
 		/*
 		 * If the nullness isn't already proven by validated constraints, have
 		 * ALTER TABLE phase 3 test for it.
 		 */
-		if (wqueue && !NotNullImpliedByRelConstraints(rel, attr))
+		if (queue_validation && wqueue &&
+			!NotNullImpliedByRelConstraints(rel, attr))
 		{
 			AlteredTableInfo *tab;
 
@@ -7951,6 +7964,15 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 			conForm->conislocal = true;
 			changed = true;
 		}
+		else if (!conForm->convalidated)
+		{
+			/*
+			 * Flip attnotnull and convalidated, and also validate the
+			 * constraint.
+			 */
+			return ATExecValidateConstraint(wqueue, rel, NameStr(conForm->conname),
+											recurse, recursing, lockmode);
+		}
 
 		if (changed)
 		{
@@ -8013,8 +8035,8 @@ ATExecSetNotNull(List **wqueue, Relation rel, char *conName, char *colName,
 	InvokeObjectPostAlterHook(RelationRelationId,
 							  RelationGetRelid(rel), attnum);
 
-	/* Mark pg_attribute.attnotnull for the column */
-	set_attnotnull(wqueue, rel, attnum, lockmode);
+	/* Mark pg_attribute.attnotnull for the column and queue validation */
+	set_attnotnull(wqueue, rel, attnum, true, true);
 
 	/*
 	 * Recurse to propagate the constraint to children that don't have one.
@@ -9456,12 +9478,44 @@ ATPrepAddPrimaryKey(List **wqueue, Relation rel, AlterTableCmd *cmd,
 		}
 	}
 
-	/* Insert not-null constraints in the queue for the PK columns */
+	/* Verify that columns are not-null, or request that they be made so */
 	foreach(lc, pkconstr->keys)
 	{
 		AlterTableCmd *newcmd;
 		Constraint *nnconstr;
+		HeapTuple	tuple;
 
+		/*
+		 * First check if a suitable constraint exists.  If it does, we don't
+		 * need to request another one.  We do need to bail out if it's not
+		 * valid, though.
+		 */
+		tuple = findNotNullConstraint(RelationGetRelid(rel), strVal(lfirst(lc)));
+		if (tuple != NULL)
+		{
+			Form_pg_constraint conForm = (Form_pg_constraint) GETSTRUCT(tuple);
+
+			/* a NO INHERIT constraint is no good */
+			if (conForm->connoinherit)
+				ereport(ERROR,
+						errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("NO INHERIT not-null constraint is incompatible with primary key"),
+						errhint("You will need to use ALTER TABLE ... ALTER CONSTRAINT ... INHERIT."));
+
+			/* an unvalidated constraint is no good */
+			if (!conForm->convalidated)
+				ereport(ERROR,
+						errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("cannot add primary key because of invalid not-null constraint \"%s\"",
+							   NameStr(conForm->conname)),
+						errhint("You will need to use ALTER TABLE ... VALIDATE CONSTRAINT to validate it."));
+
+			/* All good with this one; don't request another */
+			heap_freetuple(tuple);
+			continue;
+		}
+
+		/* This column is not already not-null, so add it to the queue */
 		nnconstr = makeNotNullConstraint(lfirst(lc));
 
 		newcmd = makeNode(AlterTableCmd);
@@ -9836,11 +9890,15 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 			constr->conname = ccon->name;
 
 		/*
-		 * If adding a not-null constraint, set the pg_attribute flag and tell
-		 * phase 3 to verify existing rows, if needed.
+		 * If adding a valid not-null constraint, set the pg_attribute flag
+		 * and tell phase 3 to verify existing rows, if needed.  For an
+		 * invalid constraint, just set attnotnull and attnotnullvalid,
+		 * without queueing verification.
 		 */
 		if (constr->contype == CONSTR_NOTNULL)
-			set_attnotnull(wqueue, rel, ccon->attnum, lockmode);
+			set_attnotnull(wqueue, rel, ccon->attnum,
+						   !constr->skip_validation,
+						   !constr->skip_validation);
 
 		ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 	}
@@ -12811,10 +12869,11 @@ ATExecValidateConstraint(List **wqueue, Relation rel, char *constrName,
 
 	con = (Form_pg_constraint) GETSTRUCT(tuple);
 	if (con->contype != CONSTRAINT_FOREIGN &&
-		con->contype != CONSTRAINT_CHECK)
+		con->contype != CONSTRAINT_CHECK &&
+		con->contype != CONSTRAINT_NOTNULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-				 errmsg("constraint \"%s\" of relation \"%s\" is not a foreign key or check constraint",
+				 errmsg("constraint \"%s\" of relation \"%s\" is not a foreign key, check, or not-null constraint",
 						constrName, RelationGetRelationName(rel))));
 
 	if (!con->conenforced)
@@ -12832,6 +12891,11 @@ ATExecValidateConstraint(List **wqueue, Relation rel, char *constrName,
 		{
 			QueueCheckConstraintValidation(wqueue, conrel, rel, constrName,
 										   tuple, recurse, recursing, lockmode);
+		}
+		else if (con->contype == CONSTRAINT_NOTNULL)
+		{
+			QueueNNConstraintValidation(wqueue, conrel, rel,
+										tuple, recurse, recursing, lockmode);
 		}
 
 		ObjectAddressSet(address, ConstraintRelationId, con->oid);
@@ -13038,6 +13102,109 @@ QueueCheckConstraintValidation(List **wqueue, Relation conrel, Relation rel,
 
 	/*
 	 * Now update the catalog, while we have the door open.
+	 */
+	copyTuple = heap_copytuple(contuple);
+	copy_con = (Form_pg_constraint) GETSTRUCT(copyTuple);
+	copy_con->convalidated = true;
+	CatalogTupleUpdate(conrel, &copyTuple->t_self, copyTuple);
+
+	InvokeObjectPostAlterHook(ConstraintRelationId, con->oid, 0);
+
+	heap_freetuple(copyTuple);
+}
+
+/*
+ * QueueNNConstraintValidation
+ *
+ * Add an entry to the wqueue to validate the given not-null constraint in
+ * Phase 3 and update the convalidated field in the pg_constraint catalog for
+ * the specified relation and all its inheriting children.
+ */
+static void
+QueueNNConstraintValidation(List **wqueue, Relation conrel, Relation rel,
+							HeapTuple contuple, bool recurse, bool recursing,
+							LOCKMODE lockmode)
+{
+	Form_pg_constraint con;
+	AlteredTableInfo *tab;
+	HeapTuple	copyTuple;
+	Form_pg_constraint copy_con;
+	List	   *children = NIL;
+	AttrNumber	attnum;
+	char	   *colname;
+
+	con = (Form_pg_constraint) GETSTRUCT(contuple);
+	Assert(con->contype == CONSTRAINT_NOTNULL);
+
+	attnum = extractNotNullColumn(contuple);
+
+	/*
+	 * If we're recursing, we've already done this for parent, so skip it.
+	 * Also, if the constraint is a NO INHERIT constraint, we shouldn't try to
+	 * look for it in the children.
+	 *
+	 * We recurse before validating on the parent, to reduce risk of
+	 * deadlocks.
+	 */
+	if (!recursing && !con->connoinherit)
+		children = find_all_inheritors(RelationGetRelid(rel), lockmode, NULL);
+
+	colname = get_attname(RelationGetRelid(rel), attnum, false);
+	foreach_oid(childoid, children)
+	{
+		Relation	childrel;
+		HeapTuple	contup;
+		Form_pg_constraint childcon;
+		char	   *conname;
+
+		if (childoid == RelationGetRelid(rel))
+			continue;
+
+		/*
+		 * If we are told not to recurse, there had better not be any child
+		 * tables, because we can't mark the constraint on the parent valid
+		 * unless it is valid for all child tables.
+		 */
+		if (!recurse)
+			ereport(ERROR,
+					errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+					errmsg("constraint must be validated on child tables too"));
+
+		/*
+		 * The column on child might have a different attnum, so search by
+		 * column name.
+		 */
+		contup = findNotNullConstraint(childoid, colname);
+		if (!contup)
+			elog(ERROR, "cache lookup failed for not-null constraint on column \"%s\" of relation \"%s\"",
+						colname, get_rel_name(childoid));
+		childcon = (Form_pg_constraint) GETSTRUCT(contup);
+		if (childcon->convalidated)
+			continue;
+
+		/* find_all_inheritors already got lock */
+		childrel = table_open(childoid, NoLock);
+		conname = pstrdup(NameStr(childcon->conname));
+
+		/* XXX improve ATExecValidateConstraint API to avoid double search */
+		ATExecValidateConstraint(wqueue, childrel, conname,
+								 false, true, lockmode);
+		table_close(childrel, NoLock);
+	}
+
+	/* Set the flags appropriately without queueing another validation */
+	set_attnotnull(NULL, rel, attnum, true, false);
+
+	tab = ATGetQueueEntry(wqueue, rel);
+	tab->verify_new_notnull = true;
+
+	/*
+	 * Invalidate relcache so that others see the new validated constraint.
+	 */
+	CacheInvalidateRelcache(rel);
+
+	/*
+	 * Now update the catalogs, while we have the door open.
 	 */
 	copyTuple = heap_copytuple(contuple);
 	copy_con = (Form_pg_constraint) GETSTRUCT(copyTuple);
@@ -13917,10 +14084,11 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 									   false),
 						   RelationGetRelationName(rel)));
 
-		/* All good -- reset attnotnull if needed */
+		/* All good -- reset attnotnull and attnotnullvalid if needed */
 		if (attForm->attnotnull)
 		{
 			attForm->attnotnull = false;
+			attForm->attnotnullvalid = false;
 			CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
 		}
 
@@ -17271,19 +17439,25 @@ MergeAttributesIntoExisting(Relation child_rel, Relation parent_rel, bool ispart
 			if (parent_att->attgenerated && !child_att->attgenerated)
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
-						 errmsg("column \"%s\" in child table must be a generated column", parent_attname)));
+						 errmsg("column \"%s\" in child table must be a generated column",
+								parent_attname)));
 			if (child_att->attgenerated && !parent_att->attgenerated)
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
-						 errmsg("column \"%s\" in child table must not be a generated column", parent_attname)));
+						 errmsg("column \"%s\" in child table must not be a generated column",
+								parent_attname)));
 
-			if (parent_att->attgenerated && child_att->attgenerated && child_att->attgenerated != parent_att->attgenerated)
+			if (parent_att->attgenerated && child_att->attgenerated &&
+				child_att->attgenerated != parent_att->attgenerated)
 				ereport(ERROR,
 						(errcode(ERRCODE_DATATYPE_MISMATCH),
-						 errmsg("column \"%s\" inherits from generated column of different kind", parent_attname),
+						 errmsg("column \"%s\" inherits from generated column of different kind",
+								parent_attname),
 						 errdetail("Parent column is %s, child column is %s.",
-								   parent_att->attgenerated == ATTRIBUTE_GENERATED_STORED ? "STORED" : "VIRTUAL",
-								   child_att->attgenerated == ATTRIBUTE_GENERATED_STORED ? "STORED" : "VIRTUAL")));
+								   parent_att->attgenerated == ATTRIBUTE_GENERATED_STORED ?
+								   "STORED" : "VIRTUAL",
+								   child_att->attgenerated == ATTRIBUTE_GENERATED_STORED ?
+								   "STORED" : "VIRTUAL")));
 
 			/*
 			 * Regular inheritance children are independent enough not to
@@ -19772,7 +19946,8 @@ PartConstraintImpliedByRelConstraint(Relation scanrel,
 		{
 			Form_pg_attribute att = TupleDescAttr(scanrel->rd_att, i - 1);
 
-			if (att->attnotnull && !att->attisdropped)
+			/* invalid not-null constraint must be ignored */
+			if (att->attnotnull && att->attnotnullvalid && !att->attisdropped)
 			{
 				NullTest   *ntest = makeNode(NullTest);
 

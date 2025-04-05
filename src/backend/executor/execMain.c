@@ -2074,6 +2074,7 @@ ExecConstraints(ResultRelInfo *resultRelInfo,
 	{
 		for (AttrNumber attnum = 1; attnum <= tupdesc->natts; attnum++)
 		{
+			/* FIXME use CompactAttribute */
 			Form_pg_attribute att = TupleDescAttr(tupdesc, attnum - 1);
 
 			if (att->attnotnull && att->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
