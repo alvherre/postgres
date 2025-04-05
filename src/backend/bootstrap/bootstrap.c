@@ -615,6 +615,9 @@ DefineAttr(char *name, char *type, int attnum, int nullness)
 				attrtypes[attnum]->attnotnull = true;
 		}
 	}
+
+	/* Not-null constraints on system catalogs are always valid. */
+	attrtypes[attnum]->attnotnullvalid = attrtypes[attnum]->attnotnull;
 }
 
 

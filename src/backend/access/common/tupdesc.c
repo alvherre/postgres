@@ -74,7 +74,8 @@ populate_compact_attribute_internal(Form_pg_attribute src,
 	dst->atthasmissing = src->atthasmissing;
 	dst->attisdropped = src->attisdropped;
 	dst->attgenerated = (src->attgenerated != '\0');
-	dst->attnotnull = src->attnotnull;
+	dst->attnullability = !src->attnotnull ? ATTNULLABLE_NONE :
+		src->attnotnullvalid ? ATTNULLABLE_VALID : ATTNULLABLE_INVALID;
 
 	switch (src->attalign)
 	{
@@ -252,6 +253,7 @@ CreateTupleDescCopy(TupleDesc tupdesc)
 		Form_pg_attribute att = TupleDescAttr(desc, i);
 
 		att->attnotnull = false;
+		att->attnotnullvalid = false;
 		att->atthasdef = false;
 		att->atthasmissing = false;
 		att->attidentity = '\0';
@@ -298,6 +300,7 @@ CreateTupleDescTruncatedCopy(TupleDesc tupdesc, int natts)
 		Form_pg_attribute att = TupleDescAttr(desc, i);
 
 		att->attnotnull = false;
+		att->attnotnullvalid = false;
 		att->atthasdef = false;
 		att->atthasmissing = false;
 		att->attidentity = '\0';
@@ -418,6 +421,7 @@ TupleDescCopy(TupleDesc dst, TupleDesc src)
 		Form_pg_attribute att = TupleDescAttr(dst, i);
 
 		att->attnotnull = false;
+		att->attnotnullvalid = false;
 		att->atthasdef = false;
 		att->atthasmissing = false;
 		att->attidentity = '\0';
@@ -464,6 +468,7 @@ TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
 
 	/* since we're not copying constraints or defaults, clear these */
 	dstAtt->attnotnull = false;
+	dstAtt->attnotnullvalid = false;
 	dstAtt->atthasdef = false;
 	dstAtt->atthasmissing = false;
 	dstAtt->attidentity = '\0';
@@ -612,6 +617,8 @@ equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
 		if (attr1->attcompression != attr2->attcompression)
 			return false;
 		if (attr1->attnotnull != attr2->attnotnull)
+			return false;
+		if (attr1->attnotnullvalid != attr2->attnotnullvalid)
 			return false;
 		if (attr1->atthasdef != attr2->atthasdef)
 			return false;
@@ -841,6 +848,7 @@ TupleDescInitEntry(TupleDesc desc,
 	att->attndims = attdim;
 
 	att->attnotnull = false;
+	att->attnotnullvalid = false;
 	att->atthasdef = false;
 	att->atthasmissing = false;
 	att->attidentity = '\0';
@@ -904,6 +912,7 @@ TupleDescInitBuiltinEntry(TupleDesc desc,
 	att->attndims = attdim;
 
 	att->attnotnull = false;
+	att->attnotnullvalid = false;
 	att->atthasdef = false;
 	att->atthasmissing = false;
 	att->attidentity = '\0';
