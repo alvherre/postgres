@@ -74,8 +74,8 @@ populate_compact_attribute_internal(Form_pg_attribute src,
 	dst->atthasmissing = src->atthasmissing;
 	dst->attisdropped = src->attisdropped;
 	dst->attgenerated = (src->attgenerated != '\0');
-	dst->attnullability = !src->attnotnull ? ATTNULLABLE_NONE :
-		src->attnotnullvalid ? ATTNULLABLE_VALID : ATTNULLABLE_INVALID;
+	dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
+		ATTNULLABLE_UNKNOWN;
 
 	switch (src->attalign)
 	{
@@ -145,9 +145,10 @@ verify_compact_attribute(TupleDesc tupdesc, int attnum)
 
 	/*
 	 * Make the attcacheoff match since it's been reset to -1 by
-	 * populate_compact_attribute_internal.
+	 * populate_compact_attribute_internal.  Same with attnullability.
 	 */
 	tmp.attcacheoff = cattr->attcacheoff;
+	tmp.attnullability = cattr->attnullability;
 
 	/* Check the freshly populated CompactAttribute matches the TupleDesc's */
 	Assert(memcmp(&tmp, cattr, sizeof(CompactAttribute)) == 0);
@@ -253,7 +254,6 @@ CreateTupleDescCopy(TupleDesc tupdesc)
 		Form_pg_attribute att = TupleDescAttr(desc, i);
 
 		att->attnotnull = false;
-		att->attnotnullvalid = false;
 		att->atthasdef = false;
 		att->atthasmissing = false;
 		att->attidentity = '\0';
@@ -300,7 +300,6 @@ CreateTupleDescTruncatedCopy(TupleDesc tupdesc, int natts)
 		Form_pg_attribute att = TupleDescAttr(desc, i);
 
 		att->attnotnull = false;
-		att->attnotnullvalid = false;
 		att->atthasdef = false;
 		att->atthasmissing = false;
 		att->attidentity = '\0';
@@ -421,7 +420,6 @@ TupleDescCopy(TupleDesc dst, TupleDesc src)
 		Form_pg_attribute att = TupleDescAttr(dst, i);
 
 		att->attnotnull = false;
-		att->attnotnullvalid = false;
 		att->atthasdef = false;
 		att->atthasmissing = false;
 		att->attidentity = '\0';
@@ -468,7 +466,6 @@ TupleDescCopyEntry(TupleDesc dst, AttrNumber dstAttno,
 
 	/* since we're not copying constraints or defaults, clear these */
 	dstAtt->attnotnull = false;
-	dstAtt->attnotnullvalid = false;
 	dstAtt->atthasdef = false;
 	dstAtt->atthasmissing = false;
 	dstAtt->attidentity = '\0';
@@ -567,6 +564,8 @@ DecrTupleDescRefCount(TupleDesc tupdesc)
 
 /*
  * Compare two TupleDesc structures for logical equality
+ *
+ * XXX should we compare CompactAttribute->attnullability here?
  */
 bool
 equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
@@ -617,8 +616,6 @@ equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
 		if (attr1->attcompression != attr2->attcompression)
 			return false;
 		if (attr1->attnotnull != attr2->attnotnull)
-			return false;
-		if (attr1->attnotnullvalid != attr2->attnotnullvalid)
 			return false;
 		if (attr1->atthasdef != attr2->atthasdef)
 			return false;
@@ -848,7 +845,6 @@ TupleDescInitEntry(TupleDesc desc,
 	att->attndims = attdim;
 
 	att->attnotnull = false;
-	att->attnotnullvalid = false;
 	att->atthasdef = false;
 	att->atthasmissing = false;
 	att->attidentity = '\0';
@@ -912,7 +908,6 @@ TupleDescInitBuiltinEntry(TupleDesc desc,
 	att->attndims = attdim;
 
 	att->attnotnull = false;
-	att->attnotnullvalid = false;
 	att->atthasdef = false;
 	att->atthasmissing = false;
 	att->attidentity = '\0';

@@ -19,17 +19,3 @@ SELECT relname, relkind
   FROM pg_class
  WHERE relkind IN ('v', 'c', 'f', 'p', 'I')
        AND relfilenode <> 0;
-
--- pg_attribute sanity check: attnotnullvalid can only be true when
--- attnotnull is valid.
-select pa.attrelid::regclass, pa.attname, pa.attnum,
-       pa.attnotnull, pa.attnotnullvalid
-from    pg_attribute pa
-where not pa.attnotnull and pa.attnotnullvalid;
-
--- pg_attribute's attnotnullvalid should match pg_constraint.convalidated
-select att.attrelid::regclass, att.attname, att.attnotnull,
-       att.attnotnullvalid, con.convalidated
-  from pg_attribute att join pg_constraint con
-    on (att.attnum = con.conkey[1] and att.attrelid = con.conrelid)
- where contype = 'n' and con.convalidated <> att.attnotnullvalid;

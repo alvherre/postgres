@@ -307,7 +307,7 @@ static TupleDesc GetPgClassDescriptor(void);
 static TupleDesc GetPgIndexDescriptor(void);
 static void AttrDefaultFetch(Relation relation, int ndef);
 static int	AttrDefaultCmp(const void *a, const void *b);
-static void CheckConstraintFetch(Relation relation);
+static void CheckNNConstraintFetch(Relation relation);
 static int	CheckConstraintCmp(const void *a, const void *b);
 static void InitIndexAmRoutine(Relation relation);
 static void IndexSupportInitialize(oidvector *indclass,
@@ -592,7 +592,7 @@ RelationBuildTupleDesc(Relation relation)
 
 		/* Update constraint/default info */
 		if (attp->attnotnull)
-			constr->has_not_null = true;	/* invalid ones included */
+			constr->has_not_null = true;
 		if (attp->attgenerated == ATTRIBUTE_GENERATED_STORED)
 			constr->has_generated_stored = true;
 		if (attp->attgenerated == ATTRIBUTE_GENERATED_VIRTUAL)
@@ -693,9 +693,38 @@ RelationBuildTupleDesc(Relation relation)
 
 		constr->missing = attrmiss;
 
-		if (relation->rd_rel->relchecks > 0)	/* CHECKs */
-			CheckConstraintFetch(relation);
-		else
+		/* CHECK and NOT NULLs */
+		if (!IsCatalogRelation(relation) &&
+			(relation->rd_rel->relchecks > 0 || constr->has_not_null))
+			CheckNNConstraintFetch(relation);
+
+		/*
+		 * Any not-null constraint that wasn't marked invalid by
+		 * CheckNNConstraintFetch must necessarily be valid; make it so in the
+		 * CompactAttribute array.  In catalog relations however, any not-null
+		 * constraint is necessarily valid.
+		 */
+		for (int i = 0; i < relation->rd_rel->relnatts - 1; i++)
+		{
+			CompactAttribute *attr;
+
+			attr = TupleDescCompactAttr(relation->rd_att, i);
+
+			if (IsCatalogRelation(relation))
+			{
+				if (attr->attnullability == ATTNULLABLE_UNKNOWN)
+					attr->attnullability = ATTNULLABLE_VALID;
+				continue;
+			}
+
+			if (attr->attnullability == ATTNULLABLE_UNKNOWN)
+				attr->attnullability = ATTNULLABLE_VALID;
+			else
+				Assert(attr->attnullability == ATTNULLABLE_INVALID ||
+					   attr->attnullability == ATTNULLABLE_UNRESTRICTED);
+		}
+
+		if (relation->rd_rel->relchecks == 0)
 			constr->num_check = 0;
 	}
 	else
@@ -3573,7 +3602,6 @@ RelationBuildLocalRelation(const char *relname,
 		datt->attidentity = satt->attidentity;
 		datt->attgenerated = satt->attgenerated;
 		datt->attnotnull = satt->attnotnull;
-		datt->attnotnullvalid = satt->attnotnullvalid;
 		has_not_null |= satt->attnotnull;
 		populate_compact_attribute(rel->rd_att, i);
 	}
@@ -4534,13 +4562,14 @@ AttrDefaultCmp(const void *a, const void *b)
 }
 
 /*
- * Load any check constraints for the relation.
+ * Load any check constraints for the relation, and update not-null validity
+ * of invalid constraints.
  *
  * As with defaults, if we don't find the expected number of them, just warn
  * here.  The executor should throw an error if an INSERT/UPDATE is attempted.
  */
 static void
-CheckConstraintFetch(Relation relation)
+CheckNNConstraintFetch(Relation relation)
 {
 	ConstrCheck *check;
 	int			ncheck = relation->rd_rel->relchecks;
@@ -4570,6 +4599,27 @@ CheckConstraintFetch(Relation relation)
 		Form_pg_constraint conform = (Form_pg_constraint) GETSTRUCT(htup);
 		Datum		val;
 		bool		isnull;
+
+		/*
+		 * Consider only invalid not-null constraints and mark the TupleDesc
+		 * entry invalid.
+		 */
+		if (!IsCatalogRelation(relation) &&
+			conform->contype == CONSTRAINT_NOTNULL)
+		{
+			if (!conform->convalidated)
+			{
+				AttrNumber	attnum;
+
+				attnum = extractNotNullColumn(htup);
+				Assert(relation->rd_att->compact_attrs[attnum - 1].attnullability ==
+					   ATTNULLABLE_UNKNOWN);
+				relation->rd_att->compact_attrs[attnum - 1].attnullability =
+					ATTNULLABLE_INVALID;
+			}
+
+			continue;
+		}
 
 		/* We want check constraints only */
 		if (conform->contype != CONSTRAINT_CHECK)

@@ -76,14 +76,15 @@ typedef struct CompactAttribute
 	bool		atthasmissing;	/* as FormData_pg_attribute.atthasmissing */
 	bool		attisdropped;	/* as FormData_pg_attribute.attisdropped */
 	bool		attgenerated;	/* FormData_pg_attribute.attgenerated != '\0' */
-	char		attnullability; /* attnotnull + attnotnullvalid */
+	char		attnullability; /* status of not-null constraint, see below */
 	uint8		attalignby;		/* alignment requirement in bytes */
 } CompactAttribute;
 
 /* Valid values for CompactAttribute->attnullability */
-#define		ATTNULLABLE_VALID		'v' /* valid constraint exists */
-#define		ATTNULLABLE_INVALID		'i' /* constraint exists, marked invalid */
-#define		ATTNULLABLE_NONE		'f' /* no constraint exists */
+#define	ATTNULLABLE_UNRESTRICTED 'f' /* No constraint exists */
+#define	ATTNULLABLE_UNKNOWN		'u' /* constraint exists, validity unknown */
+#define	ATTNULLABLE_VALID		'v' /* valid constraint exists */
+#define	ATTNULLABLE_INVALID		'i' /* constraint exists, marked invalid */
 
 /*
  * This struct is passed around within the backend to describe the structure

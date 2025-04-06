@@ -151,7 +151,6 @@ static const FormData_pg_attribute a1 = {
 	.attalign = TYPALIGN_SHORT,
 	.attstorage = TYPSTORAGE_PLAIN,
 	.attnotnull = true,
-	.attnotnullvalid = true,
 	.attislocal = true,
 };
 
@@ -165,7 +164,6 @@ static const FormData_pg_attribute a2 = {
 	.attalign = TYPALIGN_INT,
 	.attstorage = TYPSTORAGE_PLAIN,
 	.attnotnull = true,
-	.attnotnullvalid = true,
 	.attislocal = true,
 };
 
@@ -179,7 +177,6 @@ static const FormData_pg_attribute a3 = {
 	.attalign = TYPALIGN_INT,
 	.attstorage = TYPSTORAGE_PLAIN,
 	.attnotnull = true,
-	.attnotnullvalid = true,
 	.attislocal = true,
 };
 
@@ -193,7 +190,6 @@ static const FormData_pg_attribute a4 = {
 	.attalign = TYPALIGN_INT,
 	.attstorage = TYPSTORAGE_PLAIN,
 	.attnotnull = true,
-	.attnotnullvalid = true,
 	.attislocal = true,
 };
 
@@ -207,7 +203,6 @@ static const FormData_pg_attribute a5 = {
 	.attalign = TYPALIGN_INT,
 	.attstorage = TYPSTORAGE_PLAIN,
 	.attnotnull = true,
-	.attnotnullvalid = true,
 	.attislocal = true,
 };
 
@@ -227,7 +222,6 @@ static const FormData_pg_attribute a6 = {
 	.attalign = TYPALIGN_INT,
 	.attstorage = TYPSTORAGE_PLAIN,
 	.attnotnull = true,
-	.attnotnullvalid = true,
 	.attislocal = true,
 };
 
@@ -759,7 +753,6 @@ InsertPgAttributeTuples(Relation pg_attribute_rel,
 		slot[slotCount]->tts_values[Anum_pg_attribute_attstorage - 1] = CharGetDatum(attrs->attstorage);
 		slot[slotCount]->tts_values[Anum_pg_attribute_attcompression - 1] = CharGetDatum(attrs->attcompression);
 		slot[slotCount]->tts_values[Anum_pg_attribute_attnotnull - 1] = BoolGetDatum(attrs->attnotnull);
-		slot[slotCount]->tts_values[Anum_pg_attribute_attnotnullvalid - 1] = BoolGetDatum(attrs->attnotnullvalid);
 		slot[slotCount]->tts_values[Anum_pg_attribute_atthasdef - 1] = BoolGetDatum(attrs->atthasdef);
 		slot[slotCount]->tts_values[Anum_pg_attribute_atthasmissing - 1] = BoolGetDatum(attrs->atthasmissing);
 		slot[slotCount]->tts_values[Anum_pg_attribute_attidentity - 1] = CharGetDatum(attrs->attidentity);
@@ -1721,7 +1714,6 @@ RemoveAttributeById(Oid relid, AttrNumber attnum)
 
 	/* Remove any not-null constraint the column may have */
 	attStruct->attnotnull = false;
-	attStruct->attnotnullvalid = false;
 
 	/* Unset this so no one tries to look up the generation expression */
 	attStruct->attgenerated = '\0';

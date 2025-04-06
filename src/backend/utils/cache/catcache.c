@@ -1142,7 +1142,6 @@ CatalogCacheInitializeCache(CatCache *cache)
 			keytype = attr->atttypid;
 			/* cache key columns should always be NOT NULL */
 			Assert(attr->attnotnull);
-			Assert(attr->attnotnullvalid);
 		}
 		else
 		{

@@ -986,9 +986,6 @@ sub morph_row_for_pgattr
 		$row->{attnotnull} = 'f';
 	}
 
-	# Not-null constraints on system catalogs are always valid.
-	$row->{attnotnullvalid} = $row->{attnotnull};
-
 	Catalog::AddDefaultValues($row, $pgattr_schema, 'pg_attribute');
 	return;
 }

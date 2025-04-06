@@ -120,9 +120,6 @@ CATALOG(pg_attribute,1249,AttributeRelationId) BKI_BOOTSTRAP BKI_ROWTYPE_OID(75,
 	/* Whether a not-null constraint exists for the column */
 	bool		attnotnull;
 
-	/* Whether the not-null constraint, if it exists, is valid */
-	bool		attnotnullvalid;
-
 	/* Has DEFAULT value or not */
 	bool		atthasdef BKI_DEFAULT(f);
 

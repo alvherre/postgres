@@ -1427,7 +1427,7 @@ BuildDescForRelation(const List *columns)
 		TupleDescInitEntryCollation(desc, attnum, attcollation);
 
 		/* Fill in additional stuff not handled by TupleDescInitEntry */
-		att->attnotnull = att->attnotnullvalid = entry->is_not_null;
+		att->attnotnull = entry->is_not_null;
 		att->attislocal = entry->is_local;
 		att->attinhcount = entry->inhcount;
 		att->attidentity = entry->identity;
@@ -6222,16 +6222,18 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap)
 		 */
 		for (i = 0; i < newTupDesc->natts; i++)
 		{
-			Form_pg_attribute attr = TupleDescAttr(newTupDesc, i);
+			CompactAttribute *attr = TupleDescCompactAttr(newTupDesc, i);
 
-			if (attr->attnotnull && attr->attnotnullvalid &&
+			if (attr->attnullability != ATTNULLABLE_UNRESTRICTED &&
 				!attr->attisdropped)
 			{
-				if (attr->attgenerated != ATTRIBUTE_GENERATED_VIRTUAL)
-					notnull_attrs = lappend_int(notnull_attrs, attr->attnum);
+				Form_pg_attribute	wholeatt = TupleDescAttr(newTupDesc, i);
+
+				if (wholeatt->attgenerated != ATTRIBUTE_GENERATED_VIRTUAL)
+					notnull_attrs = lappend_int(notnull_attrs, wholeatt->attnum);
 				else
 					notnull_virtual_attrs = lappend_int(notnull_virtual_attrs,
-														attr->attnum);
+														wholeatt->attnum);
 			}
 		}
 		if (notnull_attrs || notnull_virtual_attrs)
@@ -7795,7 +7797,7 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
 
 	/*
 	 * Find the constraint that makes this column NOT NULL, and drop it.
-	 * dropconstraint_internal() resets attnotnull/attnotnullvalid.
+	 * dropconstraint_internal() resets attnotnull.
 	 */
 	conTup = findNotNullConstraintAttnum(RelationGetRelid(rel), attnum);
 	if (conTup == NULL)
@@ -7820,10 +7822,10 @@ ATExecDropNotNull(Relation rel, const char *colName, bool recurse,
  *		Helper to update/validate the pg_attribute status of a not-null
  *		constraint
  *
- * pg_attribute.attnotnull is set true, if it isn't already.  If is_valid
- * is true, also set pg_attribute.attnotnullvalid.  If queue_validation is
- * true, also set up wqueue to validate the constraint.  wqueue may be given
- * as NULL when validation is not needed (e.g., on table creation).
+ * pg_attribute.attnotnull is set true, if it isn't already.
+ * If queue_validation is true, also set up wqueue to validate the constraint.
+ * wqueue may be given as NULL when validation is not needed (e.g., on table
+ * creation).
  */
 static void
 set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
@@ -7843,7 +7845,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 	if (attr->attisdropped)
 		return;
 
-	if (!attr->attnotnull || (is_valid && !attr->attnotnullvalid))
+	if (!attr->attnotnull)
 	{
 		Relation	attr_rel;
 		HeapTuple	tuple;
@@ -7858,7 +7860,6 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 		attr = (Form_pg_attribute) GETSTRUCT(tuple);
 
 		attr->attnotnull = true;
-		attr->attnotnullvalid = is_valid;
 		CatalogTupleUpdate(attr_rel, &tuple->t_self, tuple);
 
 		/*
@@ -9899,8 +9900,8 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		/*
 		 * If adding a valid not-null constraint, set the pg_attribute flag
 		 * and tell phase 3 to verify existing rows, if needed.  For an
-		 * invalid constraint, just set attnotnull and attnotnullvalid,
-		 * without queueing verification.
+		 * invalid constraint, just set attnotnull, without queueing
+		 * verification.
 		 */
 		if (constr->contype == CONSTR_NOTNULL)
 			set_attnotnull(wqueue, rel, ccon->attnum,
@@ -14091,11 +14092,10 @@ dropconstraint_internal(Relation rel, HeapTuple constraintTup, DropBehavior beha
 									   false),
 						   RelationGetRelationName(rel)));
 
-		/* All good -- reset attnotnull and attnotnullvalid if needed */
+		/* All good -- reset attnotnull if needed */
 		if (attForm->attnotnull)
 		{
 			attForm->attnotnull = false;
-			attForm->attnotnullvalid = false;
 			CatalogTupleUpdate(attrel, &atttup->t_self, atttup);
 		}
 
@@ -19945,18 +19945,19 @@ PartConstraintImpliedByRelConstraint(Relation scanrel,
 
 		for (i = 1; i <= natts; i++)
 		{
-			Form_pg_attribute att = TupleDescAttr(scanrel->rd_att, i - 1);
+			CompactAttribute *att = TupleDescCompactAttr(scanrel->rd_att, i - 1);
 
-			/* invalid not-null constraint must be ignored */
-			if (att->attnotnull && att->attnotnullvalid && !att->attisdropped)
+			/* invalid not-null constraint must be ignored here */
+			if (att->attnullability == ATTNULLABLE_VALID && !att->attisdropped)
 			{
+				Form_pg_attribute wholeatt = TupleDescAttr(scanrel->rd_att, i - 1);
 				NullTest   *ntest = makeNode(NullTest);
 
 				ntest->arg = (Expr *) makeVar(1,
 											  i,
-											  att->atttypid,
-											  att->atttypmod,
-											  att->attcollation,
+											  wholeatt->atttypid,
+											  wholeatt->atttypmod,
+											  wholeatt->attcollation,
 											  0);
 				ntest->nulltesttype = IS_NOT_NULL;
 

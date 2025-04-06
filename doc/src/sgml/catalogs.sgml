@@ -1260,16 +1260,7 @@
        <structfield>attnotnull</structfield> <type>bool</type>
       </para>
       <para>
-       This column has a (possibly unvalidated) not-null constraint.
-      </para></entry>
-     </row>
-
-     <row>
-      <entry role="catalog_table_entry"><para role="column_definition">
-       <structfield>attnotnullvalid</structfield> <type>bool</type>
-      </para>
-      <para>
-       Whether the not-null constraint, if one exists, has been validated.
+       This column has a (possibly invalid) not-null constraint.
       </para></entry>
      </row>
 
