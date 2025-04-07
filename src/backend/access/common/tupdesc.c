@@ -22,6 +22,7 @@
 #include "access/htup_details.h"
 #include "access/toast_compression.h"
 #include "access/tupdesc_details.h"
+#include "catalog/catalog.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_type.h"
 #include "common/hashfn.h"
@@ -74,8 +75,13 @@ populate_compact_attribute_internal(Form_pg_attribute src,
 	dst->atthasmissing = src->atthasmissing;
 	dst->attisdropped = src->attisdropped;
 	dst->attgenerated = (src->attgenerated != '\0');
-	dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
-		ATTNULLABLE_UNKNOWN;
+
+	if (IsCatalogRelationOid(src->attrelid))
+		dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
+			ATTNULLABLE_VALID;
+	else
+		dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
+			ATTNULLABLE_UNKNOWN;
 
 	switch (src->attalign)
 	{

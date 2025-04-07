@@ -6224,7 +6224,7 @@ ATRewriteTable(AlteredTableInfo *tab, Oid OIDNewHeap)
 		{
 			CompactAttribute *attr = TupleDescCompactAttr(newTupDesc, i);
 
-			if (attr->attnullability != ATTNULLABLE_UNRESTRICTED &&
+			if (attr->attnullability == ATTNULLABLE_VALID &&
 				!attr->attisdropped)
 			{
 				Form_pg_attribute	wholeatt = TupleDescAttr(newTupDesc, i);
@@ -7832,6 +7832,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 			   bool is_valid, bool queue_validation)
 {
 	Form_pg_attribute attr;
+	CompactAttribute *thisatt;
 
 	Assert(!queue_validation || wqueue);
 
@@ -7857,6 +7858,9 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 			elog(ERROR, "cache lookup failed for attribute %d of relation %u",
 				 attnum, RelationGetRelid(rel));
 
+		thisatt = TupleDescCompactAttr(RelationGetDescr(rel), attnum - 1);
+		thisatt->attnullability = ATTNULLABLE_VALID;
+
 		attr = (Form_pg_attribute) GETSTRUCT(tuple);
 
 		attr->attnotnull = true;
@@ -7879,6 +7883,15 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 
 		table_close(attr_rel, RowExclusiveLock);
 		heap_freetuple(tuple);
+	}
+	else
+	{
+		thisatt = TupleDescCompactAttr(RelationGetDescr(rel), attnum - 1);
+
+		if(is_valid)
+			thisatt->attnullability = ATTNULLABLE_VALID;
+		else
+			thisatt->attnullability = ATTNULLABLE_INVALID;
 	}
 }
 

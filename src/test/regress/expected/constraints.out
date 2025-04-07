@@ -1441,6 +1441,8 @@ EXECUTE get_nnconstraint_info('{notnull_tbl1_child2}');
  notnull_tbl1_child2 | notnull_tbl1_child2_a_not_null | f            | t          |           1
 (1 row)
 
+--table rewrite won't validate invalid constraint
+ALTER TABLE notnull_tbl1 ADD column d float8 default random();
 -- VALIDATE CONSTRAINT scans the table
 ALTER TABLE notnull_tbl1 VALIDATE CONSTRAINT nn; -- error, nulls exist
 ERROR:  column "a" of relation "notnull_tbl1" contains null values

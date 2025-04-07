@@ -704,7 +704,7 @@ RelationBuildTupleDesc(Relation relation)
 		 * CompactAttribute array.  In catalog relations however, any not-null
 		 * constraint is necessarily valid.
 		 */
-		for (int i = 0; i < relation->rd_rel->relnatts - 1; i++)
+		for (int i = 0; i < relation->rd_rel->relnatts; i++)
 		{
 			CompactAttribute *attr;
 

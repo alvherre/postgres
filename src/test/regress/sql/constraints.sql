@@ -849,6 +849,9 @@ ALTER TABLE notnull_tbl1_child2 ADD NOT NULL a NOT VALID;
 ALTER TABLE notnull_tbl1_child2 INHERIT notnull_tbl1;
 EXECUTE get_nnconstraint_info('{notnull_tbl1_child2}');
 
+--table rewrite won't validate invalid constraint
+ALTER TABLE notnull_tbl1 ADD column d float8 default random();
+
 -- VALIDATE CONSTRAINT scans the table
 ALTER TABLE notnull_tbl1 VALIDATE CONSTRAINT nn; -- error, nulls exist
 UPDATE notnull_tbl1 SET a = 100 WHERE b = 1;

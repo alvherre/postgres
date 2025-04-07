@@ -176,6 +176,7 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 		for (int i = 0; i < relation->rd_att->natts; i++)
 		{
 			CompactAttribute *attr = TupleDescCompactAttr(relation->rd_att, i);
+			Assert(attr->attnullability != ATTNULLABLE_UNKNOWN);
 
 			if (attr->attnullability == ATTNULLABLE_VALID)
 			{
