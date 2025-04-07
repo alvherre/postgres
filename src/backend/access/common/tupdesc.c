@@ -76,12 +76,15 @@ populate_compact_attribute_internal(Form_pg_attribute src,
 	dst->attisdropped = src->attisdropped;
 	dst->attgenerated = (src->attgenerated != '\0');
 
-	if (IsCatalogRelationOid(src->attrelid))
-		dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
-			ATTNULLABLE_VALID;
-	else
-		dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
-			ATTNULLABLE_UNKNOWN;
+	/*
+	 * Assign nullability status for this column.  Assuming that a constraint
+	 * exists, at this point we don't know if a not-null constraint is valid,
+	 * so we assign UNKNOWN unless the table is a catalog, in which case we
+	 * know it's valid.
+	 */
+	dst->attnullability = !src->attnotnull ? ATTNULLABLE_UNRESTRICTED :
+		IsCatalogRelationOid(src->attrelid) ? ATTNULLABLE_VALID :
+		ATTNULLABLE_UNKNOWN;
 
 	switch (src->attalign)
 	{
@@ -341,7 +344,12 @@ CreateTupleDescCopyConstr(TupleDesc tupdesc)
 		   desc->natts * sizeof(FormData_pg_attribute));
 
 	for (i = 0; i < desc->natts; i++)
+	{
 		populate_compact_attribute(desc, i);
+
+		TupleDescCompactAttr(desc, i)->attnullability =
+			TupleDescCompactAttr(tupdesc, i)->attnullability;
+	}
 
 	/* Copy the TupleConstr data structure, if any */
 	if (constr)
@@ -623,6 +631,23 @@ equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
 			return false;
 		if (attr1->attnotnull != attr2->attnotnull)
 			return false;
+		/*
+		 * When the column has a not-null constraint, we also need to consider
+		 * its validity aspect, which only manifests in CompactAttribute->
+		 * attnullability, so verify that.
+		 */
+		if (attr1->attnotnull)
+		{
+			CompactAttribute *cattr1 = TupleDescCompactAttr(tupdesc1, i);
+			CompactAttribute *cattr2 = TupleDescCompactAttr(tupdesc2, i);
+
+			Assert(cattr1->attnullability != ATTNULLABLE_UNKNOWN);
+			Assert((cattr1->attnullability == ATTNULLABLE_UNKNOWN) ==
+				   (cattr2->attnullability == ATTNULLABLE_UNKNOWN));
+
+			if (cattr1->attnullability != cattr2->attnullability)
+				return false;
+		}
 		if (attr1->atthasdef != attr2->atthasdef)
 			return false;
 		if (attr1->attidentity != attr2->attidentity)

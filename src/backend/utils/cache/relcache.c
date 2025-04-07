@@ -3604,6 +3604,14 @@ RelationBuildLocalRelation(const char *relname,
 		datt->attnotnull = satt->attnotnull;
 		has_not_null |= satt->attnotnull;
 		populate_compact_attribute(rel->rd_att, i);
+
+		if (satt->attnotnull)
+		{
+			CompactAttribute *scatt = TupleDescCompactAttr(tupDesc, i);
+			CompactAttribute *dcatt = TupleDescCompactAttr(rel->rd_att, i);
+
+			dcatt->attnullability = scatt->attnullability;
+		}
 	}
 
 	if (has_not_null)

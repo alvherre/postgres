@@ -7886,12 +7886,7 @@ set_attnotnull(List **wqueue, Relation rel, AttrNumber attnum,
 	}
 	else
 	{
-		thisatt = TupleDescCompactAttr(RelationGetDescr(rel), attnum - 1);
-
-		if(is_valid)
-			thisatt->attnullability = ATTNULLABLE_VALID;
-		else
-			thisatt->attnullability = ATTNULLABLE_INVALID;
+		CacheInvalidateRelcache(rel);
 	}
 }
 
@@ -13213,7 +13208,7 @@ QueueNNConstraintValidation(List **wqueue, Relation conrel, Relation rel,
 		table_close(childrel, NoLock);
 	}
 
-	/* Set the flags appropriately without queueing another validation */
+	/* Set attnotnull appropriately without queueing another validation */
 	set_attnotnull(NULL, rel, attnum, true, false);
 
 	tab = ATGetQueueEntry(wqueue, rel);
