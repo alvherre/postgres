@@ -98,6 +98,7 @@ VACUUM [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
    <varlistentry>
     <term><literal>FULL</literal></term>
     <listitem>
+
      <para>
       Selects <quote>full</quote> vacuum, which can reclaim more
       space, but takes much longer and exclusively locks the table.
@@ -106,6 +107,14 @@ VACUUM [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
       the operation is complete.  Usually this should only be used when a
       significant amount of space needs to be reclaimed from within the table.
      </para>
+
+     <warning>
+      <para>
+       The <option>FULL</option> parameter is deprecated in favor of
+       <xref linkend="sql-repack"/>.
+      </para>
+     </warning>
+
     </listitem>
    </varlistentry>
 

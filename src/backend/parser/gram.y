@@ -297,7 +297,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 		GrantStmt GrantRoleStmt ImportForeignSchemaStmt IndexStmt InsertStmt
 		ListenStmt LoadStmt LockStmt MergeStmt NotifyStmt ExplainableStmt PreparableStmt
 		CreateFunctionStmt AlterFunctionStmt ReindexStmt RemoveAggrStmt
-		RemoveFuncStmt RemoveOperStmt RenameStmt ReturnStmt RevokeStmt RevokeRoleStmt
+		RemoveFuncStmt RemoveOperStmt RenameStmt RepackStmt ReturnStmt RevokeStmt RevokeRoleStmt
 		RuleActionStmt RuleActionStmtOrEmpty RuleStmt
 		SecLabelStmt SelectStmt TransactionStmt TransactionStmtLegacy TruncateStmt
 		UnlistenStmt UpdateStmt VacuumStmt
@@ -380,11 +380,11 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <str>		copy_file_name
 				access_method_clause attr_name
 				table_access_method_clause name cursor_name file_name
-				cluster_index_specification
+				cluster_index_specification repack_index_specification
 
 %type <list>	func_name handler_name qual_Op qual_all_Op subquery_Op
 				opt_inline_handler opt_validator validator_clause
-				opt_collate
+				opt_collate opt_repack_args
 
 %type <range>	qualified_name insert_target OptConstrFromTable
 
@@ -763,7 +763,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	QUOTE QUOTES
 
 	RANGE READ REAL REASSIGN RECURSIVE REF_P REFERENCES REFERENCING
-	REFRESH REINDEX RELATIVE_P RELEASE RENAME REPEATABLE REPLACE REPLICA
+	REFRESH REINDEX RELATIVE_P RELEASE RENAME REPACK REPEATABLE REPLACE REPLICA
 	RESET RESTART RESTRICT RETURN RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLUP
 	ROUTINE ROUTINES ROW ROWS RULE
 
@@ -1099,6 +1099,7 @@ stmt:
 			| RemoveFuncStmt
 			| RemoveOperStmt
 			| RenameStmt
+			| RepackStmt
 			| RevokeStmt
 			| RevokeRoleStmt
 			| RuleStmt
@@ -11955,6 +11956,48 @@ cluster_index_specification:
 			| /*EMPTY*/				{ $$ = NULL; }
 		;
 
+/*****************************************************************************
+ *
+ *		QUERY:
+ *				REPACK [ (options) ] [ <qualified_name> [ USING INDEX <index_name> ] ]
+ *
+ *****************************************************************************/
+
+RepackStmt:
+			REPACK opt_repack_args
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->relation = $2 ? (RangeVar *) linitial($2) : NULL;
+					n->indexname = $2 ? (char *) lsecond($2) : NULL;
+					n->params = NIL;
+					$$ = (Node *) n;
+				}
+
+			| REPACK '(' utility_option_list ')' opt_repack_args
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->relation = $5 ? (RangeVar *) linitial($5) : NULL;
+					n->indexname = $5 ? (char *) lsecond($5) : NULL;
+					n->params = $3;
+					$$ = (Node *) n;
+				}
+		;
+
+opt_repack_args:
+			qualified_name repack_index_specification
+				{
+					$$ = list_make2($1, $2);
+				}
+			| /*EMPTY*/				{ $$ = NIL; }
+		;
+
+repack_index_specification:
+			ExistingIndex
+			| /*EMPTY*/				{ $$ = NULL; }
+		;
+
 
 /*****************************************************************************
  *
@@ -17972,6 +18015,7 @@ unreserved_keyword:
 			| RELATIVE_P
 			| RELEASE
 			| RENAME
+			| REPACK
 			| REPEATABLE
 			| REPLACE
 			| REPLICA
@@ -18604,6 +18648,7 @@ bare_label_keyword:
 			| RELATIVE_P
 			| RELEASE
 			| RENAME
+			| REPACK
 			| REPEATABLE
 			| REPLACE
 			| REPLICA

@@ -280,6 +280,7 @@ ClassifyUtilityCommandAsReadOnly(Node *parsetree)
 		case T_ClusterStmt:
 		case T_ReindexStmt:
 		case T_VacuumStmt:
+		case T_RepackStmt:
 			{
 				/*
 				 * These commands write WAL, so they're not strictly
@@ -860,6 +861,10 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 
 		case T_VacuumStmt:
 			ExecVacuum(pstate, (VacuumStmt *) parsetree, isTopLevel);
+			break;
+
+		case T_RepackStmt:
+			repack(pstate, (RepackStmt *) parsetree, isTopLevel);
 			break;
 
 		case T_ExplainStmt:
@@ -2859,6 +2864,10 @@ CreateCommandTag(Node *parsetree)
 				tag = CMDTAG_ANALYZE;
 			break;
 
+		case T_RepackStmt:
+			tag = CMDTAG_REPACK;
+			break;
+
 		case T_ExplainStmt:
 			tag = CMDTAG_EXPLAIN;
 			break;
@@ -3497,6 +3506,10 @@ GetCommandLogLevel(Node *parsetree)
 			break;
 
 		case T_ClusterStmt:
+			lev = LOGSTMT_DDL;
+			break;
+
+		case T_RepackStmt:
 			lev = LOGSTMT_DDL;
 			break;
 

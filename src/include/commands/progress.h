@@ -56,24 +56,55 @@
 #define PROGRESS_ANALYZE_PHASE_COMPUTE_EXT_STATS		4
 #define PROGRESS_ANALYZE_PHASE_FINALIZE_ANALYZE			5
 
-/* Progress parameters for cluster */
-#define PROGRESS_CLUSTER_COMMAND				0
-#define PROGRESS_CLUSTER_PHASE					1
-#define PROGRESS_CLUSTER_INDEX_RELID			2
-#define PROGRESS_CLUSTER_HEAP_TUPLES_SCANNED	3
-#define PROGRESS_CLUSTER_HEAP_TUPLES_WRITTEN	4
-#define PROGRESS_CLUSTER_TOTAL_HEAP_BLKS		5
-#define PROGRESS_CLUSTER_HEAP_BLKS_SCANNED		6
-#define PROGRESS_CLUSTER_INDEX_REBUILD_COUNT	7
+/*
+ * Progress parameters for REPACK.
+ *
+ * Note: Since REPACK shares some code with CLUSTER, these values are also
+ * used by CLUSTER. (CLUSTER is now deprecated, so it makes little sense to
+ * introduce a separate set of constants.)
+ */
+#define PROGRESS_REPACK_COMMAND					0
+#define PROGRESS_REPACK_PHASE					1
+#define PROGRESS_REPACK_INDEX_RELID				2
+#define PROGRESS_REPACK_HEAP_TUPLES_SCANNED		3
+#define PROGRESS_REPACK_HEAP_TUPLES_WRITTEN		4
+#define PROGRESS_REPACK_TOTAL_HEAP_BLKS			5
+#define PROGRESS_REPACK_HEAP_BLKS_SCANNED		6
+#define PROGRESS_REPACK_INDEX_REBUILD_COUNT		7
 
-/* Phases of cluster (as advertised via PROGRESS_CLUSTER_PHASE) */
-#define PROGRESS_CLUSTER_PHASE_SEQ_SCAN_HEAP	1
-#define PROGRESS_CLUSTER_PHASE_INDEX_SCAN_HEAP	2
-#define PROGRESS_CLUSTER_PHASE_SORT_TUPLES		3
-#define PROGRESS_CLUSTER_PHASE_WRITE_NEW_HEAP	4
-#define PROGRESS_CLUSTER_PHASE_SWAP_REL_FILES	5
-#define PROGRESS_CLUSTER_PHASE_REBUILD_INDEX	6
-#define PROGRESS_CLUSTER_PHASE_FINAL_CLEANUP	7
+/*
+ * Phases of repack (as advertised via PROGRESS_REPACK_PHASE).
+ *
+ * Note: Since REPACK shares some code with CLUSTER, (some of) these values
+ * are also used by CLUSTER. (CLUSTER is now deprecated, so it makes no sense
+ * to introduce separate set of constants.)
+ */
+#define PROGRESS_REPACK_PHASE_SEQ_SCAN_HEAP		1
+#define PROGRESS_REPACK_PHASE_INDEX_SCAN_HEAP	2
+#define PROGRESS_REPACK_PHASE_SORT_TUPLES		3
+#define PROGRESS_REPACK_PHASE_WRITE_NEW_HEAP	4
+#define PROGRESS_REPACK_PHASE_SWAP_REL_FILES	5
+#define PROGRESS_REPACK_PHASE_REBUILD_INDEX		6
+#define PROGRESS_REPACK_PHASE_FINAL_CLEANUP		7
+
+/*
+ * Commands of PROGRESS_REPACK
+ *
+ * Currently we only have one command, so the PROGRESS_REPACK_COMMAND
+ * parameter is not necessary. However it makes cluster.c simpler if we have
+ * the same set of parameters for CLUSTER and REPACK - see the note on REPACK
+ * parameters above.
+ */
+#define PROGRESS_REPACK_COMMAND_REPACK			1
+
+/*
+ * Progress parameters for cluster.
+ *
+ * Although we need to report REPACK and CLUSTER in separate views, the
+ * parameters and phases of CLUSTER are a subset of those of REPACK. Therefore
+ * we just use the appropriate values defined for REPACK above instead of
+ * defining a separate set of constants here.
+ */
 
 /* Commands of PROGRESS_CLUSTER */
 #define PROGRESS_CLUSTER_COMMAND_CLUSTER		1

@@ -3961,6 +3961,19 @@ typedef struct ClusterStmt
 } ClusterStmt;
 
 /* ----------------------
+ *		Repack Statement
+ * ----------------------
+ */
+typedef struct RepackStmt
+{
+	NodeTag		type;
+	RangeVar   *relation;		/* relation being repacked */
+	char	   *indexname;		/* order tuples by this index */
+	List	   *params;			/* list of DefElem nodes */
+} RepackStmt;
+
+
+/* ----------------------
  *		Vacuum and Analyze Statements
  *
  * Even though these are nominally two statements, it's convenient to use
