@@ -67,6 +67,8 @@ typedef struct
 	Oid			indexOid;
 } RelToCluster;
 
+static bool cluster_rel_recheck(RepackCommand cmd, Relation OldHeap,
+								Oid indexOid, Oid userid, int options);
 static void rebuild_relation(RepackCommand cmd, bool usingindex,
 							 Relation OldHeap, Relation index, bool verbose);
 static void copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex,
@@ -340,52 +342,9 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	 * to cluster a not-previously-clustered index.
 	 */
 	if (recheck)
-	{
-		/* Check that the user still has privileges for the relation */
-		if (!cluster_is_permitted_for_relation(cmd, tableOid, save_userid))
-		{
-			relation_close(OldHeap, AccessExclusiveLock);
+		if (!cluster_rel_recheck(cmd, OldHeap, indexOid, save_userid,
+								 params->options))
 			goto out;
-		}
-
-		/*
-		 * Silently skip a temp table for a remote session.  Only doing this
-		 * check in the "recheck" case is appropriate (which currently means
-		 * somebody is executing a database-wide CLUSTER or on a partitioned
-		 * table), because there is another check in cluster() which will stop
-		 * any attempt to cluster remote temp tables by name.  There is
-		 * another check in cluster_rel which is redundant, but we leave it
-		 * for extra safety.
-		 */
-		if (RELATION_IS_OTHER_TEMP(OldHeap))
-		{
-			relation_close(OldHeap, AccessExclusiveLock);
-			goto out;
-		}
-
-		if (OidIsValid(indexOid))
-		{
-			/*
-			 * Check that the index still exists
-			 */
-			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(indexOid)))
-			{
-				relation_close(OldHeap, AccessExclusiveLock);
-				goto out;
-			}
-
-			/*
-			 * Check that the index is still the one with indisclustered set,
-			 * if needed.
-			 */
-			if ((params->options & CLUOPT_RECHECK_ISCLUSTERED) != 0 &&
-				!get_index_isclustered(indexOid))
-			{
-				relation_close(OldHeap, AccessExclusiveLock);
-				goto out;
-			}
-		}
-	}
 
 	/*
 	 * We allow repacking shared catalogs only when not using an index.
@@ -479,6 +438,64 @@ out:
 	SetUserIdAndSecContext(save_userid, save_sec_context);
 
 	pgstat_progress_end_command();
+}
+
+/*
+ * Check if the table (and its index) still meets the requirements of
+ * cluster_rel().
+ */
+static bool
+cluster_rel_recheck(RepackCommand cmd, Relation OldHeap, Oid indexOid,
+					Oid userid, int options)
+{
+	Oid			tableOid = RelationGetRelid(OldHeap);
+
+	/* Check that the user still has privileges for the relation */
+	if (!cluster_is_permitted_for_relation(tableOid, userid,
+										   CLUSTER_COMMAND_CLUSTER))
+	{
+		relation_close(OldHeap, AccessExclusiveLock);
+		return false;
+	}
+
+	/*
+	 * Silently skip a temp table for a remote session.  Only doing this check
+	 * in the "recheck" case is appropriate (which currently means somebody is
+	 * executing a database-wide CLUSTER or on a partitioned table), because
+	 * there is another check in cluster() which will stop any attempt to
+	 * cluster remote temp tables by name.  There is another check in
+	 * cluster_rel which is redundant, but we leave it for extra safety.
+	 */
+	if (RELATION_IS_OTHER_TEMP(OldHeap))
+	{
+		relation_close(OldHeap, AccessExclusiveLock);
+		return false;
+	}
+
+	if (OidIsValid(indexOid))
+	{
+		/*
+		 * Check that the index still exists
+		 */
+		if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(indexOid)))
+		{
+			relation_close(OldHeap, AccessExclusiveLock);
+			return false;
+		}
+
+		/*
+		 * Check that the index is still the one with indisclustered set, if
+		 * needed.
+		 */
+		if ((options & CLUOPT_RECHECK_ISCLUSTERED) != 0 &&
+			!get_index_isclustered(indexOid))
+		{
+			relation_close(OldHeap, AccessExclusiveLock);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 /*
