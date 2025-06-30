@@ -47,9 +47,13 @@ tests += {
     'specs': [
       'basic',
       'inplace',
+      'repack',
       'syscache-update-pruned',
     ],
     'runningcheck': false, # see syscache-update-pruned
+    # 'repack' requires wal_level = 'logical'.
+    'regress_args': ['--temp-config', files('logical.conf')],
+
   },
   'tap': {
     'env': {

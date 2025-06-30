@@ -58,6 +58,7 @@
 #include "utils/acl.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
+#include "utils/injection_point.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -3190,6 +3191,12 @@ rebuild_relation_finish_concurrent(Relation NewHeap, Relation OldHeap,
 	 * during logical decoding.
 	 */
 	ident_key = build_identity_key(ident_idx_new, OldHeap, &ident_key_nentries);
+
+	/*
+	 * During testing, wait for another backend to perform concurrent data
+	 * changes which we will process below.
+	 */
+	INJECTION_POINT("repack-concurrently-before-lock", NULL);
 
 	/*
 	 * Flush all WAL records inserted so far (possibly except for the last
