@@ -530,6 +530,18 @@ XLogInsert(RmgrId rmid, uint8 info)
 }
 
 /*
+ * Simple wrapper to XLogInsert to insert a WAL record with elementary
+ * contents (only an int64 is supported as value currently).
+ */
+XLogRecPtr
+XLogSimpleInsertInt64(RmgrId rmid, uint8 info, int64 value)
+{
+	XLogBeginInsert();
+	XLogRegisterData(&value, sizeof(value));
+	return XLogInsert(rmid, info);
+}
+
+/*
  * Assemble a WAL record from the registered data and buffers into an
  * XLogRecData chain, ready for insertion with XLogInsertRecord().
  *
@@ -1389,18 +1401,4 @@ InitXLogInsert(void)
 	if (hdr_scratch == NULL)
 		hdr_scratch = MemoryContextAllocZero(xloginsert_cxt,
 											 HEADER_SCRATCH_SIZE);
-}
-
-/*
- * Write an xlog record comprising simple int64 data.
- *
- * Useful for SLRU zeropages. In this case the simpledata is usually the number of
- * a nullified SLRU page.
- */
-void
-XLogSimpleInsert(RmgrId rmid, uint8 info, int64 simpledata)
-{
-	XLogBeginInsert();
-	XLogRegisterData(&simpledata, sizeof(simpledata));
-	(void) XLogInsert(rmid, info);
 }

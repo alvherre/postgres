@@ -830,10 +830,8 @@ check_transaction_buffers(int *newval, void **extra, GucSource source)
 void
 BootStrapCLOG(void)
 {
-	/*
-	 * Nullify the page (pageno = 0) and save the page on a disk
-	 */
-	SimpleLruZeroPageExt(XactCtl, 0);
+	/* Zero page number 0 and flush it to disk */
+	SimpleLruZeroAndWritePage(XactCtl, 0);
 }
 
 /*
@@ -943,7 +941,7 @@ ExtendCLOG(TransactionId newestXact)
 
 	/* Zero the page and make an XLOG entry about it */
 	SimpleLruZeroPage(XactCtl, pageno);
-	XLogSimpleInsert(RM_CLOG_ID, CLOG_ZEROPAGE, pageno);
+	XLogSimpleInsertInt64(RM_CLOG_ID, CLOG_ZEROPAGE, pageno);
 
 	LWLockRelease(lock);
 }
@@ -1071,9 +1069,10 @@ clog_redo(XLogReaderState *record)
 	if (info == CLOG_ZEROPAGE)
 	{
 		int64		pageno;
+
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 		/* Zero the page, write the page on a disk */
-		SimpleLruZeroPageExt(XactCtl, pageno);
+		SimpleLruZeroAndWritePage(XactCtl, pageno);
 	}
 	else if (info == CLOG_TRUNCATE)
 	{

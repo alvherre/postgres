@@ -362,32 +362,6 @@ check_slru_buffers(const char *name, int *newval)
 }
 
 /*
- * SimpleLruZeroPageExt performs:
- * 		1. locking the page,
- * 		2. nullifying the page,
- * 		3. writing the page out,
- * 		4. releasing the lock.
- */
-void
-SimpleLruZeroPageExt(SlruCtl ctl, int64 pageno)
-{
-	int			slotno;
-	LWLock	   *lock;
-
-	lock = SimpleLruGetBankLock(ctl, pageno);
-	LWLockAcquire(lock, LW_EXCLUSIVE);
-
-	/* Create and zero the page*/
-	slotno = SimpleLruZeroPage(ctl, pageno);
-
-	/* Make sure it's written out */
-	SimpleLruWritePage(ctl, slotno);
-	Assert(!ctl->shared->page_dirty[slotno]);
-
-	LWLockRelease(lock);
-}
-
-/*
  * Initialize (or reinitialize) a page to zeroes.
  *
  * The page is not actually written, just set up in shared memory.
@@ -456,6 +430,31 @@ SimpleLruZeroLSNs(SlruCtl ctl, int slotno)
 	if (shared->lsn_groups_per_page > 0)
 		MemSet(&shared->group_lsn[slotno * shared->lsn_groups_per_page], 0,
 			   shared->lsn_groups_per_page * sizeof(XLogRecPtr));
+}
+
+/*
+ * This is a convenience wrapper for the common case of zeroing a page and
+ * immediately flushing it to disk.
+ *
+ * Control lock is acquired and released here.
+ */
+void
+SimpleLruZeroAndWritePage(SlruCtl ctl, int64 pageno)
+{
+	int			slotno;
+	LWLock	   *lock;
+
+	lock = SimpleLruGetBankLock(ctl, pageno);
+	LWLockAcquire(lock, LW_EXCLUSIVE);
+
+	/* Create and zero the page */
+	slotno = SimpleLruZeroPage(ctl, pageno);
+
+	/* Make sure it's written out */
+	SimpleLruWritePage(ctl, slotno);
+	Assert(!ctl->shared->page_dirty[slotno]);
+
+	LWLockRelease(lock);
 }
 
 /*

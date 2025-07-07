@@ -271,7 +271,7 @@ BootStrapSUBTRANS(void)
 	/*
 	 * Nullify the page (pageno = 0), save the page on a disk
 	 */
-	SimpleLruZeroPageExt(SubTransCtl, 0);
+	SimpleLruZeroAndWritePage(SubTransCtl, 0);
 }
 
 /*

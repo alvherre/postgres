@@ -731,7 +731,7 @@ ActivateCommitTs(void)
 	/* Create the current segment file, if necessary */
 	if (!SimpleLruDoesPhysicalPageExist(CommitTsCtl, pageno))
 		/* Zero the page, write the page on a disk */
-		SimpleLruZeroPageExt(CommitTsCtl, pageno);
+		SimpleLruZeroAndWritePage(CommitTsCtl, pageno);
 
 	/* Change the activation status in shared memory. */
 	LWLockAcquire(CommitTsLock, LW_EXCLUSIVE);
@@ -846,7 +846,7 @@ ExtendCommitTs(TransactionId newestXact)
 	SimpleLruZeroPage(CommitTsCtl, pageno);
 
 	if (!InRecovery)
-		XLogSimpleInsert(RM_COMMIT_TS_ID, COMMIT_TS_ZEROPAGE, pageno);
+		XLogSimpleInsertInt64(RM_COMMIT_TS_ID, COMMIT_TS_ZEROPAGE, pageno);
 
 	LWLockRelease(lock);
 }
@@ -990,10 +990,11 @@ commit_ts_redo(XLogReaderState *record)
 	if (info == COMMIT_TS_ZEROPAGE)
 	{
 		int64		pageno;
+
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 
 		/* Zero the page, write the page on a disk */
-		SimpleLruZeroPageExt(CommitTsCtl, pageno);
+		SimpleLruZeroAndWritePage(CommitTsCtl, pageno);
 	}
 	else if (info == COMMIT_TS_TRUNCATE)
 	{

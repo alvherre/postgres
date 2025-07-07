@@ -2033,8 +2033,8 @@ BootStrapMultiXact(void)
 	/*
 	 * Nullify the page (pageno = 0), save the page on a disk
 	 */
-	SimpleLruZeroPageExt(MultiXactOffsetCtl, 0);
-	SimpleLruZeroPageExt(MultiXactMemberCtl, 0);
+	SimpleLruZeroAndWritePage(MultiXactOffsetCtl, 0);
+	SimpleLruZeroAndWritePage(MultiXactMemberCtl, 0);
 }
 
 /*
@@ -2508,7 +2508,8 @@ ExtendMultiXactOffset(MultiXactId multi)
 
 	/* Zero the page and make an XLOG entry about it */
 	SimpleLruZeroPage(MultiXactOffsetCtl, pageno);
-	XLogSimpleInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_ZERO_OFF_PAGE, pageno);
+	XLogSimpleInsertInt64(RM_MULTIXACT_ID, XLOG_MULTIXACT_ZERO_OFF_PAGE,
+						  pageno);
 
 	LWLockRelease(lock);
 }
@@ -2552,7 +2553,8 @@ ExtendMultiXactMember(MultiXactOffset offset, int nmembers)
 
 			/* Zero the page and make an XLOG entry about it */
 			SimpleLruZeroPage(MultiXactMemberCtl, pageno);
-			XLogSimpleInsert(RM_MULTIXACT_ID, XLOG_MULTIXACT_ZERO_MEM_PAGE, pageno);
+			XLogSimpleInsertInt64(RM_MULTIXACT_ID,
+								  XLOG_MULTIXACT_ZERO_MEM_PAGE, pageno);
 
 			LWLockRelease(lock);
 		}
@@ -3329,16 +3331,18 @@ multixact_redo(XLogReaderState *record)
 	if (info == XLOG_MULTIXACT_ZERO_OFF_PAGE)
 	{
 		int64		pageno;
+
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 		/* Zero the page, write the page on a disk */
-		SimpleLruZeroPageExt(MultiXactOffsetCtl, pageno);
+		SimpleLruZeroAndWritePage(MultiXactOffsetCtl, pageno);
 	}
 	else if (info == XLOG_MULTIXACT_ZERO_MEM_PAGE)
 	{
 		int64		pageno;
+
 		memcpy(&pageno, XLogRecGetData(record), sizeof(pageno));
 		/* Zero the page, write the page on a disk */
-		SimpleLruZeroPageExt(MultiXactMemberCtl, pageno);
+		SimpleLruZeroAndWritePage(MultiXactMemberCtl, pageno);
 	}
 	else if (info == XLOG_MULTIXACT_CREATE_ID)
 	{
