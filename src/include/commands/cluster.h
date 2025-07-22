@@ -31,24 +31,11 @@ typedef struct ClusterParams
 	bits32		options;		/* bitmask of CLUOPT_* */
 } ClusterParams;
 
-/*
- * cluster.c currently implements three nearly identical commands: CLUSTER,
- * VACUUM FULL and REPACK. Where needed, use this enumeration to distinguish
- * which of these commands is being executed.
- *
- * Remove this stuff when removing the (now deprecated) CLUSTER and VACUUM
- * FULL commands.
- */
-typedef enum ClusterCommand
-{
-	CLUSTER_COMMAND_CLUSTER,
-	CLUSTER_COMMAND_REPACK,
-	CLUSTER_COMMAND_VACUUM
-} ClusterCommand;
 
-extern void cluster(ParseState *pstate, ClusterStmt *stmt, bool isTopLevel);
-extern void cluster_rel(Relation OldHeap, Oid indexOid, ClusterParams *params,
-						ClusterCommand cmd);
+extern void ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel);
+
+extern void cluster_rel(RepackCommand command,
+						Relation OldHeap, Oid indexOid, ClusterParams *params);
 extern void check_index_is_clusterable(Relation OldHeap, Oid indexOid,
 									   LOCKMODE lockmode);
 extern void mark_index_clustered(Relation rel, Oid indexOid, bool is_internal);
@@ -64,5 +51,4 @@ extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 							 MultiXactId cutoffMulti,
 							 char newrelpersistence);
 
-extern void repack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel);
 #endif							/* CLUSTER_H */

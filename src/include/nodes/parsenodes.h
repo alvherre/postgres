@@ -3949,24 +3949,21 @@ typedef struct AlterSystemStmt
 } AlterSystemStmt;
 
 /* ----------------------
- *		Cluster Statement (support pbrown's cluster index implementation)
- * ----------------------
- */
-typedef struct ClusterStmt
-{
-	NodeTag		type;
-	RangeVar   *relation;		/* relation being indexed, or NULL if all */
-	char	   *indexname;		/* original index defined */
-	List	   *params;			/* list of DefElem nodes */
-} ClusterStmt;
-
-/* ----------------------
  *		Repack Statement
  * ----------------------
  */
+typedef enum RepackCommand
+{
+	REPACK_COMMAND_CLUSTER,
+	REPACK_COMMAND_CLUSTER_ALL,
+	REPACK_COMMAND_REPACK,
+	REPACK_COMMAND_VACUUMFULL
+} RepackCommand;
+
 typedef struct RepackStmt
 {
 	NodeTag		type;
+	RepackCommand command;		/* type of command being run */
 	RangeVar   *relation;		/* relation being repacked */
 	char	   *indexname;		/* order tuples by this index */
 	List	   *params;			/* list of DefElem nodes */

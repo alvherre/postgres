@@ -277,7 +277,6 @@ ClassifyUtilityCommandAsReadOnly(Node *parsetree)
 				return COMMAND_OK_IN_RECOVERY | COMMAND_OK_IN_READ_ONLY_TXN;
 			}
 
-		case T_ClusterStmt:
 		case T_ReindexStmt:
 		case T_VacuumStmt:
 		case T_RepackStmt:
@@ -855,16 +854,12 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 			ExecuteCallStmt(castNode(CallStmt, parsetree), params, isAtomicContext, dest);
 			break;
 
-		case T_ClusterStmt:
-			cluster(pstate, (ClusterStmt *) parsetree, isTopLevel);
-			break;
-
 		case T_VacuumStmt:
 			ExecVacuum(pstate, (VacuumStmt *) parsetree, isTopLevel);
 			break;
 
 		case T_RepackStmt:
-			repack(pstate, (RepackStmt *) parsetree, isTopLevel);
+			ExecRepack(pstate, (RepackStmt *) parsetree, isTopLevel);
 			break;
 
 		case T_ExplainStmt:
@@ -2853,10 +2848,6 @@ CreateCommandTag(Node *parsetree)
 			tag = CMDTAG_CALL;
 			break;
 
-		case T_ClusterStmt:
-			tag = CMDTAG_CLUSTER;
-			break;
-
 		case T_VacuumStmt:
 			if (((VacuumStmt *) parsetree)->is_vacuumcmd)
 				tag = CMDTAG_VACUUM;
@@ -3503,10 +3494,6 @@ GetCommandLogLevel(Node *parsetree)
 
 		case T_CallStmt:
 			lev = LOGSTMT_ALL;
-			break;
-
-		case T_ClusterStmt:
-			lev = LOGSTMT_DDL;
 			break;
 
 		case T_RepackStmt:

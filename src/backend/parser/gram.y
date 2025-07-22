@@ -280,7 +280,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 		AlterCompositeTypeStmt AlterUserMappingStmt
 		AlterRoleStmt AlterRoleSetStmt AlterPolicyStmt AlterStatsStmt
 		AlterDefaultPrivilegesStmt DefACLAction
-		AnalyzeStmt CallStmt ClosePortalStmt ClusterStmt CommentStmt
+		AnalyzeStmt CallStmt ClosePortalStmt CommentStmt
 		ConstraintsSetStmt CopyStmt CreateAsStmt CreateCastStmt
 		CreateDomainStmt CreateExtensionStmt CreateGroupStmt CreateOpClassStmt
 		CreateOpFamilyStmt AlterOpFamilyStmt CreatePLangStmt
@@ -314,7 +314,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 				simple_select values_clause
 				PLpgSQL_Expr PLAssignStmt
 
-%type <str>			opt_single_name
+%type <str>			opt_single_name opt_using_index
 %type <list>		opt_qualified_name
 %type <boolean>		opt_concurrently
 %type <dbehavior>	opt_drop_behavior
@@ -380,11 +380,11 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <str>		copy_file_name
 				access_method_clause attr_name
 				table_access_method_clause name cursor_name file_name
-				cluster_index_specification repack_index_specification
+				cluster_index_specification
 
 %type <list>	func_name handler_name qual_Op qual_all_Op subquery_Op
 				opt_inline_handler opt_validator validator_clause
-				opt_collate opt_repack_args
+				opt_collate
 
 %type <range>	qualified_name insert_target OptConstrFromTable
 
@@ -1025,7 +1025,6 @@ stmt:
 			| CallStmt
 			| CheckPointStmt
 			| ClosePortalStmt
-			| ClusterStmt
 			| CommentStmt
 			| ConstraintsSetStmt
 			| CopyStmt
@@ -11888,17 +11887,51 @@ CreateConversionStmt:
 /*****************************************************************************
  *
  *		QUERY:
+ *				REPACK [ (options) ] [ <qualified_name> [ USING INDEX <index_name> ] ]
+
+ *			obsolete variants:
  *				CLUSTER (options) [ <qualified_name> [ USING <index_name> ] ]
  *				CLUSTER [VERBOSE] [ <qualified_name> [ USING <index_name> ] ]
  *				CLUSTER [VERBOSE] <index_name> ON <qualified_name> (for pre-8.3)
  *
  *****************************************************************************/
 
-ClusterStmt:
-			CLUSTER '(' utility_option_list ')' qualified_name cluster_index_specification
+RepackStmt:
+			REPACK qualified_name opt_using_index
 				{
-					ClusterStmt *n = makeNode(ClusterStmt);
+					RepackStmt *n = makeNode(RepackStmt);
 
+					n->command = REPACK_COMMAND_REPACK;
+					n->relation = $2;
+					n->indexname = $3;
+					n->params = NIL;
+					$$ = (Node *) n;
+				}
+			| REPACK USING INDEX
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_CLUSTER_ALL;
+					n->relation = NULL;
+					n->indexname = NULL;
+					n->params = NIL;
+					$$ = (Node *) n;
+				}
+			| REPACK '(' utility_option_list ')' qualified_name opt_using_index
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_REPACK;
+					n->relation = $5;
+					n->indexname = $6;
+					n->params = $3;
+					$$ = (Node *) n;
+				}
+			| CLUSTER '(' utility_option_list ')' qualified_name cluster_index_specification
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = $5;
 					n->indexname = $6;
 					n->params = $3;
@@ -11906,8 +11939,9 @@ ClusterStmt:
 				}
 			| CLUSTER '(' utility_option_list ')'
 				{
-					ClusterStmt *n = makeNode(ClusterStmt);
+					RepackStmt *n = makeNode(RepackStmt);
 
+					n->command = REPACK_COMMAND_CLUSTER_ALL;
 					n->relation = NULL;
 					n->indexname = NULL;
 					n->params = $3;
@@ -11916,8 +11950,9 @@ ClusterStmt:
 			/* unparenthesized VERBOSE kept for pre-14 compatibility */
 			| CLUSTER opt_verbose qualified_name cluster_index_specification
 				{
-					ClusterStmt *n = makeNode(ClusterStmt);
+					RepackStmt *n = makeNode(RepackStmt);
 
+					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = $3;
 					n->indexname = $4;
 					n->params = NIL;
@@ -11928,8 +11963,9 @@ ClusterStmt:
 			/* unparenthesized VERBOSE kept for pre-17 compatibility */
 			| CLUSTER opt_verbose
 				{
-					ClusterStmt *n = makeNode(ClusterStmt);
+					RepackStmt *n = makeNode(RepackStmt);
 
+					n->command = REPACK_COMMAND_CLUSTER_ALL;
 					n->relation = NULL;
 					n->indexname = NULL;
 					n->params = NIL;
@@ -11940,8 +11976,9 @@ ClusterStmt:
 			/* kept for pre-8.3 compatibility */
 			| CLUSTER opt_verbose name ON qualified_name
 				{
-					ClusterStmt *n = makeNode(ClusterStmt);
+					RepackStmt *n = makeNode(RepackStmt);
 
+					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = $5;
 					n->indexname = $3;
 					n->params = NIL;
@@ -11951,50 +11988,13 @@ ClusterStmt:
 				}
 		;
 
-cluster_index_specification:
-			USING name				{ $$ = $2; }
+opt_using_index:
+			ExistingIndex			{ $$ = $1; }
 			| /*EMPTY*/				{ $$ = NULL; }
 		;
 
-/*****************************************************************************
- *
- *		QUERY:
- *				REPACK [ (options) ] [ <qualified_name> [ USING INDEX <index_name> ] ]
- *
- *****************************************************************************/
-
-RepackStmt:
-			REPACK opt_repack_args
-				{
-					RepackStmt *n = makeNode(RepackStmt);
-
-					n->relation = $2 ? (RangeVar *) linitial($2) : NULL;
-					n->indexname = $2 ? (char *) lsecond($2) : NULL;
-					n->params = NIL;
-					$$ = (Node *) n;
-				}
-
-			| REPACK '(' utility_option_list ')' opt_repack_args
-				{
-					RepackStmt *n = makeNode(RepackStmt);
-
-					n->relation = $5 ? (RangeVar *) linitial($5) : NULL;
-					n->indexname = $5 ? (char *) lsecond($5) : NULL;
-					n->params = $3;
-					$$ = (Node *) n;
-				}
-		;
-
-opt_repack_args:
-			qualified_name repack_index_specification
-				{
-					$$ = list_make2($1, $2);
-				}
-			| /*EMPTY*/				{ $$ = NIL; }
-		;
-
-repack_index_specification:
-			ExistingIndex
+cluster_index_specification:
+			USING name				{ $$ = $2; }
 			| /*EMPTY*/				{ $$ = NULL; }
 		;
 

@@ -74,10 +74,6 @@
 
 /*
  * Phases of repack (as advertised via PROGRESS_REPACK_PHASE).
- *
- * Note: Since REPACK shares some code with CLUSTER, (some of) these values
- * are also used by CLUSTER. (CLUSTER is now deprecated, so it makes no sense
- * to introduce separate set of constants.)
  */
 #define PROGRESS_REPACK_PHASE_SEQ_SCAN_HEAP		1
 #define PROGRESS_REPACK_PHASE_INDEX_SCAN_HEAP	2
