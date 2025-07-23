@@ -3955,9 +3955,8 @@ typedef struct AlterSystemStmt
 typedef enum RepackCommand
 {
 	REPACK_COMMAND_CLUSTER,
-	REPACK_COMMAND_CLUSTER_ALL,
 	REPACK_COMMAND_REPACK,
-	REPACK_COMMAND_VACUUMFULL
+	REPACK_COMMAND_VACUUMFULL,
 } RepackCommand;
 
 typedef struct RepackStmt
@@ -3966,6 +3965,7 @@ typedef struct RepackStmt
 	RepackCommand command;		/* type of command being run */
 	RangeVar   *relation;		/* relation being repacked */
 	char	   *indexname;		/* order tuples by this index */
+	bool		usingindex;		/* whether USING INDEX is specified */
 	List	   *params;			/* list of DefElem nodes */
 } RepackStmt;
 

@@ -318,6 +318,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <list>		opt_qualified_name
 %type <boolean>		opt_concurrently
 %type <dbehavior>	opt_drop_behavior
+%type <list>		opt_utility_option_list
 
 %type <node>	alter_column_default opclass_item opclass_drop alter_using
 %type <ival>	add_drop opt_asc_desc opt_nulls_order
@@ -556,7 +557,6 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <list>	generic_option_list alter_generic_option_list
 
 %type <ival>	reindex_target_relation reindex_target_all
-%type <list>	opt_reindex_option_list
 
 %type <node>	copy_generic_opt_arg copy_generic_opt_arg_list_item
 %type <defelt>	copy_generic_opt_elem
@@ -1139,6 +1139,11 @@ opt_drop_behavior:
 			CASCADE							{ $$ = DROP_CASCADE; }
 			| RESTRICT						{ $$ = DROP_RESTRICT; }
 			| /* EMPTY */					{ $$ = DROP_RESTRICT; /* default */ }
+		;
+
+opt_utility_option_list:
+			'(' utility_option_list ')'		{ $$ = $2; }
+			| /* EMPTY */					{ $$ = NULL; }
 		;
 
 /*****************************************************************************
@@ -2028,18 +2033,12 @@ constraints_set_mode:
  * Checkpoint statement
  */
 CheckPointStmt:
-			CHECKPOINT
+			CHECKPOINT opt_utility_option_list
 				{
 					CheckPointStmt *n = makeNode(CheckPointStmt);
 
 					$$ = (Node *) n;
-				}
-			| CHECKPOINT '(' utility_option_list ')'
-				{
-					CheckPointStmt *n = makeNode(CheckPointStmt);
-
-					$$ = (Node *) n;
-					n->options = $3;
+					n->options = $2;
 				}
 		;
 
@@ -9354,7 +9353,7 @@ DropTransformStmt: DROP TRANSFORM opt_if_exists FOR Typename LANGUAGE name opt_d
  *****************************************************************************/
 
 ReindexStmt:
-			REINDEX opt_reindex_option_list reindex_target_relation opt_concurrently qualified_name
+			REINDEX opt_utility_option_list reindex_target_relation opt_concurrently qualified_name
 				{
 					ReindexStmt *n = makeNode(ReindexStmt);
 
@@ -9367,7 +9366,7 @@ ReindexStmt:
 											makeDefElem("concurrently", NULL, @4));
 					$$ = (Node *) n;
 				}
-			| REINDEX opt_reindex_option_list SCHEMA opt_concurrently name
+			| REINDEX opt_utility_option_list SCHEMA opt_concurrently name
 				{
 					ReindexStmt *n = makeNode(ReindexStmt);
 
@@ -9380,7 +9379,7 @@ ReindexStmt:
 											makeDefElem("concurrently", NULL, @4));
 					$$ = (Node *) n;
 				}
-			| REINDEX opt_reindex_option_list reindex_target_all opt_concurrently opt_single_name
+			| REINDEX opt_utility_option_list reindex_target_all opt_concurrently opt_single_name
 				{
 					ReindexStmt *n = makeNode(ReindexStmt);
 
@@ -9401,10 +9400,6 @@ reindex_target_relation:
 reindex_target_all:
 			SYSTEM_P				{ $$ = REINDEX_OBJECT_SYSTEM; }
 			| DATABASE				{ $$ = REINDEX_OBJECT_DATABASE; }
-		;
-opt_reindex_option_list:
-			'(' utility_option_list ')'				{ $$ = $2; }
-			| /* EMPTY */							{ $$ = NULL; }
 		;
 
 /*****************************************************************************
@@ -11897,34 +11892,26 @@ CreateConversionStmt:
  *****************************************************************************/
 
 RepackStmt:
-			REPACK qualified_name opt_using_index
+			REPACK opt_utility_option_list qualified_name opt_using_index
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_REPACK;
-					n->relation = $2;
-					n->indexname = $3;
-					n->params = NIL;
+					n->relation = $3;
+					n->indexname = $4;
+					n->usingindex = $4 == NULL;
+					n->params = $2;
 					$$ = (Node *) n;
 				}
 			| REPACK USING INDEX
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
-					n->command = REPACK_COMMAND_CLUSTER_ALL;
+					n->command = REPACK_COMMAND_REPACK;
 					n->relation = NULL;
 					n->indexname = NULL;
+					n->usingindex = true;
 					n->params = NIL;
-					$$ = (Node *) n;
-				}
-			| REPACK '(' utility_option_list ')' qualified_name opt_using_index
-				{
-					RepackStmt *n = makeNode(RepackStmt);
-
-					n->command = REPACK_COMMAND_REPACK;
-					n->relation = $5;
-					n->indexname = $6;
-					n->params = $3;
 					$$ = (Node *) n;
 				}
 			| CLUSTER '(' utility_option_list ')' qualified_name cluster_index_specification
@@ -11934,6 +11921,7 @@ RepackStmt:
 					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = $5;
 					n->indexname = $6;
+					n->usingindex = true;
 					n->params = $3;
 					$$ = (Node *) n;
 				}
@@ -11941,9 +11929,10 @@ RepackStmt:
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
-					n->command = REPACK_COMMAND_CLUSTER_ALL;
+					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = NULL;
 					n->indexname = NULL;
+					n->usingindex = true;
 					n->params = $3;
 					$$ = (Node *) n;
 				}
@@ -11955,6 +11944,7 @@ RepackStmt:
 					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = $3;
 					n->indexname = $4;
+					n->usingindex = true;
 					n->params = NIL;
 					if ($2)
 						n->params = lappend(n->params, makeDefElem("verbose", NULL, @2));
@@ -11965,9 +11955,10 @@ RepackStmt:
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
-					n->command = REPACK_COMMAND_CLUSTER_ALL;
+					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = NULL;
 					n->indexname = NULL;
+					n->usingindex = true;
 					n->params = NIL;
 					if ($2)
 						n->params = lappend(n->params, makeDefElem("verbose", NULL, @2));

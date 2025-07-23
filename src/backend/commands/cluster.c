@@ -82,8 +82,7 @@ static bool cluster_is_permitted_for_relation(RepackCommand cmd,
 											  Oid relid, Oid userid);
 static Relation process_single_relation(RepackCommand cmd,
 										RangeVar *relation, char *indexname,
-										ClusterParams *params,
-										Oid *indexOid_p);
+										ClusterParams *params);
 
 /*---------------------------------------------------------------------------
  * This cluster code allows for clustering multiple tables at once. Because
@@ -109,6 +108,21 @@ static Relation process_single_relation(RepackCommand cmd,
  * if there is no index with the bit set.
  *---------------------------------------------------------------------------
  */
+static const char *
+RepackCommandAsString(RepackCommand cmd)
+{
+	switch (cmd)
+	{
+		case REPACK_COMMAND_REPACK:
+			return "REPACK";
+		case REPACK_COMMAND_VACUUMFULL:
+			return "VACUUM";
+		case REPACK_COMMAND_CLUSTER:
+			return "VACUUM";
+	}
+	return "???";
+}
+
 void
 ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 {
@@ -127,7 +141,8 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("unrecognized REPACK option \"%s\"",
+					 errmsg("unrecognized %s option \"%s\"",
+							RepackCommandAsString(stmt->command),
 							opt->defname),
 					 parser_errposition(pstate, opt->location)));
 	}
@@ -136,10 +151,13 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 
 	if (stmt->relation != NULL)
 	{
-		/* This is the single-relation case. */
+		/*
+		 * The single-relation case.  If no relation is returned, we're done;
+		 * otherwise, press on to process its partitions.
+		 */
 		rel = process_single_relation(stmt->command,
 									  stmt->relation, stmt->indexname,
-									  &params, &indexOid);
+									  &params);
 		if (rel == NULL)
 			return;
 	}
@@ -150,7 +168,7 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	 * transaction.  This forces us to disallow running inside a user
 	 * transaction block.
 	 */
-	PreventInTransactionBlock(isTopLevel, "REPACK");
+	PreventInTransactionBlock(isTopLevel, RepackCommandAsString(stmt->command));
 
 	/* Also, we need a memory context to hold our list of relations */
 	repack_context = AllocSetContextCreate(PortalContext,
@@ -184,36 +202,13 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	else
 		rtcs = get_tables_to_repack(repack_context);
 
-	/* Do the job. */
-	cluster_multiple_rels(stmt->command, rtcs, &params);
-
-	/* Start a new transaction for the cleanup work. */
-	StartTransactionCommand();
-
-	/* Clean up working storage */
-	MemoryContextDelete(repack_context);
-}
-
-/*
- * Given a list of relations to cluster, process each of them in a separate
- * transaction.
- *
- * We expect to be in a transaction at start, but there isn't one when we
- * return.
- */
-static void
-cluster_multiple_rels(RepackCommand cmd, List *rtcs, ClusterParams *params)
-{
-	ListCell   *lc;
-
 	/* Commit to get out of starting transaction */
 	PopActiveSnapshot();
 	CommitTransactionCommand();
 
 	/* Cluster the tables, each in a separate transaction */
-	foreach(lc, rtcs)
+	foreach_ptr(RelToCluster, rtc, rtcs)
 	{
-		RelToCluster *rtc = (RelToCluster *) lfirst(lc);
 		Relation	rel;
 
 		/* Start a new transaction for each relation. */
@@ -231,6 +226,12 @@ cluster_multiple_rels(RepackCommand cmd, List *rtcs, ClusterParams *params)
 		PopActiveSnapshot();
 		CommitTransactionCommand();
 	}
+
+	/* Start a new transaction for the cleanup work. */
+	StartTransactionCommand();
+
+	/* Clean up working storage */
+	MemoryContextDelete(repack_context);
 }
 
 /*
@@ -279,8 +280,7 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 									 PROGRESS_REPACK_COMMAND_REPACK);
 	else if (OidIsValid(indexOid))
 	{
-		Assert(cmd == REPACK_COMMAND_CLUSTER ||
-			   cmd == REPACK_COMMAND_CLUSTER_ALL);
+		Assert(cmd == REPACK_COMMAND_CLUSTER);
 		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
 									 PROGRESS_CLUSTER_COMMAND_CLUSTER);
 	}
@@ -1754,13 +1754,18 @@ cluster_is_permitted_for_relation(RepackCommand cmd, Oid relid, Oid userid)
 
 
 /*
- * REPACK a single relation if it's a non-partitioned table or a leaf
- * partition and return NULL. Return the relation's relcache entry if the
- * caller needs to process it (because the relation is partitioned).
+ * Given a relation name and potentially an index name, obtain lock on it
+ * and determine what to do: if it's not a partitioned table, we repack it
+ * as indicated (using an existing clustered index, or following the
+ * indicated index), and return NULL.
+ *
+ * If the table is partitioned, we don't do anything to it and instead return
+ * its relcache entry, so that our caller can process the partitions using the
+ * multiple-table handling code.
  */
 static Relation
 process_single_relation(RepackCommand cmd, RangeVar *relation, char *indexname,
-						ClusterParams *params, Oid *indexOid_p)
+						ClusterParams *params)
 {
 	Relation	rel;
 	Oid			indexOid = InvalidOid;
@@ -1800,14 +1805,41 @@ process_single_relation(RepackCommand cmd, RangeVar *relation, char *indexname,
 		}
 	}
 
-	if (indexname == NULL && cmd == REPACK_COMMAND_CLUSTER)
+	/* For non-partitioned tables, do what we came here to do. */
+	if (rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
 	{
-		ListCell   *index;
+		Oid		indexOid;
 
-		/* We need to find the index that has indisclustered set. */
-		foreach(index, RelationGetIndexList(rel))
+		indexOid = determine_clustered_index(rel,
+											 cmd->usingindex, cmd->indexname);
+
+		cluster_rel(cmd, rel, indexOid, params);
+		/* cluster_rel closes the relation, but keeps lock */
+
+		return NULL;
+	}
+
+	return rel;
+}
+
+/*
+ * Given a relation and the usingindex/indexname options in a
+ * REPACK USING INDEX or CLUSTER command, return the OID of the index to use
+ * for clustering the table.
+ *
+ * Caller must hold lock on the relation so that the set of indexes doesn't
+ * change.
+ */
+static Oid
+determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
+{
+	Oid		indexOid;
+
+	if (indexname == NULL && usingindex)
+	{
+		/* Find an index with indisclustered set, or report error */
+		foreach_oid(indexOid, RelationGetIndexList(rel))
 		{
-			indexOid = lfirst_oid(index);
 			if (get_index_isclustered(indexOid))
 				break;
 			indexOid = InvalidOid;
@@ -1832,17 +1864,8 @@ process_single_relation(RepackCommand cmd, RangeVar *relation, char *indexname,
 					 errmsg("index \"%s\" for table \"%s\" does not exist",
 							indexname, relation->relname)));
 	}
+	else
+		indexOid = InvalidOid;
 
-	*indexOid_p = indexOid;
-
-	/* For non-partitioned tables, do what we came here to do. */
-	if (rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
-	{
-		cluster_rel(cmd, rel, indexOid, params);
-		/* cluster_rel closes the relation, but keeps lock */
-
-		return NULL;
-	}
-
-	return rel;
+	return indexOid;
 }
