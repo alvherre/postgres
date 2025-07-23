@@ -11914,18 +11914,18 @@ RepackStmt:
 					n->params = NIL;
 					$$ = (Node *) n;
 				}
-			| CLUSTER '(' utility_option_list ')' qualified_name cluster_index_specification
+			| CLUSTER opt_utility_option_list qualified_name cluster_index_specification
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_CLUSTER;
-					n->relation = $5;
-					n->indexname = $6;
+					n->relation = $3;
+					n->indexname = $4;
 					n->usingindex = true;
-					n->params = $3;
+					n->params = $2;
 					$$ = (Node *) n;
 				}
-			| CLUSTER '(' utility_option_list ')'
+			| CLUSTER opt_utility_option_list
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
@@ -11933,11 +11933,11 @@ RepackStmt:
 					n->relation = NULL;
 					n->indexname = NULL;
 					n->usingindex = true;
-					n->params = $3;
+					n->params = $2;
 					$$ = (Node *) n;
 				}
 			/* unparenthesized VERBOSE kept for pre-14 compatibility */
-			| CLUSTER opt_verbose qualified_name cluster_index_specification
+			| CLUSTER VERBOSE qualified_name cluster_index_specification
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
@@ -11951,7 +11951,7 @@ RepackStmt:
 					$$ = (Node *) n;
 				}
 			/* unparenthesized VERBOSE kept for pre-17 compatibility */
-			| CLUSTER opt_verbose
+			| CLUSTER VERBOSE
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
@@ -11965,7 +11965,7 @@ RepackStmt:
 					$$ = (Node *) n;
 				}
 			/* kept for pre-8.3 compatibility */
-			| CLUSTER opt_verbose name ON qualified_name
+			| CLUSTER VERBOSE name ON qualified_name
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
