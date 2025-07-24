@@ -183,7 +183,8 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	if (rel == NULL)
 	{
 		Assert(stmt->indexname == NULL);
-		rtcs = get_tables_to_repack(stmt->command, stmt->usingindex, repack_context);
+		rtcs = get_tables_to_repack(stmt->command, stmt->usingindex,
+									repack_context);
 	}
 	else
 	{
@@ -208,6 +209,7 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 							   RelationGetRelationName(rel)));
 
 			relid = determine_clustered_index(rel, true, stmt->indexname);
+			/* XXX is this the right place for this? */
 			check_index_is_clusterable(rel, relid, AccessExclusiveLock);
 			rel_is_index = true;
 		}
@@ -239,7 +241,13 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		/* functions in indexes may want a snapshot set */
 		PushActiveSnapshot(GetTransactionSnapshot());
 
-		rel = table_open(rtc->tableOid, AccessExclusiveLock);
+		/*
+		 * Open the target table, coping with the case where it has been
+		 * dropped.
+		 */
+		rel = try_table_open(rtc->tableOid, AccessExclusiveLock);
+		if (rel == NULL)
+			continue;
 
 		/* Process this table */
 		cluster_rel(stmt->command, stmt->usingindex,
@@ -1662,6 +1670,13 @@ get_tables_to_repack(RepackCommand command, bool usingindex,
 			Form_pg_index	index;
 
 			index = (Form_pg_index) GETSTRUCT(tuple);
+			/*
+			 * XXX I think the only reason there's no test failure here is
+			 * that we seldom have clustered indexes that would be affected
+			 * by concurrency.  Maybe we should also do the
+			 * ConditionalLockRelationOid+SearchSysCacheExists dance that
+			 * we do below.
+			 */
 			if (!cluster_is_permitted_for_relation(command, index->indrelid,
 												   GetUserId()))
 				continue;
@@ -1688,13 +1703,32 @@ get_tables_to_repack(RepackCommand command, bool usingindex,
 			Form_pg_class class;
 
 			class = (Form_pg_class) GETSTRUCT(tuple);
-			if (!cluster_is_permitted_for_relation(command, class->oid,
-												   GetUserId()))
+
+			/*
+			 * Try to obtain a light lock on the table, to ensure it doesn't
+			 * go away while we collect the list.  If we cannot, just
+			 * disregard the table.  XXX we could release at the bottom of the
+			 * loop, but for now just hold it until this transaction is
+			 * finished.
+			 */
+			if (!ConditionalLockRelationOid(class->oid, AccessShareLock))
 				continue;
+
+			/* Verify that the table still exists. */
+			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(class->oid)))
+			{
+				/* Release useless lock */
+				UnlockRelationOid(class->oid, AccessShareLock);
+				continue;
+			}
 
 			/* Can only process plain tables and matviews */
 			if (class->relkind != RELKIND_RELATION &&
 				class->relkind != RELKIND_MATVIEW)
+				continue;
+
+			if (!cluster_is_permitted_for_relation(command, class->oid,
+												   GetUserId()))
 				continue;
 
 			/* Use a permanent memory context for the result list */
@@ -1848,7 +1882,7 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 	{
 		ereport(ERROR,
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("cannot execute \"%s\" on temporary tables of other sessions",
+				errmsg("cannot execute %s on temporary tables of other sessions",
 					   RepackCommandAsString(stmt->command)));
 	}
 
