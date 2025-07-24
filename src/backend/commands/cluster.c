@@ -67,15 +67,16 @@ typedef struct
 	Oid			indexOid;
 } RelToCluster;
 
-static void rebuild_relation(RepackCommand cmd,
+static void rebuild_relation(RepackCommand cmd, bool usingindex,
 							 Relation OldHeap, Relation index, bool verbose);
 static void copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex,
 							bool verbose, bool *pSwapToastByContent,
 							TransactionId *pFreezeXid, MultiXactId *pCutoffMulti);
-static List *get_tables_to_repack(bool usingindex, MemoryContext repack_context);
+static List *get_tables_to_repack(RepackCommand cmd, bool usingindex,
+								  MemoryContext permcxt);
 static List *get_tables_to_repack_partitioned(RepackCommand cmd,
-							   				  MemoryContext cluster_context,
-						   					  Oid relid, bool rel_is_index);
+											  MemoryContext cluster_context,
+											  Oid relid, bool rel_is_index);
 static bool cluster_is_permitted_for_relation(RepackCommand cmd,
 											  Oid relid, Oid userid);
 static Relation process_single_relation(RepackStmt *stmt,
@@ -129,7 +130,6 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	ClusterParams params = {0};
 	bool		verbose = false;
 	Relation	rel = NULL;
-	Oid			indexOid = InvalidOid;
 	MemoryContext repack_context;
 	List	   *rtcs;
 
@@ -183,7 +183,7 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	if (rel == NULL)
 	{
 		Assert(stmt->indexname == NULL);
-		rtcs = get_tables_to_repack(stmt->usingindex, repack_context);
+		rtcs = get_tables_to_repack(stmt->command, stmt->usingindex, repack_context);
 	}
 	else
 	{
@@ -192,9 +192,23 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 
 		Assert(rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
 
-		if (OidIsValid(indexOid))
+		/*
+		 * If an index name was specified, resolve it now and pass it down.
+		 */
+		if (stmt->usingindex)
 		{
-			relid = indexOid;
+			/*
+			 * XXX how should this behave?  Passing no index to a partitioned
+			 * table could be useful to have certain partitions clustered by
+			 * some index, and other partitions by a different index.
+			 */
+			if (!stmt->indexname)
+				ereport(ERROR,
+						errmsg("there is no previously clustered index for table \"%s\"",
+							   RelationGetRelationName(rel)));
+
+			relid = determine_clustered_index(rel, true, stmt->indexname);
+			check_index_is_clusterable(rel, relid, AccessExclusiveLock);
 			rel_is_index = true;
 		}
 		else
@@ -202,8 +216,9 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 			relid = RelationGetRelid(rel);
 			rel_is_index = false;
 		}
+
 		rtcs = get_tables_to_repack_partitioned(stmt->command, repack_context,
-							   					relid, rel_is_index);
+												relid, rel_is_index);
 
 		/* close parent relation, releasing lock on it */
 		table_close(rel, AccessExclusiveLock);
@@ -227,7 +242,8 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		rel = table_open(rtc->tableOid, AccessExclusiveLock);
 
 		/* Process this table */
-		cluster_rel(stmt->command, rel, rtc->indexOid, &params);
+		cluster_rel(stmt->command, stmt->usingindex,
+					rel, rtc->indexOid, &params);
 		/* cluster_rel closes the relation, but keeps lock */
 
 		PopActiveSnapshot();
@@ -254,15 +270,14 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
  * them incrementally while we load the table.
  *
  * If indexOid is InvalidOid, the table will be rewritten in physical order
- * instead of index order.  This is the new implementation of VACUUM FULL,
- * and error messages should refer to the operation as VACUUM not CLUSTER.
+ * instead of index order.
  *
- * 'cmd' indicates which command is being executed. REPACK should be the only
- * caller of this function in the future.
+ * 'cmd' indicates which command is being executed, to be used for error
+ * messages.
  */
 void
-cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
-			ClusterParams *params)
+cluster_rel(RepackCommand cmd, bool usingindex,
+			Relation OldHeap, Oid indexOid, ClusterParams *params)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			save_userid;
@@ -285,9 +300,8 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	if (cmd == REPACK_COMMAND_REPACK)
 		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
 									 PROGRESS_REPACK_COMMAND_REPACK);
-	else if (OidIsValid(indexOid))
+	else if (cmd == REPACK_COMMAND_CLUSTER)
 	{
-		Assert(cmd == REPACK_COMMAND_CLUSTER);
 		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
 									 PROGRESS_CLUSTER_COMMAND_CLUSTER);
 	}
@@ -366,19 +380,16 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	}
 
 	/*
-	 * We allow VACUUM FULL, but not CLUSTER, on shared catalogs.  CLUSTER
-	 * would work in most respects, but the index would only get marked as
-	 * indisclustered in the current database, leading to unexpected behavior
-	 * if CLUSTER were later invoked in another database.
-	 *
-	 * REPACK does not set indisclustered. XXX Not sure I understand the
-	 * comment above: how can an attribute be set "only in the current
-	 * database"?
+	 * We allow repacking shared catalogs only when not using an index.
+	 * It would work to use an index in most respects, but the index would
+	 * only get marked as indisclustered in the current database, leading to
+	 * unexpected behavior if CLUSTER were later invoked in another database.
 	 */
-	if (cmd == REPACK_COMMAND_CLUSTER && OldHeap->rd_rel->relisshared)
+	if (usingindex && OldHeap->rd_rel->relisshared)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot cluster a shared catalog")));
+				 errmsg("cannot run \"%s\" on a shared catalog",
+						RepackCommandAsString(cmd))));
 
 	/*
 	 * Don't process temp tables of other backends ... their local buffer
@@ -409,10 +420,7 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	 * Also check for active uses of the relation in the current transaction,
 	 * including open scans and pending AFTER trigger events.
 	 */
-	CheckTableNotInUse(OldHeap,
-					   (cmd == REPACK_COMMAND_CLUSTER ?
-						"CLUSTER" : (cmd == REPACK_COMMAND_REPACK ?
-									 "REPACK" : "VACUUM")));
+	CheckTableNotInUse(OldHeap, RepackCommandAsString(cmd));
 
 	/* Check heap and index are valid to cluster on */
 	if (OidIsValid(indexOid))
@@ -452,7 +460,7 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	TransferPredicateLocksToHeapRelation(OldHeap);
 
 	/* rebuild_relation does all the dirty work */
-	rebuild_relation(cmd, OldHeap, index, verbose);
+	rebuild_relation(cmd, usingindex, OldHeap, index, verbose);
 	/* rebuild_relation closes OldHeap, and index if valid */
 
 out:
@@ -609,8 +617,8 @@ mark_index_clustered(Relation rel, Oid indexOid, bool is_internal)
  * On exit, they are closed, but locks on them are not released.
  */
 static void
-rebuild_relation(RepackCommand cmd, Relation OldHeap, Relation index,
-				 bool verbose)
+rebuild_relation(RepackCommand cmd, bool usingindex,
+				 Relation OldHeap, Relation index, bool verbose)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			accessMethod = OldHeap->rd_rel->relam;
@@ -626,8 +634,8 @@ rebuild_relation(RepackCommand cmd, Relation OldHeap, Relation index,
 	Assert(CheckRelationLockedByMe(OldHeap, AccessExclusiveLock, false) &&
 		   (index == NULL || CheckRelationLockedByMe(index, AccessExclusiveLock, false)));
 
-	if (index && cmd == REPACK_COMMAND_CLUSTER)
-		/* Mark the correct index as clustered */
+	/* for CLUSTER or REPACK USING INDEX, mark the index as the one to use */
+	if (usingindex)
 		mark_index_clustered(OldHeap, RelationGetRelid(index), true);
 
 	/* Remember info about rel before closing OldHeap */
@@ -1617,63 +1625,92 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 }
 
 /*
- * Determine which tables to process.  If USING INDEX was given, then
- * they are tables that have some indisclustered set.  Otherwise, it's all
- * tables that the user has privileges to repack/cluster.
+ * Determine which relations to process, when REPACK/CLUSTER is called
+ * without specifying a table name.  The exact process depends on whether
+ * USING INDEX was given or not, and in any case we only return tables and
+ * materialized views that the current user has privileges to repack/cluster.
+ *
+ * If USING INDEX was given, we scan pg_index to find those that have
+ * indisclustered set; if it was not given, scan pg_class and return all
+ * tables.
  *
  * Return it as a list of RelToCluster in the given memory context.
- *
- *
- *
- * Get a list of tables that the current user has privileges on and
- * have indisclustered set.  Return the list in a List * of RelToCluster
- * (stored in the specified memory context), each one giving the tableOid
- * and the indexOid on which the table is already clustered.
  */
 static List *
-get_tables_to_repack(bool usingindex,
-					 MemoryContext repack_context)
+get_tables_to_repack(RepackCommand command, bool usingindex,
+					 MemoryContext permcxt)
 {
-	Relation	relrelation;
+	Relation	catalog;
 	TableScanDesc scan;
 	HeapTuple	tuple;
 	MemoryContext old_context;
 	List	   *rtcs = NIL;
 
-	/*
-	 * Get all relations that the current user has the appropriate privileges
-	 * for.
-	 */
-	relrelation = table_open(RelationRelationId, AccessShareLock);
-	scan = table_beginscan_catalog(relrelation, 0, NULL);
-	while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+	if (usingindex)
 	{
-		RelToCluster *rtc;
-		Form_pg_class relrelation = (Form_pg_class) GETSTRUCT(tuple);
-		Oid			relid = relrelation->oid;
-		char		relkind = get_rel_relkind(relid);
+		ScanKeyData		entry;
 
-		/* Only interested in relations. */
-		if (relkind != RELKIND_RELATION && relkind != RELKIND_MATVIEW)
-			continue;
+		catalog = table_open(IndexRelationId, AccessShareLock);
+		ScanKeyInit(&entry,
+					Anum_pg_index_indisclustered,
+					BTEqualStrategyNumber, F_BOOLEQ,
+					BoolGetDatum(true));
+		scan = table_beginscan_catalog(catalog, 1, &entry);
+		while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+		{
+			RelToCluster *rtc;
+			Form_pg_index	index;
 
-		if (!cluster_is_permitted_for_relation(REPACK_COMMAND_REPACK, relid,
-											   GetUserId()))
-			continue;
+			index = (Form_pg_index) GETSTRUCT(tuple);
+			if (!cluster_is_permitted_for_relation(command, index->indrelid,
+												   GetUserId()))
+				continue;
 
-		/* Use a permanent memory context for the result list */
-		old_context = MemoryContextSwitchTo(repack_context);
+			/* Use a permanent memory context for the result list */
+			old_context = MemoryContextSwitchTo(permcxt);
 
-		rtc = (RelToCluster *) palloc(sizeof(RelToCluster));
-		rtc->tableOid = relid;
-		rtc->indexOid = InvalidOid;
-		rtcs = lappend(rtcs, rtc);
+			rtc = (RelToCluster *) palloc(sizeof(RelToCluster));
+			rtc->tableOid = index->indrelid;
+			rtc->indexOid = index->indexrelid;
+			rtcs = lappend(rtcs, rtc);
 
-		MemoryContextSwitchTo(old_context);
+			MemoryContextSwitchTo(old_context);
+		}
 	}
-	table_endscan(scan);
+	else
+	{
+		catalog = table_open(RelationRelationId, AccessShareLock);
+		scan = table_beginscan_catalog(catalog, 0, NULL);
 
-	relation_close(relrelation, AccessShareLock);
+		while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
+		{
+			RelToCluster *rtc;
+			Form_pg_class class;
+
+			class = (Form_pg_class) GETSTRUCT(tuple);
+			if (!cluster_is_permitted_for_relation(command, class->oid,
+												   GetUserId()))
+				continue;
+
+			/* Can only process plain tables and matviews */
+			if (class->relkind != RELKIND_RELATION &&
+				class->relkind != RELKIND_MATVIEW)
+				continue;
+
+			/* Use a permanent memory context for the result list */
+			old_context = MemoryContextSwitchTo(permcxt);
+
+			rtc = (RelToCluster *) palloc(sizeof(RelToCluster));
+			rtc->tableOid = class->oid;
+			rtc->indexOid = InvalidOid;
+			rtcs = lappend(rtcs, rtc);
+
+			MemoryContextSwitchTo(old_context);
+		}
+	}
+
+	table_endscan(scan);
+	relation_close(catalog, AccessShareLock);
 
 	return rtcs;
 }
@@ -1690,7 +1727,7 @@ get_tables_to_repack(bool usingindex,
  */
 static List *
 get_tables_to_repack_partitioned(RepackCommand cmd, MemoryContext cluster_context,
-								  Oid relid, bool rel_is_index)
+								 Oid relid, bool rel_is_index)
 {
 	List	   *inhoids;
 	ListCell   *lc;
@@ -1809,34 +1846,28 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 	 */
 	if (RELATION_IS_OTHER_TEMP(rel))
 	{
-		if (stmt->command == REPACK_COMMAND_CLUSTER)
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("cannot cluster temporary tables of other sessions"));
-		else
-		{
-			Assert(stmt->command == REPACK_COMMAND_REPACK);
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("cannot repack temporary tables of other sessions"));
-		}
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot execute \"%s\" on temporary tables of other sessions",
+					   RepackCommandAsString(stmt->command)));
 	}
 
-	/* For non-partitioned tables, do what we came here to do. */
-	if (rel->rd_rel->relkind != RELKIND_PARTITIONED_TABLE)
+	/*
+	 * For partitioned tables, let caller handle this.  Otherwise, process
+	 * it here and we're done.
+	 */
+	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		return rel;
+	else
 	{
 		Oid		indexOid;
 
 		indexOid = determine_clustered_index(rel, stmt->usingindex,
 											 stmt->indexname);
-
-		cluster_rel(stmt->command, rel, indexOid, params);
-		/* cluster_rel closes the relation, but keeps lock */
-
+		check_index_is_clusterable(rel, indexOid, AccessExclusiveLock);
+		cluster_rel(stmt->command, stmt->usingindex, rel, indexOid, params);
 		return NULL;
 	}
-
-	return rel;
 }
 
 /*
@@ -1845,7 +1876,7 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
  * for clustering the table.
  *
  * Caller must hold lock on the relation so that the set of indexes doesn't
- * change.
+ * change, and must call check_index_is_clusterable.
  */
 static Oid
 determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
@@ -1875,7 +1906,8 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 	else if (indexname != NULL)
 	{
 		/*
-		 * The index is expected to be in the same namespace as the relation.
+		 * An index was specified; figure out its name.  It must be in the
+		 * same namespace as the relation.
 		 */
 		indexOid = get_relname_relid(indexname,
 									 rel->rd_rel->relnamespace);

@@ -636,7 +636,7 @@ CREATE TEMP TABLE ptnowner_oldnodes AS
   JOIN pg_class AS c ON c.oid=tree.relid;
 SET SESSION AUTHORIZATION regress_ptnowner;
 CLUSTER ptnowner USING ptnowner_i_idx;
-WARNING:  permission denied to cluster "ptnowner2", skipping it
+WARNING:  permission denied to execute CLUSTER on "ptnowner2", skipping it
 RESET SESSION AUTHORIZATION;
 SELECT a.relname, a.relfilenode=b.relfilenode FROM pg_class a
   JOIN ptnowner_oldnodes b USING (oid) ORDER BY a.relname COLLATE "C";

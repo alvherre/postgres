@@ -316,7 +316,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 %type <str>			opt_single_name
 %type <list>		opt_qualified_name
-%type <boolean>		opt_concurrently
+%type <boolean>		opt_concurrently opt_usingindex
 %type <dbehavior>	opt_drop_behavior
 %type <list>		opt_utility_option_list
 
@@ -1133,6 +1133,11 @@ opt_qualified_name:
 opt_concurrently:
 			CONCURRENTLY					{ $$ = true; }
 			| /*EMPTY*/						{ $$ = false; }
+		;
+
+opt_usingindex:
+			USING INDEX						{ $$ = true; }
+			| /* EMPTY */					{ $$ = false; }
 		;
 
 opt_drop_behavior:
@@ -11883,7 +11888,7 @@ CreateConversionStmt:
  *
  *		QUERY:
  *				REPACK [ (options) ] [ <qualified_name> [ USING INDEX <index_name> ] ]
-
+ *
  *			obsolete variants:
  *				CLUSTER (options) [ <qualified_name> [ USING <index_name> ] ]
  *				CLUSTER [VERBOSE] [ <qualified_name> [ USING <index_name> ] ]
@@ -11898,41 +11903,30 @@ RepackStmt:
 
 					n->command = REPACK_COMMAND_REPACK;
 					n->relation = $3;
-					n->indexname = $4;
+					n->indexname = $6;
 					n->usingindex = true;
 					n->params = $2;
 					$$ = (Node *) n;
 				}
-			| REPACK opt_utility_option_list qualified_name USING INDEX
+			| REPACK opt_utility_option_list qualified_name opt_usingindex
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_REPACK;
 					n->relation = $3;
 					n->indexname = NULL;
-					n->usingindex = true;
+					n->usingindex = $4;
 					n->params = $2;
 					$$ = (Node *) n;
 				}
-			| REPACK opt_utility_option_list qualified_name
-				{
-					RepackStmt *n = makeNode(RepackStmt);
-
-					n->command = REPACK_COMMAND_REPACK;
-					n->relation = $3;
-					n->indexname = NULL;
-					n->usingindex = false;
-					n->params = $2;
-					$$ = (Node *) n;
-				}
-			| REPACK USING INDEX
+			| REPACK opt_usingindex
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_REPACK;
 					n->relation = NULL;
 					n->indexname = NULL;
-					n->usingindex = true;
+					n->usingindex = $2;
 					n->params = NIL;
 					$$ = (Node *) n;
 				}
@@ -11947,17 +11941,6 @@ RepackStmt:
 					n->params = $3;
 					$$ = (Node *) n;
 				}
-			| CLUSTER qualified_name cluster_index_specification
-				{
-					RepackStmt *n = makeNode(RepackStmt);
-
-					n->command = REPACK_COMMAND_CLUSTER;
-					n->relation = $2;
-					n->indexname = $3;
-					n->usingindex = true;
-					n->params = NIL;
-					$$ = (Node *) n;
-				}
 			| CLUSTER opt_utility_option_list
 				{
 					RepackStmt *n = makeNode(RepackStmt);
@@ -11970,7 +11953,7 @@ RepackStmt:
 					$$ = (Node *) n;
 				}
 			/* unparenthesized VERBOSE kept for pre-14 compatibility */
-			| CLUSTER VERBOSE qualified_name cluster_index_specification
+			| CLUSTER opt_verbose qualified_name cluster_index_specification
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
@@ -11978,9 +11961,8 @@ RepackStmt:
 					n->relation = $3;
 					n->indexname = $4;
 					n->usingindex = true;
-					n->params = NIL;
 					if ($2)
-						n->params = lappend(n->params, makeDefElem("verbose", NULL, @2));
+						n->params = list_make1(makeDefElem("verbose", NULL, @2));
 					$$ = (Node *) n;
 				}
 			/* unparenthesized VERBOSE kept for pre-17 compatibility */
@@ -11992,26 +11974,21 @@ RepackStmt:
 					n->relation = NULL;
 					n->indexname = NULL;
 					n->usingindex = true;
-					n->params = NIL;
-					if ($2)
-						n->params = lappend(n->params, makeDefElem("verbose", NULL, @2));
+					n->params = list_make1(makeDefElem("verbose", NULL, @2));
 					$$ = (Node *) n;
 				}
 			/* kept for pre-8.3 compatibility */
-			| CLUSTER VERBOSE name ON qualified_name
+			| CLUSTER opt_verbose name ON qualified_name
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_CLUSTER;
 					n->relation = $5;
 					n->indexname = $3;
-					n->params = NIL;
+					n->usingindex = true;
 					if ($2)
-						n->params = lappend(n->params, makeDefElem("verbose", NULL, @2));
+						n->params = list_make1(makeDefElem("verbose", NULL, @2));
 					$$ = (Node *) n;
-				}
-			| CLUSTER name ON qualified_name
-				{
 				}
 		;
 
