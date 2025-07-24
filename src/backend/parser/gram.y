@@ -314,7 +314,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 				simple_select values_clause
 				PLpgSQL_Expr PLAssignStmt
 
-%type <str>			opt_single_name opt_using_index
+%type <str>			opt_single_name
 %type <list>		opt_qualified_name
 %type <boolean>		opt_concurrently
 %type <dbehavior>	opt_drop_behavior
@@ -11892,14 +11892,36 @@ CreateConversionStmt:
  *****************************************************************************/
 
 RepackStmt:
-			REPACK opt_utility_option_list qualified_name opt_using_index
+			REPACK opt_utility_option_list qualified_name USING INDEX name
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_REPACK;
 					n->relation = $3;
 					n->indexname = $4;
-					n->usingindex = $4 == NULL;
+					n->usingindex = true;
+					n->params = $2;
+					$$ = (Node *) n;
+				}
+			| REPACK opt_utility_option_list qualified_name USING INDEX
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_REPACK;
+					n->relation = $3;
+					n->indexname = NULL;
+					n->usingindex = true;
+					n->params = $2;
+					$$ = (Node *) n;
+				}
+			| REPACK opt_utility_option_list qualified_name
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_REPACK;
+					n->relation = $3;
+					n->indexname = NULL;
+					n->usingindex = false;
 					n->params = $2;
 					$$ = (Node *) n;
 				}
@@ -11914,15 +11936,26 @@ RepackStmt:
 					n->params = NIL;
 					$$ = (Node *) n;
 				}
-			| CLUSTER opt_utility_option_list qualified_name cluster_index_specification
+			| CLUSTER '(' utility_option_list ')' qualified_name cluster_index_specification
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_CLUSTER;
-					n->relation = $3;
-					n->indexname = $4;
+					n->relation = $5;
+					n->indexname = $6;
 					n->usingindex = true;
-					n->params = $2;
+					n->params = $3;
+					$$ = (Node *) n;
+				}
+			| CLUSTER qualified_name cluster_index_specification
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_CLUSTER;
+					n->relation = $2;
+					n->indexname = $3;
+					n->usingindex = true;
+					n->params = NIL;
 					$$ = (Node *) n;
 				}
 			| CLUSTER opt_utility_option_list
@@ -11977,11 +12010,9 @@ RepackStmt:
 						n->params = lappend(n->params, makeDefElem("verbose", NULL, @2));
 					$$ = (Node *) n;
 				}
-		;
-
-opt_using_index:
-			ExistingIndex			{ $$ = $1; }
-			| /*EMPTY*/				{ $$ = NULL; }
+			| CLUSTER name ON qualified_name
+				{
+				}
 		;
 
 cluster_index_specification:
