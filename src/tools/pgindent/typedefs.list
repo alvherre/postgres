@@ -391,6 +391,7 @@ CachedFunctionHashEntry
 CachedFunctionHashKey
 CachedPlan
 CachedPlanSource
+CachedPlanType
 CallContext
 CallStmt
 CancelRequestPacket
@@ -1760,6 +1761,7 @@ NonEmptyRange
 Notification
 NotificationList
 NotifyStmt
+NotnullHashEntry
 Nsrt
 NtDllRoutine
 NtFlushBuffersFileEx_t
@@ -2567,6 +2569,8 @@ RestrictInfo
 Result
 ResultRelInfo
 ResultState
+RetainDeadTuplesData
+RetainDeadTuplesPhase
 ReturnSetInfo
 ReturnStmt
 ReturningClause
