@@ -195,6 +195,7 @@
    &refreshMaterializedView;
    &reindex;
    &releaseSavepoint;
+   &repack;
    &reset;
    &revoke;
    &rollback;
@@ -257,6 +258,7 @@
    &pgIsready;
    &pgReceivewal;
    &pgRecvlogical;
+   &pgRepackdb;
    &pgRestore;
    &pgVerifyBackup;
    &psqlRef;

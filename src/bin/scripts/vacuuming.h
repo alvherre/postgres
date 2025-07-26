@@ -17,6 +17,12 @@
 #include "fe_utils/connect_utils.h"
 #include "fe_utils/simple_list.h"
 
+typedef enum
+{
+	MODE_VACUUM,
+	MODE_REPACK
+} RunMode;
+
 /* For analyze-in-stages mode */
 #define ANALYZE_NO_STAGE	-1
 #define ANALYZE_NUM_STAGES	3
@@ -24,6 +30,7 @@
 /* vacuum options controlled by user flags */
 typedef struct vacuumingOptions
 {
+	RunMode		mode;
 	bool		analyze_only;
 	bool		verbose;
 	bool		and_analyze;
@@ -87,8 +94,8 @@ extern void vacuum_all_databases(ConnParams *cparams,
 extern void prepare_vacuum_command(PQExpBuffer sql, int serverVersion,
 								   vacuumingOptions *vacopts, const char *table);
 
-extern void run_vacuum_command(PGconn *conn, const char *sql, bool echo,
-							   const char *table);
+extern void run_vacuum_command(PGconn *conn, vacuumingOptions *vacopts,
+							   const char *sql, bool echo, const char *table);
 
 extern char *escape_quotes(const char *src);
 

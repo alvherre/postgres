@@ -64,6 +64,11 @@ PostgreSQL documentation
    this utility and via other methods for accessing the server.
   </para>
 
+  <para>
+   <application>clusterdb</application> has been superceded by
+   <application>pg_repackdb</application>.
+  </para>
+
  </refsect1>
 
 

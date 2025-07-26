@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  * vacuuming.c
- *		Common routines for vacuumdb
+ *		Common routines for vacuumdb and pg_repackdb
  *
  * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -166,6 +166,14 @@ vacuum_one_database(ConnParams *cparams,
 
 	conn = connectDatabase(cparams, progname, echo, false, true);
 
+	if (vacopts->mode == MODE_REPACK && PQserverVersion(conn) < 190000)
+	{
+		/* XXX arguably, here we should use VACUUM FULL instead of failing */
+		PQfinish(conn);
+		pg_fatal("cannot use the \"%s\" command on server versions older than PostgreSQL %s",
+				 "REPACK", "19");
+	}
+
 	if (vacopts->disable_page_skipping && PQserverVersion(conn) < 90600)
 	{
 		PQfinish(conn);
@@ -258,9 +266,15 @@ vacuum_one_database(ConnParams *cparams,
 		if (stage != ANALYZE_NO_STAGE)
 			printf(_("%s: processing database \"%s\": %s\n"),
 				   progname, PQdb(conn), _(stage_messages[stage]));
-		else
+		else if (vacopts->mode == MODE_VACUUM)
 			printf(_("%s: vacuuming database \"%s\"\n"),
 				   progname, PQdb(conn));
+		else
+		{
+			Assert(vacopts->mode == MODE_REPACK);
+			printf(_("%s: repacking database \"%s\"\n"),
+				   progname, PQdb(conn));
+		}
 		fflush(stdout);
 	}
 
@@ -350,7 +364,7 @@ vacuum_one_database(ConnParams *cparams,
 		 * through ParallelSlotsGetIdle.
 		 */
 		ParallelSlotSetHandler(free_slot, TableCommandResultHandler, NULL);
-		run_vacuum_command(free_slot->connection, sql.data,
+		run_vacuum_command(free_slot->connection, vacopts, sql.data,
 						   echo, tabname);
 
 		cell = cell->next;
@@ -363,7 +377,7 @@ vacuum_one_database(ConnParams *cparams,
 	}
 
 	/* If we used SKIP_DATABASE_STATS, mop up with ONLY_DATABASE_STATS */
-	if (vacopts->skip_database_stats &&
+	if (vacopts->mode == MODE_VACUUM && vacopts->skip_database_stats &&
 		stage == ANALYZE_NO_STAGE)
 	{
 		const char *cmd = "VACUUM (ONLY_DATABASE_STATS);";
@@ -376,7 +390,7 @@ vacuum_one_database(ConnParams *cparams,
 		}
 
 		ParallelSlotSetHandler(free_slot, TableCommandResultHandler, NULL);
-		run_vacuum_command(free_slot->connection, cmd, echo, NULL);
+		run_vacuum_command(free_slot->connection, vacopts, cmd, echo, NULL);
 
 		if (!ParallelSlotsWaitCompletion(sa))
 			failed = true;
@@ -708,6 +722,12 @@ vacuum_all_databases(ConnParams *cparams,
 	int			i;
 
 	conn = connectMaintenanceDatabase(cparams, progname, echo);
+	if (vacopts->mode == MODE_REPACK && PQserverVersion(conn) < 190000)
+	{
+		PQfinish(conn);
+		pg_fatal("cannot use the \"%s\" command on server versions older than PostgreSQL %s",
+				 "REPACK", "19");
+	}
 	result = executeQuery(conn,
 						  "SELECT datname FROM pg_database WHERE datallowconn AND datconnlimit <> -2 ORDER BY 1;",
 						  echo);
@@ -761,7 +781,7 @@ vacuum_all_databases(ConnParams *cparams,
 }
 
 /*
- * Construct a vacuum/analyze command to run based on the given
+ * Construct a vacuum/analyze/repack command to run based on the given
  * options, in the given string buffer, which may contain previous garbage.
  *
  * The table name used must be already properly quoted.  The command generated
@@ -777,7 +797,13 @@ prepare_vacuum_command(PQExpBuffer sql, int serverVersion,
 
 	resetPQExpBuffer(sql);
 
-	if (vacopts->analyze_only)
+	if (vacopts->mode == MODE_REPACK)
+	{
+		appendPQExpBufferStr(sql, "REPACK");
+		if (vacopts->verbose)
+			appendPQExpBufferStr(sql, " (VERBOSE)");
+	}
+	else if (vacopts->analyze_only)
 	{
 		appendPQExpBufferStr(sql, "ANALYZE");
 
@@ -938,8 +964,8 @@ prepare_vacuum_command(PQExpBuffer sql, int serverVersion,
  * Any errors during command execution are reported to stderr.
  */
 void
-run_vacuum_command(PGconn *conn, const char *sql, bool echo,
-				   const char *table)
+run_vacuum_command(PGconn *conn, vacuumingOptions *vacopts,
+				   const char *sql, bool echo, const char *table)
 {
 	bool		status;
 
@@ -952,13 +978,21 @@ run_vacuum_command(PGconn *conn, const char *sql, bool echo,
 	{
 		if (table)
 		{
-			pg_log_error("vacuuming of table \"%s\" in database \"%s\" failed: %s",
-						 table, PQdb(conn), PQerrorMessage(conn));
+			if (vacopts->mode == MODE_VACUUM)
+				pg_log_error("vacuuming of table \"%s\" in database \"%s\" failed: %s",
+							 table, PQdb(conn), PQerrorMessage(conn));
+			else
+				pg_log_error("repacking of table \"%s\" in database \"%s\" failed: %s",
+							 table, PQdb(conn), PQerrorMessage(conn));
 		}
 		else
 		{
-			pg_log_error("vacuuming of database \"%s\" failed: %s",
-						 PQdb(conn), PQerrorMessage(conn));
+			if (vacopts->mode == MODE_VACUUM)
+				pg_log_error("vacuuming of database \"%s\" failed: %s",
+							 PQdb(conn), PQerrorMessage(conn));
+			else
+				pg_log_error("repacking of database \"%s\" failed: %s",
+							 PQdb(conn), PQerrorMessage(conn));
 		}
 	}
 }
