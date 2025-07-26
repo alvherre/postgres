@@ -1,0 +1,479 @@
+<!--
+doc/src/sgml/ref/pg_repackdb.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="app-pgrepackdb">
+ <indexterm zone="app-pgrepackdb">
+  <primary>pg_repackdb</primary>
+ </indexterm>
+
+ <refmeta>
+  <refentrytitle><application>pg_repackdb</application></refentrytitle>
+  <manvolnum>1</manvolnum>
+  <refmiscinfo>Application</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>pg_repackdb</refname>
+  <refpurpose>repack and analyze a <productname>PostgreSQL</productname>
+  database</refpurpose>
+ </refnamediv>
+
+ <refsynopsisdiv>
+  <cmdsynopsis>
+   <command>pg_repackdb</command>
+   <arg rep="repeat"><replaceable>connection-option</replaceable></arg>
+   <arg rep="repeat"><replaceable>option</replaceable></arg>
+
+   <arg choice="plain" rep="repeat">
+    <arg choice="opt">
+     <group choice="plain">
+      <arg choice="plain"><option>-t</option></arg>
+      <arg choice="plain"><option>--table</option></arg>
+     </group>
+     <replaceable>table</replaceable>
+     <arg choice="opt">( <replaceable class="parameter">column</replaceable> [,...] )</arg>
+    </arg>
+   </arg>
+
+   <arg choice="opt">
+    <group choice="plain">
+     <arg choice="plain"><replaceable>dbname</replaceable></arg>
+     <arg choice="plain"><option>-a</option></arg>
+     <arg choice="plain"><option>--all</option></arg>
+    </group>
+   </arg>
+  </cmdsynopsis>
+
+  <cmdsynopsis>
+   <command>pg_repackdb</command>
+   <arg rep="repeat"><replaceable>connection-option</replaceable></arg>
+   <arg rep="repeat"><replaceable>option</replaceable></arg>
+
+   <arg choice="plain" rep="repeat">
+    <arg choice="opt">
+     <group choice="plain">
+      <arg choice="plain"><option>-n</option></arg>
+      <arg choice="plain"><option>--schema</option></arg>
+     </group>
+     <replaceable>schema</replaceable>
+    </arg>
+   </arg>
+
+   <arg choice="opt">
+    <group choice="plain">
+     <arg choice="plain"><replaceable>dbname</replaceable></arg>
+     <arg choice="plain"><option>-a</option></arg>
+     <arg choice="plain"><option>--all</option></arg>
+    </group>
+   </arg>
+  </cmdsynopsis>
+
+  <cmdsynopsis>
+   <command>pg_repackdb</command>
+   <arg rep="repeat"><replaceable>connection-option</replaceable></arg>
+   <arg rep="repeat"><replaceable>option</replaceable></arg>
+
+   <arg choice="plain" rep="repeat">
+    <arg choice="opt">
+     <group choice="plain">
+      <arg choice="plain"><option>-N</option></arg>
+      <arg choice="plain"><option>--exclude-schema</option></arg>
+     </group>
+     <replaceable>schema</replaceable>
+    </arg>
+   </arg>
+
+   <arg choice="opt">
+    <group choice="plain">
+     <arg choice="plain"><replaceable>dbname</replaceable></arg>
+     <arg choice="plain"><option>-a</option></arg>
+     <arg choice="plain"><option>--all</option></arg>
+    </group>
+   </arg>
+  </cmdsynopsis>
+ </refsynopsisdiv>
+
+ <refsect1>
+  <title>Description</title>
+
+  <para>
+   <application>pg_repackdb</application> is a utility for repacking a
+   <productname>PostgreSQL</productname> database.
+   <application>pg_repackdb</application> will also generate internal
+   statistics used by the <productname>PostgreSQL</productname> query
+   optimizer.
+  </para>
+
+  <para>
+   <application>pg_repackdb</application> is a wrapper around the SQL
+   command <link linkend="sql-repack"><command>REPACK</command></link> There
+   is no effective difference between repacking and analyzing databases via
+   this utility and via other methods for accessing the server.
+  </para>
+
+ </refsect1>
+
+
+ <refsect1>
+  <title>Options</title>
+
+   <para>
+    <application>pg_repackdb</application> accepts the following command-line arguments:
+    <variablelist>
+     <varlistentry>
+      <term><option>-a</option></term>
+      <term><option>--all</option></term>
+      <listitem>
+       <para>
+        Repack all databases.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option><optional>-d</optional> <replaceable class="parameter">dbname</replaceable></option></term>
+      <term><option><optional>--dbname=</optional><replaceable class="parameter">dbname</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the name of the database to be repacked or analyzed,
+        when <option>-a</option>/<option>--all</option> is not used.  If this
+        is not specified, the database name is read from the environment
+        variable <envar>PGDATABASE</envar>.  If that is not set, the user name
+        specified for the connection is used.
+        The <replaceable>dbname</replaceable> can be
+        a <link linkend="libpq-connstring">connection string</link>.  If so,
+        connection string parameters will override any conflicting command
+        line options.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-e</option></term>
+      <term><option>--echo</option></term>
+      <listitem>
+       <para>
+        Echo the commands that <application>pg_repackdb</application>
+        generates and sends to the server.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-j <replaceable class="parameter">njobs</replaceable></option></term>
+      <term><option>--jobs=<replaceable class="parameter">njobs</replaceable></option></term>
+      <listitem>
+       <para>
+        Execute the repack or analyze commands in parallel by running
+        <replaceable class="parameter">njobs</replaceable>
+        commands simultaneously.  This option may reduce the processing time
+        but it also increases the load on the database server.
+       </para>
+       <para>
+        <application>pg_repackdb</application> will open
+        <replaceable class="parameter">njobs</replaceable> connections to the
+        database, so make sure your <xref linkend="guc-max-connections"/>
+        setting is high enough to accommodate all connections.
+       </para>
+       <para>
+        Note that using this mode might cause deadlock failures if certain
+        system catalogs are processed in parallel.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-n <replaceable class="parameter">schema</replaceable></option></term>
+      <term><option>--schema=<replaceable class="parameter">schema</replaceable></option></term>
+      <listitem>
+       <para>
+        Repack or analyze all tables in
+        <replaceable class="parameter">schema</replaceable> only.  Multiple
+        schemas can be repacked by writing multiple <option>-n</option>
+        switches.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-N <replaceable class="parameter">schema</replaceable></option></term>
+      <term><option>--exclude-schema=<replaceable class="parameter">schema</replaceable></option></term>
+      <listitem>
+       <para>
+        Do not repack or analyze any tables in
+        <replaceable class="parameter">schema</replaceable>.  Multiple schemas
+        can be excluded by writing multiple <option>-N</option> switches.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-q</option></term>
+      <term><option>--quiet</option></term>
+      <listitem>
+       <para>
+        Do not display progress messages.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-t <replaceable class="parameter">table</replaceable> [ (<replaceable class="parameter">column</replaceable> [,...]) ]</option></term>
+      <term><option>--table=<replaceable class="parameter">table</replaceable> [ (<replaceable class="parameter">column</replaceable> [,...]) ]</option></term>
+      <listitem>
+       <para>
+        Repack or analyze <replaceable class="parameter">table</replaceable>
+        only.  Column names can be specified only in conjunction with
+        the <option>--analyze</option> option.  Multiple tables can be
+        repacked by writing multiple
+        <option>-t</option> switches.
+       </para>
+       <tip>
+        <para>
+         If you specify columns, you probably have to escape the parentheses
+         from the shell.  (See examples below.)
+        </para>
+       </tip>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-v</option></term>
+      <term><option>--verbose</option></term>
+      <listitem>
+       <para>
+        Print detailed information during processing.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+       <term><option>-V</option></term>
+       <term><option>--version</option></term>
+       <listitem>
+       <para>
+       Print the <application>pg_repackdb</application> version and exit.
+       </para>
+       </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-z</option></term>
+      <term><option>--analyze</option></term>
+      <listitem>
+       <para>
+        Also calculate statistics for use by the optimizer.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+       <term><option>-?</option></term>
+       <term><option>--help</option></term>
+       <listitem>
+       <para>
+       Show help about <application>pg_repackdb</application> command line
+       arguments, and exit.
+       </para>
+       </listitem>
+     </varlistentry>
+
+    </variablelist>
+   </para>
+
+   <para>
+    <application>pg_repackdb</application> also accepts
+    the following command-line arguments for connection parameters:
+    <variablelist>
+     <varlistentry>
+      <term><option>-h <replaceable class="parameter">host</replaceable></option></term>
+      <term><option>--host=<replaceable class="parameter">host</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the host name of the machine on which the server
+        is running.  If the value begins with a slash, it is used
+        as the directory for the Unix domain socket.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-p <replaceable class="parameter">port</replaceable></option></term>
+      <term><option>--port=<replaceable class="parameter">port</replaceable></option></term>
+      <listitem>
+       <para>
+        Specifies the TCP port or local Unix domain socket file
+        extension on which the server
+        is listening for connections.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-U <replaceable class="parameter">username</replaceable></option></term>
+      <term><option>--username=<replaceable class="parameter">username</replaceable></option></term>
+      <listitem>
+       <para>
+        User name to connect as.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-w</option></term>
+      <term><option>--no-password</option></term>
+      <listitem>
+       <para>
+        Never issue a password prompt.  If the server requires
+        password authentication and a password is not available by
+        other means such as a <filename>.pgpass</filename> file, the
+        connection attempt will fail.  This option can be useful in
+        batch jobs and scripts where no user is present to enter a
+        password.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>-W</option></term>
+      <term><option>--password</option></term>
+      <listitem>
+       <para>
+        Force <application>pg_repackdb</application> to prompt for a
+        password before connecting to a database.
+       </para>
+
+       <para>
+        This option is never essential, since
+        <application>pg_repackdb</application> will automatically prompt
+        for a password if the server demands password authentication.
+        However, <application>pg_repackdb</application> will waste a
+        connection attempt finding out that the server wants a password.
+        In some cases it is worth typing <option>-W</option> to avoid the extra
+        connection attempt.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><option>--maintenance-db=<replaceable class="parameter">dbname</replaceable></option></term>
+      <listitem>
+       <para>
+        When the <option>-a</option>/<option>--all</option> is used, connect
+        to this database to gather the list of databases to repack.
+        If not specified, the <literal>postgres</literal> database will be used,
+        or if that does not exist, <literal>template1</literal> will be used.
+        This can be a <link linkend="libpq-connstring">connection
+        string</link>.  If so, connection string parameters will override any
+        conflicting command line options.  Also, connection string parameters
+        other than the database name itself will be re-used when connecting
+        to other databases.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </para>
+ </refsect1>
+
+
+ <refsect1>
+  <title>Environment</title>
+
+  <variablelist>
+   <varlistentry>
+    <term><envar>PGDATABASE</envar></term>
+    <term><envar>PGHOST</envar></term>
+    <term><envar>PGPORT</envar></term>
+    <term><envar>PGUSER</envar></term>
+
+    <listitem>
+     <para>
+      Default connection parameters
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><envar>PG_COLOR</envar></term>
+    <listitem>
+     <para>
+      Specifies whether to use color in diagnostic messages. Possible values
+      are <literal>always</literal>, <literal>auto</literal> and
+      <literal>never</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   This utility, like most other <productname>PostgreSQL</productname> utilities,
+   also uses the environment variables supported by <application>libpq</application>
+   (see <xref linkend="libpq-envars"/>).
+  </para>
+
+ </refsect1>
+
+
+ <refsect1>
+  <title>Diagnostics</title>
+
+  <para>
+   In case of difficulty, see
+   <xref linkend="sql-repack"/> and <xref linkend="app-psql"/> for
+   discussions of potential problems and error messages.
+   The database server must be running at the
+   targeted host.  Also, any default connection settings and environment
+   variables used by the <application>libpq</application> front-end
+   library will apply.
+  </para>
+
+ </refsect1>
+
+ <refsect1>
+  <title>Examples</title>
+
+   <para>
+    To repack the database <literal>test</literal>:
+<screen>
+<prompt>$ </prompt><userinput>pg_repackdb test</userinput>
+</screen>
+   </para>
+
+   <para>
+    To repack and analyze for the optimizer a database named
+    <literal>bigdb</literal>:
+<screen>
+<prompt>$ </prompt><userinput>pg_repackdb --analyze bigdb</userinput>
+</screen>
+   </para>
+
+   <para>
+    To repack a single table
+    <literal>foo</literal> in a database named
+    <literal>xyzzy</literal>, and analyze a single column
+    <literal>bar</literal> of the table for the optimizer:
+<screen>
+<prompt>$ </prompt><userinput>pg_repackdb --analyze --verbose --table='foo(bar)' xyzzy</userinput>
+</screen></para>
+
+   <para>
+    To repack all tables in the <literal>foo</literal> and <literal>bar</literal> schemas
+    in a database named <literal>xyzzy</literal>:
+<screen>
+<prompt>$ </prompt><userinput>pg_repackdb --schema='foo' --schema='bar' xyzzy</userinput>
+</screen></para>
+
+
+ </refsect1>
+
+ <refsect1>
+  <title>See Also</title>
+
+  <simplelist type="inline">
+   <member><xref linkend="sql-repack"/></member>
+  </simplelist>
+ </refsect1>
+
+</refentry>
