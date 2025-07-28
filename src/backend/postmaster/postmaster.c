@@ -428,8 +428,8 @@ static void process_pm_reload_request(void);
 static void process_pm_shutdown_request(void);
 static void dummy_handler(SIGNAL_ARGS);
 static void CleanupBackend(PMChild *bp, int exitstatus);
-static void HandleChildCrash(int pid, int exitstatus, const char *procname);
-static void LogChildExit(int lev, const char *procname,
+static void HandleChildCrash(int pid, int exitstatus, BackendType proctype, const char *addtype);
+static void LogChildExit(int lev, BackendType proctype, const char *addtype,
 						 int pid, int exitstatus);
 static void PostmasterStateMachine(void);
 static void UpdatePMState(PMState newState);
@@ -2285,8 +2285,7 @@ process_pm_child_exit(void)
 				StartupStatus != STARTUP_SIGNALED &&
 				!EXIT_STATUS_0(exitstatus))
 			{
-				LogChildExit(LOG, _("startup process"),
-							 pid, exitstatus);
+				LogChildExit(LOG, B_STARTUP, NULL, pid, exitstatus);
 				ereport(LOG,
 						(errmsg("aborting startup due to startup process failure")));
 				ExitPostmaster(1);
@@ -2320,8 +2319,7 @@ process_pm_child_exit(void)
 				}
 				else
 					StartupStatus = STARTUP_CRASHED;
-				HandleChildCrash(pid, exitstatus,
-								 _("startup process"));
+				HandleChildCrash(pid, exitstatus, B_STARTUP, NULL);
 				continue;
 			}
 
@@ -2365,8 +2363,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(BgWriterPMChild);
 			BgWriterPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("background writer process"));
+				HandleChildCrash(pid, exitstatus, B_BG_WRITER, NULL);
 			continue;
 		}
 
@@ -2398,8 +2395,7 @@ process_pm_child_exit(void)
 				 * Any unexpected exit of the checkpointer (including FATAL
 				 * exit) is treated as a crash.
 				 */
-				HandleChildCrash(pid, exitstatus,
-								 _("checkpointer process"));
+				HandleChildCrash(pid, exitstatus, B_CHECKPOINTER, NULL);
 			}
 
 			continue;
@@ -2415,8 +2411,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(WalWriterPMChild);
 			WalWriterPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("WAL writer process"));
+				HandleChildCrash(pid, exitstatus, B_WAL_WRITER, NULL);
 			continue;
 		}
 
@@ -2431,8 +2426,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(WalReceiverPMChild);
 			WalReceiverPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("WAL receiver process"));
+				HandleChildCrash(pid, exitstatus, B_WAL_RECEIVER, NULL);
 			continue;
 		}
 
@@ -2446,8 +2440,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(WalSummarizerPMChild);
 			WalSummarizerPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("WAL summarizer process"));
+				HandleChildCrash(pid, exitstatus, B_WAL_SUMMARIZER, NULL);
 			continue;
 		}
 
@@ -2462,8 +2455,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(AutoVacLauncherPMChild);
 			AutoVacLauncherPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("autovacuum launcher process"));
+				HandleChildCrash(pid, exitstatus, B_AUTOVAC_LAUNCHER, NULL);
 			continue;
 		}
 
@@ -2478,8 +2470,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(PgArchPMChild);
 			PgArchPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("archiver process"));
+				HandleChildCrash(pid, exitstatus, B_ARCHIVER, NULL);
 			continue;
 		}
 
@@ -2494,8 +2485,7 @@ process_pm_child_exit(void)
 				StartSysLogger();
 
 			if (!EXIT_STATUS_0(exitstatus))
-				LogChildExit(LOG, _("system logger process"),
-							 pid, exitstatus);
+				LogChildExit(LOG, B_LOGGER, NULL, pid, exitstatus);
 			continue;
 		}
 
@@ -2511,8 +2501,7 @@ process_pm_child_exit(void)
 			ReleasePostmasterChildSlot(SlotSyncWorkerPMChild);
 			SlotSyncWorkerPMChild = NULL;
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
-				HandleChildCrash(pid, exitstatus,
-								 _("slot sync worker process"));
+				HandleChildCrash(pid, exitstatus, B_SLOTSYNC_WORKER, NULL);
 			continue;
 		}
 
@@ -2520,7 +2509,7 @@ process_pm_child_exit(void)
 		if (maybe_reap_io_worker(pid))
 		{
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
-				HandleChildCrash(pid, exitstatus, _("io worker"));
+				HandleChildCrash(pid, exitstatus, B_IO_WORKER, NULL);
 
 			maybe_adjust_io_workers();
 			continue;
@@ -2542,9 +2531,9 @@ process_pm_child_exit(void)
 		else
 		{
 			if (!EXIT_STATUS_0(exitstatus) && !EXIT_STATUS_1(exitstatus))
-				HandleChildCrash(pid, exitstatus, _("untracked child process"));
+				HandleChildCrash(pid, exitstatus, B_INVALID, NULL);
 			else
-				LogChildExit(LOG, _("untracked child process"), pid, exitstatus);
+				LogChildExit(LOG, B_INVALID, NULL, pid, exitstatus);
 		}
 	}							/* loop over pending child-death reports */
 
@@ -2565,8 +2554,7 @@ static void
 CleanupBackend(PMChild *bp,
 			   int exitstatus)	/* child's exit status. */
 {
-	char		namebuf[MAXPGPATH];
-	const char *procname;
+	const char *addtype;
 	bool		crashed = false;
 	bool		logged = false;
 	pid_t		bp_pid;
@@ -2576,13 +2564,9 @@ CleanupBackend(PMChild *bp,
 
 	/* Construct a process name for the log message */
 	if (bp->bkend_type == B_BG_WORKER)
-	{
-		snprintf(namebuf, MAXPGPATH, _("background worker \"%s\""),
-				 bp->rw->rw_worker.bgw_type);
-		procname = namebuf;
-	}
+		addtype = bp->rw->rw_worker.bgw_type;
 	else
-		procname = _(GetBackendTypeDesc(bp->bkend_type));
+		addtype = NULL;
 
 	/*
 	 * If a backend dies in an ugly way then we must signal all other backends
@@ -2604,7 +2588,7 @@ CleanupBackend(PMChild *bp,
 	 */
 	if (exitstatus == ERROR_WAIT_NO_CHILDREN)
 	{
-		LogChildExit(LOG, procname, bp->pid, exitstatus);
+		LogChildExit(LOG, bp->bkend_type, addtype, bp->pid, exitstatus);
 		logged = true;
 		crashed = false;
 	}
@@ -2639,7 +2623,7 @@ CleanupBackend(PMChild *bp,
 	 */
 	if (crashed)
 	{
-		HandleChildCrash(bp_pid, exitstatus, procname);
+		HandleChildCrash(bp_pid, exitstatus, bp->bkend_type, addtype);
 		return;
 	}
 
@@ -2677,7 +2661,7 @@ CleanupBackend(PMChild *bp,
 		if (!logged)
 		{
 			LogChildExit(EXIT_STATUS_0(exitstatus) ? DEBUG1 : LOG,
-						 procname, bp_pid, exitstatus);
+						 bp->bkend_type, addtype, bp_pid, exitstatus);
 			logged = true;
 		}
 
@@ -2686,7 +2670,7 @@ CleanupBackend(PMChild *bp,
 	}
 
 	if (!logged)
-		LogChildExit(DEBUG2, procname, bp_pid, exitstatus);
+		LogChildExit(DEBUG2, bp->bkend_type, addtype, bp_pid, exitstatus);
 }
 
 /*
@@ -2778,8 +2762,8 @@ HandleFatalError(QuitSignalReason reason, bool consider_sigabrt)
 }
 
 /*
- * HandleChildCrash -- cleanup after failed backend, bgwriter, checkpointer,
- * walwriter, autovacuum, archiver, slot sync worker, or background worker.
+ * HandleChildCrash -- cleanup after failed backend or certain auxiliary
+ * processes.
  *
  * The objectives here are to clean up our local state about the child
  * process, and to signal all other remaining children to quickdie.
@@ -2787,7 +2771,7 @@ HandleFatalError(QuitSignalReason reason, bool consider_sigabrt)
  * The caller has already released its PMChild slot.
  */
 static void
-HandleChildCrash(int pid, int exitstatus, const char *procname)
+HandleChildCrash(int pid, int exitstatus, BackendType proctype, const char *addtype)
 {
 	/*
 	 * We only log messages and send signals if this is the first process
@@ -2799,7 +2783,7 @@ HandleChildCrash(int pid, int exitstatus, const char *procname)
 	if (FatalError || Shutdown == ImmediateShutdown)
 		return;
 
-	LogChildExit(LOG, procname, pid, exitstatus);
+	LogChildExit(LOG, proctype, addtype, pid, exitstatus);
 	ereport(LOG,
 			(errmsg("terminating any other active server processes")));
 
@@ -2812,9 +2796,13 @@ HandleChildCrash(int pid, int exitstatus, const char *procname)
 
 /*
  * Log the death of a child process.
+ *
+ * 'addtype' is an additional word or short phrase that describes the process,
+ * such as a background worker 'type'.
  */
 static void
-LogChildExit(int lev, const char *procname, int pid, int exitstatus)
+LogChildExit(int lev, BackendType proctype, const char *addtype, int pid,
+			 int exitstatus)
 {
 	/*
 	 * size of activity_buffer is arbitrary, but set equal to default
@@ -2829,14 +2817,13 @@ LogChildExit(int lev, const char *procname, int pid, int exitstatus)
 													   sizeof(activity_buffer));
 
 	if (WIFEXITED(exitstatus))
-		ereport(lev,
+		ereport(lev, addtype ?
+				errmsg("\"%s\" process of type \"%s\" (PID %d) exited with exit code %d",
+					   GetBackendTypeDesc(proctype), addtype, pid, WEXITSTATUS(exitstatus)) :
+				errmsg("process of type \"%s\" (PID %d) exited with exit code %d",
+					   GetBackendTypeDesc(proctype), pid, WEXITSTATUS(exitstatus)),
 
-		/*------
-		  translator: %s is a noun phrase describing a child process, such as
-		  "server process" */
-				(errmsg("%s (PID %d) exited with exit code %d",
-						procname, pid, WEXITSTATUS(exitstatus)),
-				 activity ? errdetail("Failed process was running: %s", activity) : 0));
+				activity ? errdetail("Failed process was running: %s", activity) : 0);
 	else if (WIFSIGNALED(exitstatus))
 	{
 #if defined(WIN32)
@@ -2845,20 +2832,27 @@ LogChildExit(int lev, const char *procname, int pid, int exitstatus)
 		/*------
 		  translator: %s is a noun phrase describing a child process, such as
 		  "server process" */
-				(errmsg("%s (PID %d) was terminated by exception 0x%X",
-						procname, pid, WTERMSIG(exitstatus)),
-				 errhint("See C include file \"ntstatus.h\" for a description of the hexadecimal value."),
-				 activity ? errdetail("Failed process was running: %s", activity) : 0));
+				addtype ?
+				errmsg("\"%s\" process of type \"%s\" (PID %d) was terminated by exception 0x%X",
+					   GetBackendTypeDesc(proctype), addtype, pid, WTERMSIG(exitstatus)) :
+				errmsg("\"%s\" process (PID %d) was terminated by exception 0x%X",
+					   GetBackendTypeDesc(proctype), addtype, pid, WTERMSIG(exitstatus)),
+				errhint("See C include file \"ntstatus.h\" for a description of the hexadecimal value."),
+				activity ? errdetail("Failed process was running: %s", activity) : 0);
 #else
 		ereport(lev,
 
 		/*------
 		  translator: %s is a noun phrase describing a child process, such as
 		  "server process" */
-				(errmsg("%s (PID %d) was terminated by signal %d: %s",
-						procname, pid, WTERMSIG(exitstatus),
-						pg_strsignal(WTERMSIG(exitstatus))),
-				 activity ? errdetail("Failed process was running: %s", activity) : 0));
+				addtype ?
+				errmsg("\"%s\" process of type \"%s\" (PID %d) was terminated by signal %d: %s",
+					   GetBackendTypeDesc(proctype), addtype, pid, WTERMSIG(exitstatus),
+					   pg_strsignal(WTERMSIG(exitstatus))) :
+				errmsg("\"%s\" process (PID %d) was terminated by signal %d: %s",
+					   GetBackendTypeDesc(proctype), pid, WTERMSIG(exitstatus),
+					   pg_strsignal(WTERMSIG(exitstatus))),
+				activity ? errdetail("Failed process was running: %s", activity) : 0);
 #endif
 	}
 	else
@@ -2867,9 +2861,12 @@ LogChildExit(int lev, const char *procname, int pid, int exitstatus)
 		/*------
 		  translator: %s is a noun phrase describing a child process, such as
 		  "server process" */
-				(errmsg("%s (PID %d) exited with unrecognized status %d",
-						procname, pid, exitstatus),
-				 activity ? errdetail("Failed process was running: %s", activity) : 0));
+				addtype ?
+				errmsg("\"%s\" process of type \"%s\" (PID %d) exited with unrecognized status %d",
+					   GetBackendTypeDesc(proctype), addtype, pid, exitstatus) :
+				errmsg("\"%s\" process (PID %d) exited with unrecognized status %d",
+					   GetBackendTypeDesc(proctype), pid, exitstatus),
+				activity ? errdetail("Failed process was running: %s", activity) : 0);
 }
 
 /*
