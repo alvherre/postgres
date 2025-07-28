@@ -451,8 +451,7 @@ cluster_rel_recheck(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	Oid			tableOid = RelationGetRelid(OldHeap);
 
 	/* Check that the user still has privileges for the relation */
-	if (!cluster_is_permitted_for_relation(tableOid, userid,
-										   CLUSTER_COMMAND_CLUSTER))
+	if (!cluster_is_permitted_for_relation(cmd, tableOid, userid))
 	{
 		relation_close(OldHeap, AccessExclusiveLock);
 		return false;
