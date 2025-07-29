@@ -59,18 +59,20 @@
 /*
  * Progress parameters for REPACK.
  *
- * Note: Since REPACK shares some code with CLUSTER, these values are also
- * used by CLUSTER. (CLUSTER is now deprecated, so it makes little sense to
- * introduce a separate set of constants.)
+ * Note: Since REPACK shares some code with CLUSTER, (some of) these values
+ * are also used by CLUSTER. (CLUSTER is now deprecated, so it makes little
+ * sense to introduce a separate set of constants.)
  */
 #define PROGRESS_REPACK_COMMAND					0
 #define PROGRESS_REPACK_PHASE					1
 #define PROGRESS_REPACK_INDEX_RELID				2
 #define PROGRESS_REPACK_HEAP_TUPLES_SCANNED		3
-#define PROGRESS_REPACK_HEAP_TUPLES_WRITTEN		4
-#define PROGRESS_REPACK_TOTAL_HEAP_BLKS			5
-#define PROGRESS_REPACK_HEAP_BLKS_SCANNED		6
-#define PROGRESS_REPACK_INDEX_REBUILD_COUNT		7
+#define PROGRESS_REPACK_HEAP_TUPLES_INSERTED	4
+#define PROGRESS_REPACK_HEAP_TUPLES_UPDATED		5
+#define PROGRESS_REPACK_HEAP_TUPLES_DELETED		6
+#define PROGRESS_REPACK_TOTAL_HEAP_BLKS			7
+#define PROGRESS_REPACK_HEAP_BLKS_SCANNED		8
+#define PROGRESS_REPACK_INDEX_REBUILD_COUNT		9
 
 /*
  * Phases of repack (as advertised via PROGRESS_REPACK_PHASE).
@@ -79,9 +81,10 @@
 #define PROGRESS_REPACK_PHASE_INDEX_SCAN_HEAP	2
 #define PROGRESS_REPACK_PHASE_SORT_TUPLES		3
 #define PROGRESS_REPACK_PHASE_WRITE_NEW_HEAP	4
-#define PROGRESS_REPACK_PHASE_SWAP_REL_FILES	5
-#define PROGRESS_REPACK_PHASE_REBUILD_INDEX		6
-#define PROGRESS_REPACK_PHASE_FINAL_CLEANUP		7
+#define PROGRESS_REPACK_PHASE_CATCH_UP			5
+#define PROGRESS_REPACK_PHASE_SWAP_REL_FILES	6
+#define PROGRESS_REPACK_PHASE_REBUILD_INDEX		7
+#define PROGRESS_REPACK_PHASE_FINAL_CLEANUP		8
 
 /*
  * Commands of PROGRESS_REPACK

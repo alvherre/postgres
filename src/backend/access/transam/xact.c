@@ -215,6 +215,7 @@ typedef struct TransactionStateData
 	bool		parallelChildXact;	/* is any parent transaction parallel? */
 	bool		chain;			/* start a new block after this one */
 	bool		topXidLogged;	/* for a subxact: is top-level XID logged? */
+	bool		internal;		/* for a subxact: launched internally? */
 	struct TransactionStateData *parent;	/* back link to parent */
 } TransactionStateData;
 
@@ -4735,6 +4736,7 @@ BeginInternalSubTransaction(const char *name)
 			/* Normal subtransaction start */
 			PushTransaction();
 			s = CurrentTransactionState;	/* changed by push */
+			s->internal = true;
 
 			/*
 			 * Savepoint names, like the TransactionState block itself, live
@@ -5251,7 +5253,13 @@ AbortSubTransaction(void)
 	LWLockReleaseAll();
 
 	pgstat_report_wait_end();
-	pgstat_progress_end_command();
+
+	/*
+	 * Internal subtransacion might be used by an user command, in which case
+	 * the command outlives the subtransaction.
+	 */
+	if (!s->internal)
+		pgstat_progress_end_command();
 
 	pgaio_error_cleanup();
 
@@ -5468,6 +5476,7 @@ PushTransaction(void)
 	s->parallelModeLevel = 0;
 	s->parallelChildXact = (p->parallelModeLevel != 0 || p->parallelChildXact);
 	s->topXidLogged = false;
+	s->internal = false;
 
 	CurrentTransactionState = s;
 

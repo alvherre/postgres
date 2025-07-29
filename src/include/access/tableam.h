@@ -22,6 +22,7 @@
 #include "access/xact.h"
 #include "commands/vacuum.h"
 #include "executor/tuptable.h"
+#include "replication/logical.h"
 #include "storage/read_stream.h"
 #include "utils/rel.h"
 #include "utils/snapshot.h"
@@ -623,6 +624,8 @@ typedef struct TableAmRoutine
 											  Relation OldIndex,
 											  bool use_sort,
 											  TransactionId OldestXmin,
+											  Snapshot snapshot,
+											  LogicalDecodingContext *decoding_ctx,
 											  TransactionId *xid_cutoff,
 											  MultiXactId *multi_cutoff,
 											  double *num_tuples,
@@ -1627,6 +1630,10 @@ table_relation_copy_data(Relation rel, const RelFileLocator *newrlocator)
  *   not needed for the relation's AM
  * - *xid_cutoff - ditto
  * - *multi_cutoff - ditto
+ * - snapshot - if != NULL, ignore data changes done by transactions that this
+ *	 (MVCC) snapshot considers still in-progress or in the future.
+ * - decoding_ctx - logical decoding context, to capture concurrent data
+ *   changes.
  *
  * Output parameters:
  * - *xid_cutoff - rel's new relfrozenxid value, may be invalid
@@ -1639,6 +1646,8 @@ table_relation_copy_for_cluster(Relation OldTable, Relation NewTable,
 								Relation OldIndex,
 								bool use_sort,
 								TransactionId OldestXmin,
+								Snapshot snapshot,
+								LogicalDecodingContext *decoding_ctx,
 								TransactionId *xid_cutoff,
 								MultiXactId *multi_cutoff,
 								double *num_tuples,
@@ -1647,6 +1656,7 @@ table_relation_copy_for_cluster(Relation OldTable, Relation NewTable,
 {
 	OldTable->rd_tableam->relation_copy_for_cluster(OldTable, NewTable, OldIndex,
 													use_sort, OldestXmin,
+													snapshot, decoding_ctx,
 													xid_cutoff, multi_cutoff,
 													num_tuples, tups_vacuumed,
 													tups_recently_dead);
