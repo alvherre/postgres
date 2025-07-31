@@ -3967,7 +3967,6 @@ typedef struct RepackStmt
 	char	   *indexname;		/* order tuples by this index */
 	bool		usingindex;		/* whether USING INDEX is specified */
 	List	   *params;			/* list of DefElem nodes */
-	bool		concurrent;		/* allow concurrent access? */
 } RepackStmt;
 
 
