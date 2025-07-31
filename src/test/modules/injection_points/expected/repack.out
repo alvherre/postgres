@@ -7,7 +7,7 @@ injection_points_attach
 (1 row)
 
 step wait_before_lock: 
-	REPACK CONCURRENTLY repack_test USING INDEX repack_test_pkey;
+	REPACK (CONCURRENTLY) repack_test USING INDEX repack_test_pkey;
  <waiting ...>
 step change_existing: 
 	UPDATE repack_test SET i=10 where i=1;

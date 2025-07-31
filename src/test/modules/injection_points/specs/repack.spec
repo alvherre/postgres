@@ -32,7 +32,7 @@ setup
 # Perform the initial load and wait for s2 to do some data changes.
 step wait_before_lock
 {
-	REPACK CONCURRENTLY repack_test USING INDEX repack_test_pkey;
+	REPACK (CONCURRENTLY) repack_test USING INDEX repack_test_pkey;
 }
 # Check the table from the perspective of s1.
 #

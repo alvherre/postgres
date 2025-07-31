@@ -110,7 +110,7 @@ static bool cluster_rel_recheck(RepackCommand cmd, Relation OldHeap,
 static void check_repack_concurrently_requirements(Relation rel);
 static void rebuild_relation(RepackCommand cmd, bool usingindex,
 							 Relation OldHeap, Relation index, Oid userid,
-							 bool concurrent, bool verbose);
+							 bool verbose, bool concurrent);
 static void copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex,
 							Snapshot snapshot, LogicalDecodingContext *decoding_ctx,
 							bool verbose,
@@ -187,9 +187,9 @@ RepackCommandAsString(RepackCommand cmd)
 		case REPACK_COMMAND_REPACK:
 			return "REPACK";
 		case REPACK_COMMAND_VACUUMFULL:
-			return "VACUUM";
+			return "VACUUM (FULL)";
 		case REPACK_COMMAND_CLUSTER:
-			return "VACUUM";
+			return "CLUSTER";
 	}
 	return "???";
 }
@@ -237,7 +237,10 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 				 defGetBoolean(opt))
 		{
 			if (stmt->command != REPACK_COMMAND_REPACK)
-				elog(ERROR, "not repack, oops");	/* FIXME reachable? reword */
+				ereport(ERROR,
+						errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("CONCURRENTLY option not supported for %s",
+							   RepackCommandAsString(stmt->command)));
 			params.options |= CLUOPT_CONCURRENT;
 		}
 		else
@@ -267,7 +270,7 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	 */
 	if (stmt->relation != NULL)
 	{
-		rel = process_single_relation(stmt, AccessExclusiveLock, isTopLevel, &params);
+		rel = process_single_relation(stmt, lockmode, isTopLevel, &params);
 		if (rel == NULL)
 			return;
 	}
@@ -426,14 +429,14 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 			bool isTopLevel)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
+	Relation	index;
+	LOCKMODE	lmode;
 	Oid			save_userid;
 	int			save_sec_context;
 	int			save_nestlevel;
 	bool		verbose = ((params->options & CLUOPT_VERBOSE) != 0);
 	bool		recheck = ((params->options & CLUOPT_RECHECK) != 0);
-	Relation	index;
 	bool		concurrent = ((params->options & CLUOPT_CONCURRENT) != 0);
-	LOCKMODE	lmode;
 
 	/*
 	 * Check that the correct lock is held. The lock mode is
@@ -456,7 +459,7 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 		 * the result of GetCurrentTransactionIdIfAny() instead, but that
 		 * would be less clear from user's perspective.
 		 */
-		PreventInTransactionBlock(isTopLevel, "REPACK CONCURRENTLY");
+		PreventInTransactionBlock(isTopLevel, "REPACK (CONCURRENTLY)");
 
 		check_repack_concurrently_requirements(OldHeap);
 	}
@@ -502,11 +505,13 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	 * If this is a single-transaction CLUSTER, we can skip these tests. We
 	 * *must* skip the one on indisclustered since it would reject an attempt
 	 * to cluster a not-previously-clustered index.
+	 *
+	 * XXX move [some of] these comments to where the RECHECK flag is
+	 * determined?
 	 */
-	if (recheck)
-		if (!cluster_rel_recheck(cmd, OldHeap, indexOid, save_userid,
-								 lmode, params->options))
-			goto out;
+	if (recheck && !cluster_rel_recheck(cmd, OldHeap, indexOid, save_userid,
+										lmode, params->options))
+		goto out;
 
 	/*
 	 * We allow repacking shared catalogs only when not using an index. It
@@ -906,7 +911,7 @@ check_repack_concurrently_requirements(Relation rel)
 static void
 rebuild_relation(RepackCommand cmd, bool usingindex,
 				 Relation OldHeap, Relation index, Oid userid,
-				 bool concurrent, bool verbose)
+				 bool verbose, bool concurrent)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			accessMethod = OldHeap->rd_rel->relam;
@@ -923,10 +928,10 @@ rebuild_relation(RepackCommand cmd, bool usingindex,
 #if USE_ASSERT_CHECKING
 	LOCKMODE	lmode;
 
-	lmode = !concurrent ? AccessExclusiveLock : ShareUpdateExclusiveLock;
+	lmode = concurrent ? ShareUpdateExclusiveLock : AccessExclusiveLock;
 
-	Assert(CheckRelationLockedByMe(OldHeap, lmode, false) &&
-		   (index == NULL || CheckRelationLockedByMe(index, lmode, false)));
+	Assert(CheckRelationLockedByMe(OldHeap, lmode, false));
+	Assert(!usingindex || CheckRelationLockedByMe(index, lmode, false));
 #endif
 
 	if (concurrent)
@@ -2315,7 +2320,7 @@ process_single_relation(RepackStmt *stmt, LOCKMODE lockmode, bool isTopLevel,
 		{
 			indexOid = determine_clustered_index(rel, stmt->usingindex,
 												 stmt->indexname);
-			check_index_is_clusterable(rel, indexOid, AccessExclusiveLock);
+			check_index_is_clusterable(rel, indexOid, lockmode);
 		}
 
 		cluster_rel(stmt->command, stmt->usingindex, rel, indexOid,
