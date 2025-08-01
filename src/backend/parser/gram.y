@@ -11949,6 +11949,17 @@ RepackStmt:
 					n->params = $2;
 					$$ = (Node *) n;
 				}
+			| REPACK '(' utility_option_list ')'
+				{
+					RepackStmt *n = makeNode(RepackStmt);
+
+					n->command = REPACK_COMMAND_REPACK;
+					n->relation = NULL;
+					n->indexname = NULL;
+					n->usingindex = false;
+					n->params = $3;
+					$$ = (Node *) n;
+				}
 			| REPACK opt_usingindex
 				{
 					RepackStmt *n = makeNode(RepackStmt);
