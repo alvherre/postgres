@@ -41,6 +41,13 @@ install: all installdirs
 	$(INSTALL_PROGRAM) vacuumdb$(X)   '$(DESTDIR)$(bindir)'/vacuumdb$(X)
 	$(INSTALL_PROGRAM) reindexdb$(X)  '$(DESTDIR)$(bindir)'/reindexdb$(X)
 	$(INSTALL_PROGRAM) pg_isready$(X) '$(DESTDIR)$(bindir)'/pg_isready$(X)
+ifneq ($(PORTNAME), win32)
+	@rm -f '$(DESTDIR)$(bindir)/pg_repackdb$(X)'
+	ln -s vacuumdb$(X) '$(DESTDIR)$(bindir)/pg_repackdb$(X)'
+else
+	$(INSTALL_PROGRAM) vacuumdb$(X) '$(DESTDIR)$(bindir)/pg_repackdb$(X)'
+endif
+
 
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
