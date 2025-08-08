@@ -35,6 +35,10 @@ foreach binary : binaries
   bin_targets += binary
 endforeach
 
+install_symlink('pg_repackdb',
+  kwargs: {'install_dir': dir_bin, 'pointing_to': 'vacuumdb'}
+)
+
 tests += {
   'name': 'scripts',
   'sd': meson.current_source_dir(),

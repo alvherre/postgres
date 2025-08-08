@@ -63,6 +63,23 @@ typedef enum
 
 static VacObjFilter objfilter = OBJFILTER_NONE;
 
+typedef enum
+{
+	MODE_VACUUM,
+	MODE_REPACK
+} RunMode;
+
+static RunMode mode = MODE_VACUUM;
+
+static struct option *get_options(void);
+static void main_vacuum(int argc, char *argv[]);
+static void main_repack(int argc, char *argv[]);
+static void main_common(ConnParams *cparams, const char *dbname,
+						const char *maintenance_db, vacuumingOptions *vacopts,
+						SimpleStringList *objects, bool analyze_in_stages,
+						int tbl_count, int concurrentCons,
+						const char *progname, bool echo, bool quiet);
+
 static SimpleStringList *retrieve_objects(PGconn *conn,
 										  vacuumingOptions *vacopts,
 										  SimpleStringList *objects,
@@ -89,7 +106,8 @@ static void prepare_vacuum_command(PQExpBuffer sql, int serverVersion,
 static void run_vacuum_command(PGconn *conn, const char *sql, bool echo,
 							   const char *table);
 
-static void help(const char *progname);
+static void help_vacuum(const char *progname);
+static void help_repack(const char *progname);
 
 void		check_objfilter(void);
 
@@ -99,55 +117,118 @@ static char *escape_quotes(const char *src);
 #define ANALYZE_NO_STAGE	-1
 #define ANALYZE_NUM_STAGES	3
 
-
 int
 main(int argc, char *argv[])
 {
-	static struct option long_options[] = {
-		{"host", required_argument, NULL, 'h'},
-		{"port", required_argument, NULL, 'p'},
-		{"username", required_argument, NULL, 'U'},
-		{"no-password", no_argument, NULL, 'w'},
-		{"password", no_argument, NULL, 'W'},
-		{"echo", no_argument, NULL, 'e'},
-		{"quiet", no_argument, NULL, 'q'},
-		{"dbname", required_argument, NULL, 'd'},
-		{"analyze", no_argument, NULL, 'z'},
-		{"analyze-only", no_argument, NULL, 'Z'},
-		{"freeze", no_argument, NULL, 'F'},
-		{"all", no_argument, NULL, 'a'},
-		{"table", required_argument, NULL, 't'},
-		{"full", no_argument, NULL, 'f'},
-		{"verbose", no_argument, NULL, 'v'},
-		{"jobs", required_argument, NULL, 'j'},
-		{"parallel", required_argument, NULL, 'P'},
-		{"schema", required_argument, NULL, 'n'},
-		{"exclude-schema", required_argument, NULL, 'N'},
-		{"maintenance-db", required_argument, NULL, 2},
-		{"analyze-in-stages", no_argument, NULL, 3},
-		{"disable-page-skipping", no_argument, NULL, 4},
-		{"skip-locked", no_argument, NULL, 5},
-		{"min-xid-age", required_argument, NULL, 6},
-		{"min-mxid-age", required_argument, NULL, 7},
-		{"no-index-cleanup", no_argument, NULL, 8},
-		{"force-index-cleanup", no_argument, NULL, 9},
-		{"no-truncate", no_argument, NULL, 10},
-		{"no-process-toast", no_argument, NULL, 11},
-		{"no-process-main", no_argument, NULL, 12},
-		{"buffer-usage-limit", required_argument, NULL, 13},
-		{"missing-stats-only", no_argument, NULL, 14},
-		{NULL, 0, NULL, 0}
-	};
+	const char *progname = get_progname(argv[0]);
 
+	if (strcmp(progname, "vacuumdb") == 0)
+	{
+		mode = MODE_VACUUM;
+		main_vacuum(argc, argv);
+	}
+	else
+	{
+		/*
+		 * The application is executed via a symbolic link.
+		 */
+		Assert(strcmp(progname, "pg_repackdb") == 0);
+
+		mode = MODE_REPACK;
+		main_repack(argc, argv);
+	}
+
+	exit(0);
+}
+
+static struct option long_options_common[] = {
+	{"host", required_argument, NULL, 'h'},
+	{"port", required_argument, NULL, 'p'},
+	{"username", required_argument, NULL, 'U'},
+	{"no-password", no_argument, NULL, 'w'},
+	{"password", no_argument, NULL, 'W'},
+	{"echo", no_argument, NULL, 'e'},
+	{"quiet", no_argument, NULL, 'q'},
+	{"dbname", required_argument, NULL, 'd'},
+	{"all", no_argument, NULL, 'a'},
+	{"table", required_argument, NULL, 't'},
+	{"verbose", no_argument, NULL, 'v'},
+	{"jobs", required_argument, NULL, 'j'},
+	{"schema", required_argument, NULL, 'n'},
+	{"exclude-schema", required_argument, NULL, 'N'},
+	{"maintenance-db", required_argument, NULL, 2}
+};
+
+static struct option long_options_vacuum[] = {
+	{"analyze", no_argument, NULL, 'z'},
+	{"analyze-only", no_argument, NULL, 'Z'},
+	{"freeze", no_argument, NULL, 'F'},
+	{"full", no_argument, NULL, 'f'},
+	{"parallel", required_argument, NULL, 'P'},
+	{"analyze-in-stages", no_argument, NULL, 3},
+	{"disable-page-skipping", no_argument, NULL, 4},
+	{"skip-locked", no_argument, NULL, 5},
+	/* TODO Consider moving to _common */
+	{"min-xid-age", required_argument, NULL, 6},
+	/* TODO Consider moving to _common */
+	{"min-mxid-age", required_argument, NULL, 7},
+	{"no-index-cleanup", no_argument, NULL, 8},
+	{"force-index-cleanup", no_argument, NULL, 9},
+	{"no-truncate", no_argument, NULL, 10},
+	{"no-process-toast", no_argument, NULL, 11},
+	{"no-process-main", no_argument, NULL, 12},
+	{"buffer-usage-limit", required_argument, NULL, 13},
+	{"missing-stats-only", no_argument, NULL, 14}
+};
+
+/* TODO Remove if there are eventually no specific options. */
+static struct option long_options_repack[] = {
+};
+
+/*
+ * Construct the options array. The result depends on whether we're doing
+ * VACUUM or REPACK.
+ */
+static struct option *
+get_options(void)
+{
+	int			ncommon = lengthof(long_options_common);
+	int			nother = mode == MODE_VACUUM ? lengthof(long_options_vacuum) :
+		lengthof(long_options_repack);
+	struct option *result = palloc_array(struct option, ncommon + nother + 1);
+	struct option *src = long_options_common;
+	struct option *dst = result;
+	int			i;
+
+	for (i = 0; i < ncommon; i++)
+	{
+		memcpy(dst, src, sizeof(struct option));
+		dst++;
+		src++;
+	}
+
+	src = mode == MODE_VACUUM ? long_options_vacuum : long_options_repack;
+	for (i = 0; i < nother; i++)
+	{
+		memcpy(dst, src, sizeof(struct option));
+		dst++;
+		src++;
+	}
+
+	/* End-of-list marker */
+	memset(dst, 0, sizeof(struct option));
+
+	return result;
+}
+
+static void
+main_vacuum(int argc, char *argv[])
+{
 	const char *progname;
 	int			optindex;
 	int			c;
 	const char *dbname = NULL;
 	const char *maintenance_db = NULL;
-	char	   *host = NULL;
-	char	   *port = NULL;
-	char	   *username = NULL;
-	enum trivalue prompt_password = TRI_DEFAULT;
 	ConnParams	cparams;
 	bool		echo = false;
 	bool		quiet = false;
@@ -167,13 +248,18 @@ main(int argc, char *argv[])
 	vacopts.process_main = true;
 	vacopts.process_toast = true;
 
+	/* the same for connection parameters */
+	memset(&cparams, 0, sizeof(cparams));
+	cparams.prompt_password = TRI_DEFAULT;
+
 	pg_logging_init(argv[0]);
 	progname = get_progname(argv[0]);
 	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pgscripts"));
 
-	handle_help_version_opts(argc, argv, "vacuumdb", help);
+	handle_help_version_opts(argc, argv, progname, help_vacuum);
 
-	while ((c = getopt_long(argc, argv, "ad:efFh:j:n:N:p:P:qt:U:vwWzZ", long_options, &optindex)) != -1)
+	while ((c = getopt_long(argc, argv, "ad:efFh:j:n:N:p:P:qt:U:vwWzZ",
+							get_options(), &optindex)) != -1)
 	{
 		switch (c)
 		{
@@ -194,7 +280,7 @@ main(int argc, char *argv[])
 				vacopts.freeze = true;
 				break;
 			case 'h':
-				host = pg_strdup(optarg);
+				cparams.pghost = pg_strdup(optarg);
 				break;
 			case 'j':
 				if (!option_parse_int(optarg, "-j/--jobs", 1, INT_MAX,
@@ -210,7 +296,7 @@ main(int argc, char *argv[])
 				simple_string_list_append(&objects, optarg);
 				break;
 			case 'p':
-				port = pg_strdup(optarg);
+				cparams.pgport = pg_strdup(optarg);
 				break;
 			case 'P':
 				if (!option_parse_int(optarg, "-P/--parallel", 0, INT_MAX,
@@ -226,16 +312,16 @@ main(int argc, char *argv[])
 				tbl_count++;
 				break;
 			case 'U':
-				username = pg_strdup(optarg);
+				cparams.pguser = pg_strdup(optarg);
 				break;
 			case 'v':
 				vacopts.verbose = true;
 				break;
 			case 'w':
-				prompt_password = TRI_NO;
+				cparams.prompt_password = TRI_NO;
 				break;
 			case 'W':
-				prompt_password = TRI_YES;
+				cparams.prompt_password = TRI_YES;
 				break;
 			case 'z':
 				vacopts.and_analyze = true;
@@ -379,13 +465,141 @@ main(int argc, char *argv[])
 		pg_fatal("cannot use the \"%s\" option without \"%s\" or \"%s\"",
 				 "missing-stats-only", "analyze-only", "analyze-in-stages");
 
-	/* fill cparams except for dbname, which is set below */
-	cparams.pghost = host;
-	cparams.pgport = port;
-	cparams.pguser = username;
-	cparams.prompt_password = prompt_password;
-	cparams.override_dbname = NULL;
+	main_common(&cparams, dbname, maintenance_db, &vacopts, &objects,
+				analyze_in_stages, tbl_count, concurrentCons,
+				progname, echo, quiet);
+}
 
+static void
+main_repack(int argc, char *argv[])
+{
+	const char *progname;
+	int			optindex;
+	int			c;
+	const char *dbname = NULL;
+	const char *maintenance_db = NULL;
+	ConnParams	cparams;
+	bool		echo = false;
+	bool		quiet = false;
+	vacuumingOptions vacopts;
+	SimpleStringList objects = {NULL, NULL};
+	int			concurrentCons = 1;
+	int			tbl_count = 0;
+
+	/* initialize options */
+	memset(&vacopts, 0, sizeof(vacopts));
+
+	/* the same for connection parameters */
+	memset(&cparams, 0, sizeof(cparams));
+	cparams.prompt_password = TRI_DEFAULT;
+
+	pg_logging_init(argv[0]);
+	progname = get_progname(argv[0]);
+	set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pgscripts"));
+
+	handle_help_version_opts(argc, argv, progname, help_repack);
+
+	while ((c = getopt_long(argc, argv, "ad:eh:j:n:N:p:qt:U:vwW",
+							get_options(), &optindex)) != -1)
+	{
+		switch (c)
+		{
+			case 'a':
+				objfilter |= OBJFILTER_ALL_DBS;
+				break;
+			case 'd':
+				objfilter |= OBJFILTER_DATABASE;
+				dbname = pg_strdup(optarg);
+				break;
+			case 'e':
+				echo = true;
+				break;
+			case 'h':
+				cparams.pghost = pg_strdup(optarg);
+				break;
+			case 'j':
+				if (!option_parse_int(optarg, "-j/--jobs", 1, INT_MAX,
+									  &concurrentCons))
+					exit(1);
+				break;
+			case 'n':
+				objfilter |= OBJFILTER_SCHEMA;
+				simple_string_list_append(&objects, optarg);
+				break;
+			case 'N':
+				objfilter |= OBJFILTER_SCHEMA_EXCLUDE;
+				simple_string_list_append(&objects, optarg);
+				break;
+			case 'p':
+				cparams.pgport = pg_strdup(optarg);
+				break;
+			case 'q':
+				quiet = true;
+				break;
+			case 't':
+				objfilter |= OBJFILTER_TABLE;
+				simple_string_list_append(&objects, optarg);
+				tbl_count++;
+				break;
+			case 'U':
+				cparams.pguser = pg_strdup(optarg);
+				break;
+			case 'v':
+				vacopts.verbose = true;
+				break;
+			case 'w':
+				cparams.prompt_password = TRI_NO;
+				break;
+			case 'W':
+				cparams.prompt_password = TRI_YES;
+				break;
+			case 2:
+				maintenance_db = pg_strdup(optarg);
+				break;
+			default:
+				/* getopt_long already emitted a complaint */
+				pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+				exit(1);
+		}
+	}
+
+	/*
+	 * Non-option argument specifies database name as long as it wasn't
+	 * already specified with -d / --dbname
+	 */
+	if (optind < argc && dbname == NULL)
+	{
+		objfilter |= OBJFILTER_DATABASE;
+		dbname = argv[optind];
+		optind++;
+	}
+
+	if (optind < argc)
+	{
+		pg_log_error("too many command-line arguments (first is \"%s\")",
+					 argv[optind]);
+		pg_log_error_hint("Try \"%s --help\" for more information.", progname);
+		exit(1);
+	}
+
+	/*
+	 * Validate the combination of filters specified in the command-line
+	 * options.
+	 */
+	check_objfilter();
+
+	main_common(&cparams, dbname, maintenance_db, &vacopts, &objects,
+				false, tbl_count, concurrentCons,
+				progname, echo, quiet);
+}
+
+static void
+main_common(ConnParams *cparams, const char *dbname,
+			const char *maintenance_db, vacuumingOptions *vacopts,
+			SimpleStringList *objects, bool analyze_in_stages,
+			int tbl_count, int concurrentCons,
+			const char *progname, bool echo, bool quiet)
+{
 	setup_cancel_handler(NULL);
 
 	/* Avoid opening extra connections. */
@@ -394,11 +608,11 @@ main(int argc, char *argv[])
 
 	if (objfilter & OBJFILTER_ALL_DBS)
 	{
-		cparams.dbname = maintenance_db;
+		cparams->dbname = maintenance_db;
 
-		vacuum_all_databases(&cparams, &vacopts,
+		vacuum_all_databases(cparams, vacopts,
 							 analyze_in_stages,
-							 &objects,
+							 objects,
 							 concurrentCons,
 							 progname, echo, quiet);
 	}
@@ -414,7 +628,7 @@ main(int argc, char *argv[])
 				dbname = get_user_name_or_exit(progname);
 		}
 
-		cparams.dbname = dbname;
+		cparams->dbname = dbname;
 
 		if (analyze_in_stages)
 		{
@@ -423,23 +637,21 @@ main(int argc, char *argv[])
 
 			for (stage = 0; stage < ANALYZE_NUM_STAGES; stage++)
 			{
-				vacuum_one_database(&cparams, &vacopts,
+				vacuum_one_database(cparams, vacopts,
 									stage,
-									&objects,
-									vacopts.missing_stats_only ? &found_objs : NULL,
+									objects,
+									vacopts->missing_stats_only ? &found_objs : NULL,
 									concurrentCons,
 									progname, echo, quiet);
 			}
 		}
 		else
-			vacuum_one_database(&cparams, &vacopts,
+			vacuum_one_database(cparams, vacopts,
 								ANALYZE_NO_STAGE,
-								&objects, NULL,
+								objects, NULL,
 								concurrentCons,
 								progname, echo, quiet);
 	}
-
-	exit(0);
 }
 
 /*
@@ -450,19 +662,39 @@ check_objfilter(void)
 {
 	if ((objfilter & OBJFILTER_ALL_DBS) &&
 		(objfilter & OBJFILTER_DATABASE))
-		pg_fatal("cannot vacuum all databases and a specific one at the same time");
+	{
+		if (mode == MODE_VACUUM)
+			pg_fatal("cannot vacuum all databases and a specific one at the same time");
+		else
+			pg_fatal("cannot repack all databases and a specific one at the same time");
+	}
 
 	if ((objfilter & OBJFILTER_TABLE) &&
 		(objfilter & OBJFILTER_SCHEMA))
-		pg_fatal("cannot vacuum all tables in schema(s) and specific table(s) at the same time");
+	{
+		if (mode == MODE_VACUUM)
+			pg_fatal("cannot vacuum all tables in schema(s) and specific table(s) at the same time");
+		else
+			pg_fatal("cannot repack all tables in schema(s) and specific table(s) at the same time");
+	}
 
 	if ((objfilter & OBJFILTER_TABLE) &&
 		(objfilter & OBJFILTER_SCHEMA_EXCLUDE))
-		pg_fatal("cannot vacuum specific table(s) and exclude schema(s) at the same time");
+	{
+		if (mode == MODE_VACUUM)
+			pg_fatal("cannot vacuum specific table(s) and exclude schema(s) at the same time");
+		else
+			pg_fatal("cannot repack specific table(s) and exclude schema(s) at the same time");
+	}
 
 	if ((objfilter & OBJFILTER_SCHEMA) &&
 		(objfilter & OBJFILTER_SCHEMA_EXCLUDE))
-		pg_fatal("cannot vacuum all tables in schema(s) and exclude schema(s) at the same time");
+	{
+		if (mode == MODE_VACUUM)
+			pg_fatal("cannot vacuum all tables in schema(s) and exclude schema(s) at the same time");
+		else
+			pg_fatal("cannot repack all tables in schema(s) and exclude schema(s) at the same time");
+	}
 }
 
 /*
@@ -551,6 +783,13 @@ vacuum_one_database(ConnParams *cparams,
 		   (stage >= 0 && stage < ANALYZE_NUM_STAGES));
 
 	conn = connectDatabase(cparams, progname, echo, false, true);
+
+	if (mode == MODE_REPACK && PQserverVersion(conn) < 190000)
+	{
+		PQfinish(conn);
+		pg_fatal("cannot use the \"%s\" command on server versions older than PostgreSQL %s",
+				 "REPACK", "19");
+	}
 
 	if (vacopts->disable_page_skipping && PQserverVersion(conn) < 90600)
 	{
@@ -644,9 +883,15 @@ vacuum_one_database(ConnParams *cparams,
 		if (stage != ANALYZE_NO_STAGE)
 			printf(_("%s: processing database \"%s\": %s\n"),
 				   progname, PQdb(conn), _(stage_messages[stage]));
-		else
+		else if (mode == MODE_VACUUM)
 			printf(_("%s: vacuuming database \"%s\"\n"),
 				   progname, PQdb(conn));
+		else
+		{
+			Assert(mode == MODE_REPACK);
+			printf(_("%s: repacking database \"%s\"\n"),
+				   progname, PQdb(conn));
+		}
 		fflush(stdout);
 	}
 
@@ -749,7 +994,8 @@ vacuum_one_database(ConnParams *cparams,
 	}
 
 	/* If we used SKIP_DATABASE_STATS, mop up with ONLY_DATABASE_STATS */
-	if (vacopts->skip_database_stats && stage == ANALYZE_NO_STAGE)
+	if (mode == MODE_VACUUM && vacopts->skip_database_stats &&
+		stage == ANALYZE_NO_STAGE)
 	{
 		const char *cmd = "VACUUM (ONLY_DATABASE_STATS);";
 		ParallelSlot *free_slot = ParallelSlotsGetIdle(sa, NULL);
@@ -1074,6 +1320,12 @@ vacuum_all_databases(ConnParams *cparams,
 	int			i;
 
 	conn = connectMaintenanceDatabase(cparams, progname, echo);
+	if (mode == MODE_REPACK && PQserverVersion(conn) < 190000)
+	{
+		PQfinish(conn);
+		pg_fatal("cannot use the \"%s\" command on server versions older than PostgreSQL %s",
+				 "REPACK", "19");
+	}
 	result = executeQuery(conn,
 						  "SELECT datname FROM pg_database WHERE datallowconn AND datconnlimit <> -2 ORDER BY 1;",
 						  echo);
@@ -1127,8 +1379,8 @@ vacuum_all_databases(ConnParams *cparams,
 }
 
 /*
- * Construct a vacuum/analyze command to run based on the given options, in the
- * given string buffer, which may contain previous garbage.
+ * Construct a vacuum/analyze/repack command to run based on the given
+ * options, in the given string buffer, which may contain previous garbage.
  *
  * The table name used must be already properly quoted.  The command generated
  * depends on the server version involved and it is semicolon-terminated.
@@ -1143,7 +1395,13 @@ prepare_vacuum_command(PQExpBuffer sql, int serverVersion,
 
 	resetPQExpBuffer(sql);
 
-	if (vacopts->analyze_only)
+	if (mode == MODE_REPACK)
+	{
+		appendPQExpBufferStr(sql, "REPACK");
+		if (vacopts->verbose)
+			appendPQExpBufferStr(sql, " (VERBOSE)");
+	}
+	else if (vacopts->analyze_only)
 	{
 		appendPQExpBufferStr(sql, "ANALYZE");
 
@@ -1317,16 +1575,34 @@ run_vacuum_command(PGconn *conn, const char *sql, bool echo,
 	if (!status)
 	{
 		if (table)
-			pg_log_error("vacuuming of table \"%s\" in database \"%s\" failed: %s",
-						 table, PQdb(conn), PQerrorMessage(conn));
+		{
+			if (mode == MODE_VACUUM)
+				pg_log_error("vacuuming of table \"%s\" in database \"%s\" failed: %s",
+							 table, PQdb(conn), PQerrorMessage(conn));
+			else
+				pg_log_error("repacking of table \"%s\" in database \"%s\" failed: %s",
+							 table, PQdb(conn), PQerrorMessage(conn));
+		}
 		else
-			pg_log_error("vacuuming of database \"%s\" failed: %s",
-						 PQdb(conn), PQerrorMessage(conn));
+		{
+			if (mode == MODE_VACUUM)
+				pg_log_error("vacuuming of database \"%s\" failed: %s",
+							 PQdb(conn), PQerrorMessage(conn));
+			else
+				pg_log_error("repacking of database \"%s\" failed: %s",
+							 PQdb(conn), PQerrorMessage(conn));
+		}
 	}
 }
 
+/*
+ * As the order of options matters here, and since the command (vacuum/repack)
+ * is mentioned often, it'd look ugly if we tried to generate the text
+ * according to the 'mode' variable. Therefore, use a separate function for
+ * each mode.
+ */
 static void
-help(const char *progname)
+help_vacuum(const char *progname)
 {
 	printf(_("%s cleans and analyzes a PostgreSQL database.\n\n"), progname);
 	printf(_("Usage:\n"));
@@ -1360,6 +1636,36 @@ help(const char *progname)
 	printf(_("  -Z, --analyze-only              only update optimizer statistics; no vacuum\n"));
 	printf(_("      --analyze-in-stages         only update optimizer statistics, in multiple\n"
 			 "                                  stages for faster results; no vacuum\n"));
+	printf(_("  -?, --help                      show this help, then exit\n"));
+	printf(_("\nConnection options:\n"));
+	printf(_("  -h, --host=HOSTNAME       database server host or socket directory\n"));
+	printf(_("  -p, --port=PORT           database server port\n"));
+	printf(_("  -U, --username=USERNAME   user name to connect as\n"));
+	printf(_("  -w, --no-password         never prompt for password\n"));
+	printf(_("  -W, --password            force password prompt\n"));
+	printf(_("  --maintenance-db=DBNAME   alternate maintenance database\n"));
+	printf(_("\nRead the description of the SQL command VACUUM for details.\n"));
+	printf(_("\nReport bugs to <%s>.\n"), PACKAGE_BUGREPORT);
+	printf(_("%s home page: <%s>\n"), PACKAGE_NAME, PACKAGE_URL);
+}
+
+static void
+help_repack(const char *progname)
+{
+	printf(_("%s cleans and analyzes a PostgreSQL database.\n\n"), progname);
+	printf(_("Usage:\n"));
+	printf(_("  %s [OPTION]... [DBNAME]\n"), progname);
+	printf(_("\nOptions:\n"));
+	printf(_("  -a, --all                       repack all databases\n"));
+	printf(_("  -d, --dbname=DBNAME             database to repack\n"));
+	printf(_("  -e, --echo                      show the commands being sent to the server\n"));
+	printf(_("  -j, --jobs=NUM                  use this many concurrent connections to repack\n"));
+	printf(_("  -n, --schema=SCHEMA             repack tables in the specified schema(s) only\n"));
+	printf(_("  -N, --exclude-schema=SCHEMA     do not repack tables in the specified schema(s)\n"));
+	printf(_("  -q, --quiet                     don't write any messages\n"));
+	printf(_("  -t, --table='TABLE[(COLUMNS)]'  repack specific table(s) only\n"));
+	printf(_("  -v, --verbose                   write a lot of output\n"));
+	printf(_("  -V, --version                   output version information, then exit\n"));
 	printf(_("  -?, --help                      show this help, then exit\n"));
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME       database server host or socket directory\n"));
