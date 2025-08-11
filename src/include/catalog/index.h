@@ -99,6 +99,9 @@ extern Oid	index_concurrently_create_copy(Relation heapRelation,
 										   Oid oldIndexId,
 										   Oid tablespaceOid,
 										   const char *newName);
+extern Oid	index_create_copy(Relation heapRelation, Oid oldIndexId,
+							  Oid tablespaceOid, const char *newName,
+							  bool concurrently);
 
 extern void index_concurrently_build(Oid heapRelationId,
 									 Oid indexRelationId);
