@@ -45,6 +45,7 @@
 #include <termios.h>
 #endif
 
+#include "dumputils.h"
 #include "fe_utils/option_utils.h"
 #include "filter.h"
 #include "getopt_long.h"
@@ -82,8 +83,6 @@ main(int argc, char **argv)
 	static int	no_subscriptions = 0;
 	static int	strict_names = 0;
 	static int	statistics_only = 0;
-	static int	with_data = 0;
-	static int	with_schema = 0;
 	static int	with_statistics = 0;
 
 	struct option cmdopts[] = {
@@ -139,11 +138,10 @@ main(int argc, char **argv)
 		{"no-security-labels", no_argument, &no_security_labels, 1},
 		{"no-subscriptions", no_argument, &no_subscriptions, 1},
 		{"no-statistics", no_argument, &no_statistics, 1},
-		{"with-data", no_argument, &with_data, 1},
-		{"with-schema", no_argument, &with_schema, 1},
-		{"with-statistics", no_argument, &with_statistics, 1},
+		{"statistics", no_argument, &with_statistics, 1},
 		{"statistics-only", no_argument, &statistics_only, 1},
 		{"filter", required_argument, NULL, 4},
+		{"restrict-key", required_argument, NULL, 6},
 
 		{NULL, 0, NULL, 0}
 	};
@@ -319,6 +317,10 @@ main(int argc, char **argv)
 				opts->exit_on_error = true;
 				break;
 
+			case 6:
+				opts->restrict_key = pg_strdup(optarg);
+				break;
+
 			default:
 				/* getopt_long already emitted a complaint */
 				pg_log_error_hint("Try \"%s --help\" for more information.", progname);
@@ -354,7 +356,23 @@ main(int argc, char **argv)
 			pg_log_error_hint("Try \"%s --help\" for more information.", progname);
 			exit_nicely(1);
 		}
+
+		if (opts->restrict_key)
+			pg_fatal("options -d/--dbname and --restrict-key cannot be used together");
+
 		opts->useDB = 1;
+	}
+	else
+	{
+		/*
+		 * If you don't provide a restrict key, one will be appointed for you.
+		 */
+		if (!opts->restrict_key)
+			opts->restrict_key = generate_restrict_key();
+		if (!opts->restrict_key)
+			pg_fatal("could not generate restrict key");
+		if (!valid_restrict_key(opts->restrict_key))
+			pg_fatal("invalid restrict key");
 	}
 
 	/* reject conflicting "-only" options */
@@ -373,13 +391,17 @@ main(int argc, char **argv)
 	if (statistics_only && no_statistics)
 		pg_fatal("options --statistics-only and --no-statistics cannot be used together");
 
-	/* reject conflicting "with-" and "no-" options */
-	if (with_data && no_data)
-		pg_fatal("options --with-data and --no-data cannot be used together");
-	if (with_schema && no_schema)
-		pg_fatal("options --with-schema and --no-schema cannot be used together");
+	/* reject conflicting "no-" options */
 	if (with_statistics && no_statistics)
-		pg_fatal("options --with-statistics and --no-statistics cannot be used together");
+		pg_fatal("options --statistics and --no-statistics cannot be used together");
+
+	/* reject conflicting "only-" options */
+	if (data_only && with_statistics)
+		pg_fatal("options %s and %s cannot be used together",
+				 "-a/--data-only", "--statistics");
+	if (schema_only && with_statistics)
+		pg_fatal("options %s and %s cannot be used together",
+				 "-s/--schema-only", "--statistics");
 
 	if (data_only && opts->dropSchema)
 		pg_fatal("options -c/--clean and -a/--data-only cannot be used together");
@@ -399,16 +421,14 @@ main(int argc, char **argv)
 		pg_fatal("cannot specify both --single-transaction and multiple jobs");
 
 	/*
-	 * Set derivative flags. An "-only" option may be overridden by an
-	 * explicit "with-" option; e.g. "--schema-only --with-statistics" will
-	 * include schema and statistics. Other ambiguous or nonsensical
-	 * combinations, e.g. "--schema-only --no-schema", will have already
-	 * caused an error in one of the checks above.
+	 * Set derivative flags. Ambiguous or nonsensical combinations, e.g.
+	 * "--schema-only --no-schema", will have already caused an error in one
+	 * of the checks above.
 	 */
 	opts->dumpData = ((opts->dumpData && !schema_only && !statistics_only) ||
-					  (data_only || with_data)) && !no_data;
+					  data_only) && !no_data;
 	opts->dumpSchema = ((opts->dumpSchema && !data_only && !statistics_only) ||
-						(schema_only || with_schema)) && !no_schema;
+						schema_only) && !no_schema;
 	opts->dumpStatistics = ((opts->dumpStatistics && !schema_only && !data_only) ||
 							(statistics_only || with_statistics)) && !no_statistics;
 
@@ -548,7 +568,9 @@ usage(const char *progname)
 	printf(_("  --no-subscriptions           do not restore subscriptions\n"));
 	printf(_("  --no-table-access-method     do not restore table access methods\n"));
 	printf(_("  --no-tablespaces             do not restore tablespace assignments\n"));
+	printf(_("  --restrict-key=RESTRICT_KEY  use provided string as psql \\restrict key\n"));
 	printf(_("  --section=SECTION            restore named section (pre-data, data, or post-data)\n"));
+	printf(_("  --statistics                 restore the statistics\n"));
 	printf(_("  --statistics-only            restore only the statistics, not schema or data\n"));
 	printf(_("  --strict-names               require table and/or schema include patterns to\n"
 			 "                               match at least one entity each\n"));
@@ -556,9 +578,6 @@ usage(const char *progname)
 	printf(_("  --use-set-session-authorization\n"
 			 "                               use SET SESSION AUTHORIZATION commands instead of\n"
 			 "                               ALTER OWNER commands to set ownership\n"));
-	printf(_("  --with-data                  restore the data\n"));
-	printf(_("  --with-schema                restore the schema\n"));
-	printf(_("  --with-statistics            restore the statistics\n"));
 
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME      database server host or socket directory\n"));

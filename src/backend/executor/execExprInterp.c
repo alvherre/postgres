@@ -2815,7 +2815,7 @@ ExecJustHashVarImpl(ExprState *state, TupleTableSlot *slot, bool *isnull)
 	*isnull = false;
 
 	if (!fcinfo->args[0].isnull)
-		return DatumGetUInt32(hashop->d.hashdatum.fn_addr(fcinfo));
+		return hashop->d.hashdatum.fn_addr(fcinfo);
 	else
 		return (Datum) 0;
 }
@@ -2849,7 +2849,7 @@ ExecJustHashVarVirtImpl(ExprState *state, TupleTableSlot *slot, bool *isnull)
 	*isnull = false;
 
 	if (!fcinfo->args[0].isnull)
-		return DatumGetUInt32(hashop->d.hashdatum.fn_addr(fcinfo));
+		return hashop->d.hashdatum.fn_addr(fcinfo);
 	else
 		return (Datum) 0;
 }
@@ -2892,7 +2892,7 @@ ExecJustHashOuterVarStrict(ExprState *state, ExprContext *econtext,
 	if (!fcinfo->args[0].isnull)
 	{
 		*isnull = false;
-		return DatumGetUInt32(hashop->d.hashdatum.fn_addr(fcinfo));
+		return hashop->d.hashdatum.fn_addr(fcinfo);
 	}
 	else
 	{
@@ -4393,7 +4393,7 @@ ExecEvalHashedScalarArrayOp(ExprState *state, ExprEvalStep *op, ExprContext *eco
 			 * is the equality function and we need not-equals.
 			 */
 			if (!inclause)
-				result = !result;
+				result = BoolGetDatum(!DatumGetBool(result));
 		}
 	}
 
