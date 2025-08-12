@@ -181,10 +181,6 @@ static struct option long_options_vacuum[] = {
 	{"missing-stats-only", no_argument, NULL, 14}
 };
 
-/* TODO Remove if there are eventually no specific options. */
-static struct option long_options_repack[] = {
-};
-
 /*
  * Construct the options array. The result depends on whether we're doing
  * VACUUM or REPACK.
@@ -193,8 +189,7 @@ static struct option *
 get_options(void)
 {
 	int			ncommon = lengthof(long_options_common);
-	int			nother = mode == MODE_VACUUM ? lengthof(long_options_vacuum) :
-		lengthof(long_options_repack);
+	int			nother = mode == MODE_VACUUM ? lengthof(long_options_vacuum) : 0;
 	struct option *result = palloc_array(struct option, ncommon + nother + 1);
 	struct option *src = long_options_common;
 	struct option *dst = result;
@@ -207,7 +202,7 @@ get_options(void)
 		src++;
 	}
 
-	src = mode == MODE_VACUUM ? long_options_vacuum : long_options_repack;
+	src = mode == MODE_VACUUM ? long_options_vacuum : NULL;
 	for (i = 0; i < nother; i++)
 	{
 		memcpy(dst, src, sizeof(struct option));
