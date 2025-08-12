@@ -8,7 +8,7 @@ common_sources = files(
 )
 
 pg_basebackup_deps = [frontend_code, libpq, lz4, zlib, zstd]
-pg_basebackup_common = static_library('libpg_basebackup_common',
+pg_basebackup_common = static_library('libpg_basebackup_common_static',
   common_sources,
   dependencies: pg_basebackup_deps,
   kwargs: internal_lib_args,

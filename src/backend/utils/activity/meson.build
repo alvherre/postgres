@@ -27,7 +27,7 @@ waitevent_sources = files(
   'wait_event_funcs.c',
 )
 
-wait_event = static_library('wait_event_names',
+wait_event = static_library('wait_event_names_static',
   waitevent_sources,
   dependencies: [backend_code],
   include_directories: include_directories('../../../include/utils'),

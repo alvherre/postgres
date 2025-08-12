@@ -130,7 +130,7 @@ jsonpath_gram = custom_target('jsonpath_parse',
 generated_sources += jsonpath_gram.to_list()
 
 # so we don't need to add . as an include dir for the whole backend
-backend_link_with += static_library('jsonpath',
+backend_link_with += static_library('jsonpath_static',
   jsonpath_scan, jsonpath_gram,
   dependencies: [backend_code],
   include_directories: include_directories('.'),

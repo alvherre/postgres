@@ -42,7 +42,7 @@ syncrep_gram = custom_target('syncrep_gram',
 generated_sources += syncrep_gram.to_list()
 repl_parser_sources += syncrep_gram
 
-repl_parser = static_library('repl_parser',
+repl_parser = static_library('repl_parser_static',
   repl_parser_sources,
   dependencies: [backend_code],
   include_directories: include_directories('.'),

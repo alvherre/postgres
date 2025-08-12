@@ -23,7 +23,7 @@ nodefunc_sources = files(
   'outfuncs.c',
   'readfuncs.c',
 )
-nodefuncs = static_library('nodefuncs',
+nodefuncs = static_library('nodefuncs_static',
   nodefunc_sources,
   dependencies: [backend_code],
   include_directories: include_directories('../../include/nodes'),

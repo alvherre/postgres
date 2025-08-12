@@ -21,7 +21,7 @@ bootparse = custom_target('bootparse',
 generated_sources += bootparse.to_list()
 boot_parser_sources += bootparse
 
-boot_parser = static_library('boot_parser',
+boot_parser = static_library('boot_parser_static',
   boot_parser_sources,
   dependencies: [backend_code],
   include_directories: include_directories('.'),

@@ -21,7 +21,7 @@ if host_system == 'windows'
 endif
 
 # see src/interfaces/libpq/meson.build
-ecpg_pgtypes_st = static_library('libpgtypes',
+ecpg_pgtypes_st = static_library('libpgtypes_static',
   ecpg_pgtypes_sources,
   include_directories: ecpg_pgtypes_inc,
   c_args: ecpg_pgtypes_c_args,
@@ -31,7 +31,7 @@ ecpg_pgtypes_st = static_library('libpgtypes',
 )
 ecpg_targets += ecpg_pgtypes_st
 
-ecpg_pgtypes_so = shared_library('libpgtypes',
+ecpg_pgtypes_so = shared_library('libpgtypes_shared',
   ecpg_pgtypes_sources + ecpg_pgtypes_so_sources,
   include_directories: ecpg_pgtypes_inc,
   c_args: ecpg_pgtypes_c_args,

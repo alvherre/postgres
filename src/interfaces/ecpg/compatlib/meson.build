@@ -16,7 +16,7 @@ if host_system == 'windows'
 endif
 
 # see src/interfaces/libpq/meson.build
-ecpg_compat_st = static_library('libecpg_compat',
+ecpg_compat_st = static_library('libecpg_compat_static',
   ecpg_compat_sources,
   include_directories: ecpg_compat_inc,
   c_args: ecpg_compat_c_args,
@@ -26,7 +26,7 @@ ecpg_compat_st = static_library('libecpg_compat',
 )
 ecpg_targets += ecpg_compat_st
 
-ecpg_compat_so = shared_library('libecpg_compat',
+ecpg_compat_so = shared_library('libecpg_compat_shared',
   ecpg_compat_sources + ecpg_compat_so_sources,
   include_directories: ecpg_compat_inc,
   c_args: ecpg_compat_c_args,

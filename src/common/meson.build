@@ -167,7 +167,7 @@ foreach name, opts : pgcommon_variants
       continue
     endif
     c_args = opts.get('c_args', []) + common_cflags[cflagname]
-    cflag_libs += static_library('libpgcommon@0@_@1@'.format(name, cflagname),
+    cflag_libs += static_library('libpgcommon@0@_@1@_static'.format(name, cflagname),
       c_pch: pch_c_h,
       kwargs: opts + {
         'include_directories': [
@@ -182,7 +182,7 @@ foreach name, opts : pgcommon_variants
     )
   endforeach
 
-  lib = static_library('libpgcommon@0@'.format(name),
+  lib = static_library('libpgcommon@0@_static'.format(name),
       link_with: cflag_libs,
       link_whole: cflag_libs,
       c_pch: pch_c_h,
@@ -201,7 +201,7 @@ common_srv = pgcommon['_srv']
 common_shlib = pgcommon['_shlib']
 common_static = pgcommon['']
 
-common_excluded_shlib = static_library('libpgcommon_excluded_shlib',
+common_excluded_shlib = static_library('libpgcommon_excluded_shlib_static',
   sources: common_sources_excluded_shlib,
   dependencies: [frontend_common_code],
   build_by_default: false,

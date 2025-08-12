@@ -42,7 +42,7 @@ backend_parser = custom_target('gram',
 generated_sources += backend_parser.to_list()
 parser_sources += backend_parser
 
-parser = static_library('parser',
+parser = static_library('parser_static',
   parser_sources,
   dependencies: [backend_code],
   include_directories: include_directories('.'),

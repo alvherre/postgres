@@ -57,7 +57,7 @@ libpq_so_c_args = ['-DUSE_DYNAMIC_OAUTH']
 # We could try to avoid building the source files twice, but it probably adds
 # more complexity than its worth (reusing object files requires also linking
 # to the library on windows or breaks precompiled headers).
-libpq_st = static_library('libpq',
+libpq_st = static_library('libpq_static',
   libpq_sources,
   include_directories: [libpq_inc],
   c_args: libpq_c_args,
@@ -66,7 +66,7 @@ libpq_st = static_library('libpq',
   kwargs: default_lib_args,
 )
 
-libpq_so = shared_library('libpq',
+libpq_so = shared_library('libpq_shared',
   libpq_sources + libpq_so_sources,
   include_directories: [libpq_inc, postgres_inc],
   c_args: libpq_c_args + libpq_so_c_args,

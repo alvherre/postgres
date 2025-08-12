@@ -28,7 +28,7 @@ psqlscan = custom_target('psqlscan',
 generated_sources += psqlscan
 fe_utils_sources += psqlscan
 
-fe_utils = static_library('libpgfeutils',
+fe_utils = static_library('libpgfeutils_static',
   fe_utils_sources,
   c_pch: pch_postgres_fe_h,
   include_directories: [postgres_inc, libpq_inc],

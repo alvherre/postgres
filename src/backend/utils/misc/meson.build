@@ -27,7 +27,7 @@ guc_scan = custom_target('guc_scan',
 generated_sources += guc_scan
 
 # so we don't need to add . as an include dir for the whole backend
-backend_link_with += static_library('guc-file',
+backend_link_with += static_library('guc-file_static',
   guc_scan,
   dependencies: [backend_code],
   include_directories: include_directories('.'),

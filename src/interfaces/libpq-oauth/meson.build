@@ -21,7 +21,7 @@ export_file = custom_target('libpq-oauth.exports',
 # port needs to be in include path due to pthread-win32.h
 libpq_oauth_inc = include_directories('.', '../libpq', '../../port')
 
-libpq_oauth_st = static_library('libpq-oauth',
+libpq_oauth_st = static_library('libpq-oauth_static',
   libpq_oauth_sources,
   include_directories: [libpq_oauth_inc, postgres_inc],
   c_pch: pch_postgres_fe_h,

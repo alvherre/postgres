@@ -62,7 +62,7 @@ backend_link_depends = []
 # Can't name the static library 'postgres', because msbuild ends up with a
 # conflict for the .pdb file otherwise.
 
-postgres_lib = static_library('postgres_lib',
+postgres_lib = static_library('postgres_lib_static',
   backend_sources + timezone_sources + generated_backend_sources,
   link_whole: backend_link_with,
   dependencies: backend_build_deps,
