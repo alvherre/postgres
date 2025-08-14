@@ -96,6 +96,7 @@
 #include "utils/guc_hooks.h"
 #include "utils/guc_tables.h"
 #include "utils/injection_point.h"
+#include "utils/pgstat_internal.h"
 #include "utils/ps_status.h"
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
@@ -702,7 +703,7 @@ static void InitControlFile(uint64 sysidentifier, uint32 data_checksum_version);
 static void WriteControlFile(void);
 static void ReadControlFile(void);
 static void UpdateControlFile(void);
-static char *str_time(pg_time_t tnow);
+static char *str_time(pg_time_t tnow, char *buf, size_t bufsize);
 
 static int	get_sync_bit(int method);
 
@@ -1091,6 +1092,9 @@ XLogInsertRecord(XLogRecData *rdata,
 		pgWalUsage.wal_bytes += rechdr->xl_tot_len;
 		pgWalUsage.wal_records++;
 		pgWalUsage.wal_fpi += num_fpi;
+
+		/* Required for the flush of pending stats WAL data */
+		pgstat_report_fixed = true;
 	}
 
 	return EndPos;
@@ -2108,6 +2112,12 @@ AdvanceXLInsertBuffer(XLogRecPtr upto, TimeLineID tli, bool opportunistic)
 					LWLockRelease(WALWriteLock);
 					pgWalUsage.wal_buffers_full++;
 					TRACE_POSTGRESQL_WAL_BUFFER_WRITE_DIRTY_DONE();
+
+					/*
+					 * Required for the flush of pending stats WAL data, per
+					 * update of pgWalUsage.
+					 */
+					pgstat_report_fixed = true;
 				}
 			}
 		}
@@ -4380,7 +4390,7 @@ WriteControlFile(void)
 	ControlFile->toast_max_chunk_size = TOAST_MAX_CHUNK_SIZE;
 	ControlFile->loblksize = LOBLKSIZE;
 
-	ControlFile->float8ByVal = FLOAT8PASSBYVAL;
+	ControlFile->float8ByVal = true;	/* vestigial */
 
 	/*
 	 * Initialize the default 'char' signedness.
@@ -4641,23 +4651,7 @@ ReadControlFile(void)
 						   "LOBLKSIZE", (int) LOBLKSIZE),
 				 errhint("It looks like you need to recompile or initdb.")));
 
-#ifdef USE_FLOAT8_BYVAL
-	if (ControlFile->float8ByVal != true)
-		ereport(FATAL,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("database files are incompatible with server"),
-				 errdetail("The database cluster was initialized without USE_FLOAT8_BYVAL"
-						   " but the server was compiled with USE_FLOAT8_BYVAL."),
-				 errhint("It looks like you need to recompile or initdb.")));
-#else
-	if (ControlFile->float8ByVal != false)
-		ereport(FATAL,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("database files are incompatible with server"),
-				 errdetail("The database cluster was initialized with USE_FLOAT8_BYVAL"
-						   " but the server was compiled without USE_FLOAT8_BYVAL."),
-				 errhint("It looks like you need to recompile or initdb.")));
-#endif
+	Assert(ControlFile->float8ByVal);	/* vestigial, not worth an error msg */
 
 	wal_segment_size = ControlFile->xlog_seg_size;
 
@@ -5361,11 +5355,9 @@ BootStrapXLOG(uint32 data_checksum_version)
 }
 
 static char *
-str_time(pg_time_t tnow)
+str_time(pg_time_t tnow, char *buf, size_t bufsize)
 {
-	char	   *buf = palloc(128);
-
-	pg_strftime(buf, 128,
+	pg_strftime(buf, bufsize,
 				"%Y-%m-%d %H:%M:%S %Z",
 				pg_localtime(&tnow, log_timezone));
 
@@ -5608,6 +5600,7 @@ StartupXLOG(void)
 	XLogRecPtr	missingContrecPtr;
 	TransactionId oldestActiveXID;
 	bool		promoted = false;
+	char		timebuf[128];
 
 	/*
 	 * We should have an aux process resource owner to use, and we should not
@@ -5636,25 +5629,29 @@ StartupXLOG(void)
 			 */
 			ereport(IsPostmasterEnvironment ? LOG : NOTICE,
 					(errmsg("database system was shut down at %s",
-							str_time(ControlFile->time))));
+							str_time(ControlFile->time,
+									 timebuf, sizeof(timebuf)))));
 			break;
 
 		case DB_SHUTDOWNED_IN_RECOVERY:
 			ereport(LOG,
 					(errmsg("database system was shut down in recovery at %s",
-							str_time(ControlFile->time))));
+							str_time(ControlFile->time,
+									 timebuf, sizeof(timebuf)))));
 			break;
 
 		case DB_SHUTDOWNING:
 			ereport(LOG,
 					(errmsg("database system shutdown was interrupted; last known up at %s",
-							str_time(ControlFile->time))));
+							str_time(ControlFile->time,
+									 timebuf, sizeof(timebuf)))));
 			break;
 
 		case DB_IN_CRASH_RECOVERY:
 			ereport(LOG,
 					(errmsg("database system was interrupted while in recovery at %s",
-							str_time(ControlFile->time)),
+							str_time(ControlFile->time,
+									 timebuf, sizeof(timebuf))),
 					 errhint("This probably means that some data is corrupted and"
 							 " you will have to use the last backup for recovery.")));
 			break;
@@ -5662,7 +5659,8 @@ StartupXLOG(void)
 		case DB_IN_ARCHIVE_RECOVERY:
 			ereport(LOG,
 					(errmsg("database system was interrupted while in recovery at log time %s",
-							str_time(ControlFile->checkPointCopy.time)),
+							str_time(ControlFile->checkPointCopy.time,
+									 timebuf, sizeof(timebuf))),
 					 errhint("If this has occurred more than once some data might be corrupted"
 							 " and you might need to choose an earlier recovery target.")));
 			break;
@@ -5670,7 +5668,8 @@ StartupXLOG(void)
 		case DB_IN_PRODUCTION:
 			ereport(LOG,
 					(errmsg("database system was interrupted; last known up at %s",
-							str_time(ControlFile->time))));
+							str_time(ControlFile->time,
+									 timebuf, sizeof(timebuf)))));
 			break;
 
 		default:
@@ -6314,6 +6313,12 @@ StartupXLOG(void)
 	 * commit timestamp.
 	 */
 	CompleteCommitTsInitialization();
+
+	/* Clean up EndOfWalRecoveryInfo data to appease Valgrind leak checking */
+	if (endOfRecoveryInfo->lastPage)
+		pfree(endOfRecoveryInfo->lastPage);
+	pfree(endOfRecoveryInfo->recoveryStopReason);
+	pfree(endOfRecoveryInfo);
 
 	/*
 	 * All done with end-of-recovery actions.
@@ -8990,7 +8995,7 @@ do_pg_backup_start(const char *backupidstr, bool fast, List **tablespaces,
 	 * work correctly, it is critical that sessionBackupState is only updated
 	 * after this block is over.
 	 */
-	PG_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
+	PG_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, BoolGetDatum(true));
 	{
 		bool		gotUniqueStartpoint = false;
 		DIR		   *tblspcdir;
@@ -9229,7 +9234,7 @@ do_pg_backup_start(const char *backupidstr, bool fast, List **tablespaces,
 
 		state->starttime = (pg_time_t) time(NULL);
 	}
-	PG_END_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, DatumGetBool(true));
+	PG_END_ENSURE_ERROR_CLEANUP(do_pg_abort_backup, BoolGetDatum(true));
 
 	state->started_in_recovery = backup_started_in_recovery;
 
@@ -9569,7 +9574,7 @@ register_persistent_abort_backup_handler(void)
 
 	if (already_done)
 		return;
-	before_shmem_exit(do_pg_abort_backup, DatumGetBool(false));
+	before_shmem_exit(do_pg_abort_backup, BoolGetDatum(false));
 	already_done = true;
 }
 

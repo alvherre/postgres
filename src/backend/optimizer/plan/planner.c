@@ -58,6 +58,7 @@
 #include "parser/parsetree.h"
 #include "partitioning/partdesc.h"
 #include "rewrite/rewriteManip.h"
+#include "utils/acl.h"
 #include "utils/backend_status.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -558,6 +559,7 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 
 	result->commandType = parse->commandType;
 	result->queryId = parse->queryId;
+	result->planOrigin = PLAN_STMT_STANDARD;
 	result->hasReturning = (parse->returningList != NIL);
 	result->hasModifyingCTE = parse->hasModifyingCTE;
 	result->canSetTag = parse->canSetTag;
@@ -582,7 +584,6 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
 	result->utilityStmt = parse->utilityStmt;
 	result->stmt_location = parse->stmt_location;
 	result->stmt_len = parse->stmt_len;
-	result->cached_plan_type = PLAN_CACHE_NONE;
 
 	result->jitFlags = PGJIT_NONE;
 	if (jit_enabled && jit_above_cost >= 0 &&
@@ -835,6 +836,38 @@ subquery_planner(PlannerGlobal *glob, Query *parse, PlannerInfo *parent_root,
 		if (!rte->inh)
 			root->leaf_result_relids =
 				bms_make_singleton(parse->resultRelation);
+	}
+
+	/*
+	 * This would be a convenient time to check access permissions for all
+	 * relations mentioned in the query, since it would be better to fail now,
+	 * before doing any detailed planning.  However, for historical reasons,
+	 * we leave this to be done at executor startup.
+	 *
+	 * Note, however, that we do need to check access permissions for any view
+	 * relations mentioned in the query, in order to prevent information being
+	 * leaked by selectivity estimation functions, which only check view owner
+	 * permissions on underlying tables (see all_rows_selectable() and its
+	 * callers).  This is a little ugly, because it means that access
+	 * permissions for views will be checked twice, which is another reason
+	 * why it would be better to do all the ACL checks here.
+	 */
+	foreach(l, parse->rtable)
+	{
+		RangeTblEntry *rte = lfirst_node(RangeTblEntry, l);
+
+		if (rte->perminfoindex != 0 &&
+			rte->relkind == RELKIND_VIEW)
+		{
+			RTEPermissionInfo *perminfo;
+			bool		result;
+
+			perminfo = getRTEPermissionInfo(parse->rteperminfos, rte);
+			result = ExecCheckOneRelPerms(perminfo);
+			if (!result)
+				aclcheck_error(ACLCHECK_NO_PRIV, OBJECT_VIEW,
+							   get_rel_name(perminfo->relid));
+		}
 	}
 
 	/*
@@ -4882,7 +4915,7 @@ create_partial_distinct_paths(PlannerInfo *root, RelOptInfo *input_rel,
 					limitCount = (Node *) makeConst(INT8OID, -1, InvalidOid,
 													sizeof(int64),
 													Int64GetDatum(1), false,
-													FLOAT8PASSBYVAL);
+													true);
 
 					/*
 					 * Apply a LimitPath onto the partial path to restrict the
@@ -5085,7 +5118,7 @@ create_final_distinct_paths(PlannerInfo *root, RelOptInfo *input_rel,
 					limitCount = (Node *) makeConst(INT8OID, -1, InvalidOid,
 													sizeof(int64),
 													Int64GetDatum(1), false,
-													FLOAT8PASSBYVAL);
+													true);
 
 					/*
 					 * If the query already has a LIMIT clause, then we could

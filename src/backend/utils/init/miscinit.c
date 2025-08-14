@@ -1099,7 +1099,8 @@ EstimateClientConnectionInfoSpace(void)
  * Serialize MyClientConnectionInfo for use by parallel workers.
  */
 void
-SerializeClientConnectionInfo(Size maxsize, char *start_address)
+SerializeClientConnectionInfo(Size maxsize PG_USED_FOR_ASSERTS_ONLY,
+							  char *start_address)
 {
 	SerializedClientConnectionInfo serialized = {0};
 
@@ -1183,7 +1184,6 @@ UnlinkLockFiles(int status, Datum arg)
 		/* Should we complain if the unlink fails? */
 	}
 	/* Since we're about to exit, no need to reclaim storage */
-	lock_files = NIL;
 
 	/*
 	 * Lock file removal should always be the last externally visible action

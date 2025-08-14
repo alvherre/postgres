@@ -537,6 +537,11 @@
         The frontend should not respond to this message, but should
         continue listening for a ReadyForQuery message.
        </para>
+       <para>
+        The <productname>PostgreSQL</productname> server will always send this
+        message, but some third party backend implementations of the protocol
+        that don't support query cancellation are known not to.
+       </para>
       </listitem>
      </varlistentry>
 
@@ -2550,8 +2555,8 @@ psql "dbname=postgres replication=database" -c "IDENTIFY_SYSTEM;"
       </para>
 
       <variablelist>
-       <varlistentry id="protocol-replication-xlogdata">
-        <term>XLogData (B)</term>
+       <varlistentry id="protocol-replication-waldata">
+        <term>WALData (B)</term>
         <listitem>
          <variablelist>
           <varlistentry>
@@ -2599,11 +2604,11 @@ psql "dbname=postgres replication=database" -c "IDENTIFY_SYSTEM;"
             </para>
 
             <para>
-             A single WAL record is never split across two XLogData messages.
+             A single WAL record is never split across two WALData messages.
              When a WAL record crosses a WAL page boundary, and is therefore
              already split using continuation records, it can be split at the page
              boundary. In other words, the first main WAL record and its
-             continuation records can be sent in different XLogData messages.
+             continuation records can be sent in different WALData messages.
             </para>
            </listitem>
           </varlistentry>

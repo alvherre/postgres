@@ -1484,11 +1484,6 @@ StartReadBuffersImpl(ReadBuffersOperation *operation,
  * buffers must remain valid until WaitReadBuffers() is called, and any
  * forwarded buffers must also be preserved for a continuing call unless
  * they are explicitly released.
- *
- * Currently the I/O is only started with optional operating system advice if
- * requested by the caller with READ_BUFFERS_ISSUE_ADVICE, and the real I/O
- * happens synchronously in WaitReadBuffers().  In future work, true I/O could
- * be initiated here.
  */
 bool
 StartReadBuffers(ReadBuffersOperation *operation,
@@ -2743,12 +2738,10 @@ ExtendBufferedRelShared(BufferManagerRelation bmr,
 		 * because mdread doesn't complain about reads beyond EOF (when
 		 * zero_damaged_pages is ON) and so a previous attempt to read a block
 		 * beyond EOF could have left a "valid" zero-filled buffer.
-		 * Unfortunately, we have also seen this case occurring because of
-		 * buggy Linux kernels that sometimes return an lseek(SEEK_END) result
-		 * that doesn't account for a recent write. In that situation, the
-		 * pre-existing buffer would contain valid data that we don't want to
-		 * overwrite.  Since the legitimate cases should always have left a
-		 * zero-filled buffer, complain if not PageIsNew.
+		 *
+		 * This has also been observed when relation was overwritten by
+		 * external process. Since the legitimate cases should always have
+		 * left a zero-filled buffer, complain if not PageIsNew.
 		 */
 		if (existing_id >= 0)
 		{
@@ -2778,8 +2771,7 @@ ExtendBufferedRelShared(BufferManagerRelation bmr,
 				ereport(ERROR,
 						(errmsg("unexpected data beyond EOF in block %u of relation %s",
 								existing_hdr->tag.blockNum,
-								relpath(bmr.smgr->smgr_rlocator, fork).str),
-						 errhint("This has been seen to occur with buggy kernels; consider updating your system.")));
+								relpath(bmr.smgr->smgr_rlocator, fork).str)));
 
 			/*
 			 * We *must* do smgr[zero]extend before succeeding, else the page
@@ -6373,8 +6365,8 @@ ckpt_buforder_comparator(const CkptSortItem *a, const CkptSortItem *b)
 static int
 ts_ckpt_progress_comparator(Datum a, Datum b, void *arg)
 {
-	CkptTsStatus *sa = (CkptTsStatus *) a;
-	CkptTsStatus *sb = (CkptTsStatus *) b;
+	CkptTsStatus *sa = (CkptTsStatus *) DatumGetPointer(a);
+	CkptTsStatus *sb = (CkptTsStatus *) DatumGetPointer(b);
 
 	/* we want a min-heap, so return 1 for the a < b */
 	if (sa->progress < sb->progress)

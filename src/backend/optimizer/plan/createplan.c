@@ -284,7 +284,10 @@ static Material *make_material(Plan *lefttree);
 static Memoize *make_memoize(Plan *lefttree, Oid *hashoperators,
 							 Oid *collations, List *param_exprs,
 							 bool singlerow, bool binary_mode,
-							 uint32 est_entries, Bitmapset *keyparamids);
+							 uint32 est_entries, Bitmapset *keyparamids,
+							 Cardinality est_calls,
+							 Cardinality est_unique_keys,
+							 double est_hit_ratio);
 static WindowAgg *make_windowagg(List *tlist, WindowClause *wc,
 								 int partNumCols, AttrNumber *partColIdx, Oid *partOperators, Oid *partCollations,
 								 int ordNumCols, AttrNumber *ordColIdx, Oid *ordOperators, Oid *ordCollations,
@@ -1753,7 +1756,8 @@ create_memoize_plan(PlannerInfo *root, MemoizePath *best_path, int flags)
 
 	plan = make_memoize(subplan, operators, collations, param_exprs,
 						best_path->singlerow, best_path->binary_mode,
-						best_path->est_entries, keyparamids);
+						best_path->est_entries, keyparamids, best_path->est_calls,
+						best_path->est_unique_keys, best_path->est_hit_ratio);
 
 	copy_generic_path_info(&plan->plan, (Path *) best_path);
 
@@ -6749,7 +6753,9 @@ materialize_finished_plan(Plan *subplan)
 static Memoize *
 make_memoize(Plan *lefttree, Oid *hashoperators, Oid *collations,
 			 List *param_exprs, bool singlerow, bool binary_mode,
-			 uint32 est_entries, Bitmapset *keyparamids)
+			 uint32 est_entries, Bitmapset *keyparamids,
+			 Cardinality est_calls, Cardinality est_unique_keys,
+			 double est_hit_ratio)
 {
 	Memoize    *node = makeNode(Memoize);
 	Plan	   *plan = &node->plan;
@@ -6767,6 +6773,9 @@ make_memoize(Plan *lefttree, Oid *hashoperators, Oid *collations,
 	node->binary_mode = binary_mode;
 	node->est_entries = est_entries;
 	node->keyparamids = keyparamids;
+	node->est_calls = est_calls;
+	node->est_unique_keys = est_unique_keys;
+	node->est_hit_ratio = est_hit_ratio;
 
 	return node;
 }
@@ -7224,6 +7233,8 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 	ModifyTable *node = makeNode(ModifyTable);
 	bool		returning_old_or_new = false;
 	bool		returning_old_or_new_valid = false;
+	bool		transition_tables = false;
+	bool		transition_tables_valid = false;
 	List	   *fdw_private_list;
 	Bitmapset  *direct_modify_plans;
 	ListCell   *lc;
@@ -7370,8 +7381,8 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 		 * callback functions needed for that and (2) there are no local
 		 * structures that need to be run for each modified row: row-level
 		 * triggers on the foreign table, stored generated columns, WITH CHECK
-		 * OPTIONs from parent views, or Vars returning OLD/NEW in the
-		 * RETURNING list.
+		 * OPTIONs from parent views, Vars returning OLD/NEW in the RETURNING
+		 * list, or transition tables on the named relation.
 		 */
 		direct_modify = false;
 		if (fdwroutine != NULL &&
@@ -7383,7 +7394,10 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 			!has_row_triggers(root, rti, operation) &&
 			!has_stored_generated_columns(root, rti))
 		{
-			/* returning_old_or_new is the same for all result relations */
+			/*
+			 * returning_old_or_new and transition_tables are the same for all
+			 * result relations, respectively
+			 */
 			if (!returning_old_or_new_valid)
 			{
 				returning_old_or_new =
@@ -7392,7 +7406,18 @@ make_modifytable(PlannerInfo *root, Plan *subplan,
 				returning_old_or_new_valid = true;
 			}
 			if (!returning_old_or_new)
-				direct_modify = fdwroutine->PlanDirectModify(root, node, rti, i);
+			{
+				if (!transition_tables_valid)
+				{
+					transition_tables = has_transition_tables(root,
+															  nominalRelation,
+															  operation);
+					transition_tables_valid = true;
+				}
+				if (!transition_tables)
+					direct_modify = fdwroutine->PlanDirectModify(root, node,
+																 rti, i);
+			}
 		}
 		if (direct_modify)
 			direct_modify_plans = bms_add_member(direct_modify_plans, i);
