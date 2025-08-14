@@ -240,16 +240,19 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		/* Start a new transaction for each relation. */
 		StartTransactionCommand();
 
-		/* functions in indexes may want a snapshot set */
-		PushActiveSnapshot(GetTransactionSnapshot());
-
 		/*
 		 * Open the target table, coping with the case where it has been
 		 * dropped.
 		 */
 		rel = try_table_open(rtc->tableOid, AccessExclusiveLock);
 		if (rel == NULL)
+		{
+			CommitTransactionCommand();
 			continue;
+		}
+
+		/* functions in indexes may want a snapshot set */
+		PushActiveSnapshot(GetTransactionSnapshot());
 
 		/* Process this table */
 		cluster_rel(stmt->command, stmt->usingindex,
