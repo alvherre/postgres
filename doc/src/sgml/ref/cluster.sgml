@@ -33,57 +33,12 @@ CLUSTER [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <r
   <title>Description</title>
 
   <para>
-   <command>CLUSTER</command> instructs <productname>PostgreSQL</productname>
-   to cluster the table specified
-   by <replaceable class="parameter">table_name</replaceable>
-   based on the index specified by
-   <replaceable class="parameter">index_name</replaceable>. The index must
-   already have been defined on
-   <replaceable class="parameter">table_name</replaceable>.
+   The <command>CLUSTER</command> command is equivalent to
+   <xref linkend="sql-repack"/> with an <literal>USING INDEX</literal>
+   clause.  See there for more details.
   </para>
 
-  <para>
-   When a table is clustered, <productname>PostgreSQL</productname>
-   remembers which index it was clustered by.  The form
-   <command>CLUSTER <replaceable class="parameter">table_name</replaceable></command>
-   reclusters the table using the same index as before.  You can also
-   use the <literal>CLUSTER</literal> or <literal>SET WITHOUT CLUSTER</literal>
-   forms of <link linkend="sql-altertable"><command>ALTER TABLE</command></link> to set the index to be used for
-   future cluster operations, or to clear any previous setting.
-  </para>
-
-  <para>
-   <command>CLUSTER</command> without a
-   <replaceable class="parameter">table_name</replaceable> reclusters all the
-   previously-clustered tables in the current database that the calling user
-   has privileges for.  This form of <command>CLUSTER</command> cannot be
-   executed inside a transaction block.
-  </para>
-
-  <para>
-   When a table is being clustered, an <literal>ACCESS
-   EXCLUSIVE</literal> lock is acquired on it. This prevents any other
-   database operations (both reads and writes) from operating on the
-   table until the <command>CLUSTER</command> is finished.
-  </para>
-
-  <warning>
-   <para>
-    The <command>CLUSTER</command> command is deprecated in favor of
-    <xref linkend="sql-repack"/>.
-   </para>
-  </warning>
-
-  <note>
-   <para>
-    <xref linkend="sql-repack-notes-on-clustering"/> explain how clustering
-    works, whether it is initiated by <command>CLUSTER</command> or
-    by <command>REPACK</command>. The notable difference between the two is
-    that <command>REPACK</command> does not remember the index used last
-    time. Thus if you don't specify an index, <command>REPACK</command>
-    rewrites the table but does not try to cluster it.
-   </para>
-  </note>
+<!-- Do we need to describe exactly which options map to what?  They seem obvious to me. -->
 
  </refsect1>
 
