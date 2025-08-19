@@ -3162,7 +3162,6 @@ UnicodeNormalizationForm
 UnicodeNormalizationQC
 Unique
 UniquePath
-UniquePathMethod
 UniqueRelInfo
 UniqueState
 UnlistenStmt
@@ -3178,7 +3177,6 @@ UpgradeTaskSlotState
 UpgradeTaskStep
 UploadManifestCmd
 UpperRelationKind
-UpperUniquePath
 UserAuth
 UserContext
 UserMapping
