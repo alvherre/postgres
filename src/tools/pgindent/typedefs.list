@@ -425,7 +425,6 @@ ClientCertName
 ClientConnectionInfo
 ClientData
 ClientSocket
-ClusterCommand
 ClonePtrType
 ClosePortalStmt
 ClosePtrType
@@ -2537,6 +2536,7 @@ ReorderBufferTupleCidKey
 ReorderBufferUpdateProgressTxnCB
 ReorderTuple
 RepOriginId
+RepackCommand
 RepackStmt
 ReparameterizeForeignPathByChild_function
 ReplaceVarsFromTargetList_context

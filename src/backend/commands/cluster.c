@@ -83,8 +83,8 @@ static bool cluster_is_permitted_for_relation(RepackCommand cmd,
 											  Oid relid, Oid userid);
 static Relation process_single_relation(RepackStmt *stmt,
 										ClusterParams *params);
-static Oid determine_clustered_index(Relation rel, bool usingindex,
-									 const char *indexname);
+static Oid	determine_clustered_index(Relation rel, bool usingindex,
+									  const char *indexname);
 
 
 static const char *
@@ -358,9 +358,9 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 			goto out;
 
 	/*
-	 * We allow repacking shared catalogs only when not using an index.
-	 * It would work to use an index in most respects, but the index would
-	 * only get marked as indisclustered in the current database, leading to
+	 * We allow repacking shared catalogs only when not using an index. It
+	 * would work to use an index in most respects, but the index would only
+	 * get marked as indisclustered in the current database, leading to
 	 * unexpected behavior if CLUSTER were later invoked in another database.
 	 */
 	if (usingindex && OldHeap->rd_rel->relisshared)
@@ -387,7 +387,7 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 		}
 		else
 		{
-			Assert (cmd == REPACK_COMMAND_VACUUMFULL);
+			Assert(cmd == REPACK_COMMAND_VACUUMFULL);
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot vacuum temporary tables of other sessions")));
@@ -1683,7 +1683,7 @@ get_tables_to_repack(RepackCommand command, bool usingindex,
 
 	if (usingindex)
 	{
-		ScanKeyData		entry;
+		ScanKeyData entry;
 
 		catalog = table_open(IndexRelationId, AccessShareLock);
 		ScanKeyInit(&entry,
@@ -1694,15 +1694,16 @@ get_tables_to_repack(RepackCommand command, bool usingindex,
 		while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
 		{
 			RelToCluster *rtc;
-			Form_pg_index	index;
+			Form_pg_index index;
 
 			index = (Form_pg_index) GETSTRUCT(tuple);
+
 			/*
 			 * XXX I think the only reason there's no test failure here is
-			 * that we seldom have clustered indexes that would be affected
-			 * by concurrency.  Maybe we should also do the
-			 * ConditionalLockRelationOid+SearchSysCacheExists dance that
-			 * we do below.
+			 * that we seldom have clustered indexes that would be affected by
+			 * concurrency.  Maybe we should also do the
+			 * ConditionalLockRelationOid+SearchSysCacheExists dance that we
+			 * do below.
 			 */
 			if (!cluster_is_permitted_for_relation(command, index->indrelid,
 												   GetUserId()))
@@ -1914,14 +1915,14 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 	}
 
 	/*
-	 * For partitioned tables, let caller handle this.  Otherwise, process
-	 * it here and we're done.
+	 * For partitioned tables, let caller handle this.  Otherwise, process it
+	 * here and we're done.
 	 */
 	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
 		return rel;
 	else
 	{
-		Oid		indexOid;
+		Oid			indexOid;
 
 		indexOid = determine_clustered_index(rel, stmt->usingindex,
 											 stmt->indexname);
@@ -1932,7 +1933,7 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 		/* Do an analyze, if requested */
 		if (params->options & CLUOPT_ANALYZE)
 		{
-			VacuumParams	vac_params = {0};
+			VacuumParams vac_params = {0};
 
 			vac_params.options |= VACOPT_ANALYZE;
 			if (params->options & CLUOPT_VERBOSE)
@@ -1956,11 +1957,11 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 static Oid
 determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 {
-	Oid		indexOid;
+	Oid			indexOid;
 
 	if (indexname == NULL && usingindex)
 	{
-		ListCell *lc;
+		ListCell   *lc;
 
 		/* Find an index with indisclustered set, or report error */
 		foreach(lc, RelationGetIndexList(rel))
@@ -1981,8 +1982,8 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 	else if (indexname != NULL)
 	{
 		/*
-		 * An index was specified; figure out its OID.  It must be in the
-		 * same namespace as the relation.
+		 * An index was specified; figure out its OID.  It must be in the same
+		 * namespace as the relation.
 		 */
 		indexOid = get_relname_relid(indexname,
 									 rel->rd_rel->relnamespace);
