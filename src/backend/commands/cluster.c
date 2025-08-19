@@ -130,7 +130,6 @@ void
 ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 {
 	ClusterParams params = {0};
-	bool		verbose = false;
 	Relation	rel = NULL;
 	MemoryContext repack_context;
 	List	   *rtcs;
@@ -139,7 +138,10 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	foreach_node(DefElem, opt, stmt->params)
 	{
 		if (strcmp(opt->defname, "verbose") == 0)
-			verbose = defGetBoolean(opt);
+			params.options |= defGetBoolean(opt) ? CLUOPT_VERBOSE : 0;
+		else if (strcmp(opt->defname, "analyze") == 0 ||
+				 strcmp(opt->defname, "analyse") == 0)
+			params.options |= defGetBoolean(opt) ? CLUOPT_ANALYZE : 0;
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_SYNTAX_ERROR),
@@ -148,8 +150,6 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 							opt->defname),
 					 parser_errposition(pstate, opt->location)));
 	}
-
-	params.options = (verbose ? CLUOPT_VERBOSE : 0);
 
 	/*
 	 * If a single relation is specified, process it and we're done ... unless
@@ -161,6 +161,12 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		if (rel == NULL)
 			return;
 	}
+
+	/* Don't allow this for now.  Maybe we can add support for this later */
+	if (params.options & CLUOPT_ANALYZE)
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot ANALYZE multiple tables"));
 
 	/*
 	 * By here, we know we are in a multi-table situation.  In order to avoid
@@ -1919,6 +1925,19 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 											 stmt->indexname);
 		check_index_is_clusterable(rel, indexOid, AccessExclusiveLock);
 		cluster_rel(stmt->command, stmt->usingindex, rel, indexOid, params);
+
+		/* Do an analyze, if requested */
+		if (params->options & CLUOPT_ANALYZE)
+		{
+			VacuumParams	vac_params = {0};
+
+			vac_params.options |= VACOPT_ANALYZE;
+			if (params->options & CLUOPT_VERBOSE)
+				vac_params.options |= VACOPT_VERBOSE;
+			analyze_rel(RelationGetRelid(rel), NULL, vac_params, NIL, true,
+						NULL);
+		}
+
 		return NULL;
 	}
 }

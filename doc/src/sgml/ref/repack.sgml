@@ -26,6 +26,7 @@ REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
 <phrase>where <replaceable class="parameter">option</replaceable> can be one of:</phrase>
 
     VERBOSE [ <replaceable class="parameter">boolean</replaceable> ]
+    ANALYSE | ANALYZE
 </synopsis>
  </refsynopsisdiv>
 
@@ -184,6 +185,17 @@ REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
      <para>
       Prints a progress report as each table is repacked
       at <literal>INFO</literal> level.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><literal>ANALYZE</literal></term>
+    <term><literal>ANALYSE</literal></term>
+    <listitem>
+     <para>
+      Applies <xref linkend="sql-analyze"/> on the table after repacking.  This is
+      only supported when a single (non-partitioned) table is specified.
      </para>
     </listitem>
    </varlistentry>

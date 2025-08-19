@@ -24,6 +24,7 @@
 #define CLUOPT_RECHECK 0x02		/* recheck relation state */
 #define CLUOPT_RECHECK_ISCLUSTERED 0x04 /* recheck relation state for
 										 * indisclustered */
+#define CLUOPT_ANALYZE 0x08		/* do an ANALYZE */
 
 /* options for CLUSTER */
 typedef struct ClusterParams
