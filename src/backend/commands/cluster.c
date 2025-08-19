@@ -217,7 +217,9 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 							   RelationGetRelationName(rel)));
 
 			relid = determine_clustered_index(rel, true, stmt->indexname);
-			/* XXX is this the right place for this? */
+			if (!OidIsValid(relid))
+				elog(ERROR, "unable to determine index to cluster on");
+			/* XXX is this the right place for this check? */
 			check_index_is_clusterable(rel, relid, AccessExclusiveLock);
 			rel_is_index = true;
 		}
@@ -1923,7 +1925,8 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 
 		indexOid = determine_clustered_index(rel, stmt->usingindex,
 											 stmt->indexname);
-		check_index_is_clusterable(rel, indexOid, AccessExclusiveLock);
+		if (OidIsValid(indexOid))
+			check_index_is_clusterable(rel, indexOid, AccessExclusiveLock);
 		cluster_rel(stmt->command, stmt->usingindex, rel, indexOid, params);
 
 		/* Do an analyze, if requested */
@@ -1978,7 +1981,7 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 	else if (indexname != NULL)
 	{
 		/*
-		 * An index was specified; figure out its name.  It must be in the
+		 * An index was specified; figure out its OID.  It must be in the
 		 * same namespace as the relation.
 		 */
 		indexOid = get_relname_relid(indexname,
