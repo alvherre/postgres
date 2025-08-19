@@ -21,7 +21,7 @@ PostgreSQL documentation
 
  <refsynopsisdiv>
 <synopsis>
-REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <replaceable class="parameter">table_name</replaceable> [ USING INDEX <replaceable class="parameter">index_name</replaceable> ] ]
+REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <replaceable class="parameter">table_name</replaceable> [ USING INDEX [ <replaceable class="parameter">index_name</replaceable> ] ] ]
 
 <phrase>where <replaceable class="parameter">option</replaceable> can be one of:</phrase>
 
@@ -52,9 +52,9 @@ REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
   </para>
 
   <para>
-   If <replaceable class="parameter">index_name</replaceable> is specified,
-   the table is clustered by this index. Please see the notes on clustering
-   below.
+   If a <literal>USING INDEX</literal> clause is specified, the rows are
+   physically reordered based on information from an index.  Please see the
+   notes on clustering below.
   </para>
 
   <para>
@@ -68,8 +68,26 @@ REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
    <title>Notes on Clustering</title>
 
    <para>
-    When a table is clustered, it is physically reordered based on the index
-    information.  Clustering is a one-time operation: when the table is
+    If the <literal>USING INDEX</literal> clause is specified, the rows in
+    the table are physically reordered following an index: if an index name
+    is specified in the command, then that index is used; if no index name
+    is specified, then the index that has been configured as the index to
+    cluster on.  If no index has been configured in this way, an error is
+    thrown.  The index given in the <literal>USING INDEX</literal> clause
+    is configured as the index to cluster on, as well as an index given
+    to the <command>CLUSTER</command> command.  An index can be set
+    manually using <command>ALTER TABLE ... CLUSTER ON</command>, and reset
+    with <command>ALTER TABLE ... SET WITHOUT CLUSTER</command>.
+   </para>
+
+   <para>
+    If no table name is specified in <command>REPACK USING INDEX</command>,
+    all tables which have a clustering index defined and which the calling
+    user has privileges for are processed.
+   </para>
+
+   <para>
+    Clustering is a one-time operation: when the table is
     subsequently updated, the changes are not clustered.  That is, no attempt
     is made to store new or updated rows according to their index order.  (If
     one wishes, one can periodically recluster by issuing the command again.
@@ -83,7 +101,7 @@ REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
     In cases where you are accessing single rows randomly within a table, the
     actual order of the data in the table is unimportant. However, if you tend
     to access some data more than others, and there is an index that groups
-    them together, you will benefit from using <command>REPACK</command>.  If
+    them together, you will benefit from using clustering.  If
     you are requesting a range of indexed values from a table, or a single
     indexed value that has multiple rows that match,
     <command>REPACK</command> will help because once the index identifies the
