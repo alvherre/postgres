@@ -181,9 +181,11 @@ static struct option long_options_vacuum[] = {
 	{"missing-stats-only", no_argument, NULL, 14}
 };
 
+#if 0
 /* TODO Remove if there are eventually no specific options. */
 static struct option long_options_repack[] = {
 };
+#endif
 
 /*
  * Construct the options array. The result depends on whether we're doing
