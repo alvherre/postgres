@@ -485,6 +485,8 @@ CompressFileHandle
 CompressionLocation
 CompressorState
 ComputeXidHorizonsResult
+ConcurrentChange
+ConcurrentChangeKind
 ConditionVariable
 ConditionVariableMinimallyPadded
 ConditionalStack
@@ -1257,6 +1259,7 @@ IndexElem
 IndexFetchHeapData
 IndexFetchTableData
 IndexInfo
+IndexInsertState
 IndexList
 IndexOnlyScan
 IndexOnlyScanState
@@ -2538,6 +2541,7 @@ ReorderBufferUpdateProgressTxnCB
 ReorderTuple
 RepOriginId
 RepackCommand
+RepackDecodingState
 RepackStmt
 ReparameterizeForeignPathByChild_function
 ReplaceVarsFromTargetList_context

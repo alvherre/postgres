@@ -33,6 +33,7 @@
 #include "access/xlogreader.h"
 #include "access/xlogrecord.h"
 #include "catalog/pg_control.h"
+#include "commands/cluster.h"
 #include "replication/decode.h"
 #include "replication/logical.h"
 #include "replication/message.h"
@@ -471,6 +472,88 @@ heap_decode(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
 	uint8		info = XLogRecGetInfo(buf->record) & XLOG_HEAP_OPMASK;
 	TransactionId xid = XLogRecGetXid(buf->record);
 	SnapBuild  *builder = ctx->snapshot_builder;
+
+	/*
+	 * If the change is not intended for logical decoding, do not even
+	 * establish transaction for it - REPACK CONCURRENTLY is the typical use
+	 * case.
+	 *
+	 * First, check if REPACK CONCURRENTLY is being performed by this backend.
+	 * If so, only decode data changes of the table that it is processing, and
+	 * the changes of its TOAST relation.
+	 *
+	 * (TOAST locator should not be set unless the main is.)
+	 */
+	Assert(!OidIsValid(repacked_rel_toast_locator.relNumber) ||
+		   OidIsValid(repacked_rel_locator.relNumber));
+
+	if (OidIsValid(repacked_rel_locator.relNumber))
+	{
+		XLogReaderState *r = buf->record;
+		RelFileLocator locator;
+
+		/* Not all records contain the block. */
+		if (XLogRecGetBlockTagExtended(r, 0, &locator, NULL, NULL, NULL) &&
+			!RelFileLocatorEquals(locator, repacked_rel_locator) &&
+			(!OidIsValid(repacked_rel_toast_locator.relNumber) ||
+			 !RelFileLocatorEquals(locator, repacked_rel_toast_locator)))
+			return;
+	}
+
+	/*
+	 * Second, skip records which do not contain sufficient information for
+	 * the decoding.
+	 *
+	 * The problem we solve here is that REPACK CONCURRENTLY generates WAL
+	 * when doing changes in the new table. Those changes should not be useful
+	 * for any other user (such as logical replication subscription) because
+	 * the new table will eventually be dropped (after REPACK CONCURRENTLY has
+	 * assigned its file to the "old table").
+	 */
+	switch (info)
+	{
+		case XLOG_HEAP_INSERT:
+			{
+				xl_heap_insert *rec;
+
+				rec = (xl_heap_insert *) XLogRecGetData(buf->record);
+
+				/*
+				 * This does happen when 1) raw_heap_insert marks the TOAST
+				 * record as HEAP_INSERT_NO_LOGICAL, 2) REPACK CONCURRENTLY
+				 * replays inserts performed by other backends.
+				 */
+				if ((rec->flags & XLH_INSERT_CONTAINS_NEW_TUPLE) == 0)
+					return;
+
+				break;
+			}
+
+		case XLOG_HEAP_HOT_UPDATE:
+		case XLOG_HEAP_UPDATE:
+			{
+				xl_heap_update *rec;
+
+				rec = (xl_heap_update *) XLogRecGetData(buf->record);
+				if ((rec->flags &
+					 (XLH_UPDATE_CONTAINS_NEW_TUPLE |
+					  XLH_UPDATE_CONTAINS_OLD_TUPLE |
+					  XLH_UPDATE_CONTAINS_OLD_KEY)) == 0)
+					return;
+
+				break;
+			}
+
+		case XLOG_HEAP_DELETE:
+			{
+				xl_heap_delete *rec;
+
+				rec = (xl_heap_delete *) XLogRecGetData(buf->record);
+				if (rec->flags & XLH_DELETE_NO_LOGICAL)
+					return;
+				break;
+			}
+	}
 
 	ReorderBufferProcessXid(ctx->reorder, xid, buf->origptr);
 

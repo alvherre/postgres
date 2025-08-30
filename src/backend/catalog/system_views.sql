@@ -1266,16 +1266,17 @@ CREATE VIEW pg_stat_progress_cluster AS
                       WHEN 2 THEN 'index scanning heap'
                       WHEN 3 THEN 'sorting tuples'
                       WHEN 4 THEN 'writing new heap'
-                      WHEN 5 THEN 'swapping relation files'
-                      WHEN 6 THEN 'rebuilding index'
-                      WHEN 7 THEN 'performing final cleanup'
+                      -- 5 is 'catch-up', but that should not appear here.
+                      WHEN 6 THEN 'swapping relation files'
+                      WHEN 7 THEN 'rebuilding index'
+                      WHEN 8 THEN 'performing final cleanup'
                       END AS phase,
         CAST(S.param3 AS oid) AS cluster_index_relid,
         S.param4 AS heap_tuples_scanned,
         S.param5 AS heap_tuples_written,
-        S.param6 AS heap_blks_total,
-        S.param7 AS heap_blks_scanned,
-        S.param8 AS index_rebuild_count
+        S.param8 AS heap_blks_total,
+        S.param9 AS heap_blks_scanned,
+        S.param10 AS index_rebuild_count
     FROM pg_stat_get_progress_info('CLUSTER') AS S
         LEFT JOIN pg_database D ON S.datid = D.oid;
 
@@ -1291,16 +1292,19 @@ CREATE VIEW pg_stat_progress_repack AS
                       WHEN 2 THEN 'index scanning heap'
                       WHEN 3 THEN 'sorting tuples'
                       WHEN 4 THEN 'writing new heap'
-                      WHEN 5 THEN 'swapping relation files'
-                      WHEN 6 THEN 'rebuilding index'
-                      WHEN 7 THEN 'performing final cleanup'
+                      WHEN 5 THEN 'catch-up'
+                      WHEN 6 THEN 'swapping relation files'
+                      WHEN 7 THEN 'rebuilding index'
+                      WHEN 8 THEN 'performing final cleanup'
                       END AS phase,
         CAST(S.param3 AS oid) AS repack_index_relid,
         S.param4 AS heap_tuples_scanned,
-        S.param5 AS heap_tuples_written,
-        S.param6 AS heap_blks_total,
-        S.param7 AS heap_blks_scanned,
-        S.param8 AS index_rebuild_count
+        S.param5 AS heap_tuples_inserted,
+        S.param6 AS heap_tuples_updated,
+        S.param7 AS heap_tuples_deleted,
+        S.param8 AS heap_blks_total,
+        S.param9 AS heap_blks_scanned,
+        S.param10 AS index_rebuild_count
     FROM pg_stat_get_progress_info('REPACK') AS S
         LEFT JOIN pg_database D ON S.datid = D.oid;
 
