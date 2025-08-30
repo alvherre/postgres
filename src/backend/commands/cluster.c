@@ -83,6 +83,11 @@ typedef struct
  */
 
 /*
+ * OID of the table being repacked by this backend.
+ */
+static Oid	repacked_rel = InvalidOid;
+
+/*
  * The locators are used to avoid logical decoding of data that we do not need
  * for our table.
  */
@@ -125,8 +130,10 @@ static List *get_tables_to_repack_partitioned(RepackCommand cmd,
 static bool cluster_is_permitted_for_relation(RepackCommand cmd,
 											  Oid relid, Oid userid);
 
-static void begin_concurrent_repack(Relation rel);
-static void end_concurrent_repack(void);
+static void begin_concurrent_repack(Relation rel, Relation *index_p,
+									bool *entered_p);
+static void end_concurrent_repack(bool error);
+static void cluster_before_shmem_exit_callback(int code, Datum arg);
 static LogicalDecodingContext *setup_logical_decoding(Oid relid,
 													  const char *slotname,
 													  TupleDesc tupdesc);
@@ -146,6 +153,7 @@ static void apply_concurrent_delete(Relation rel, HeapTuple tup_target,
 									ConcurrentChange *change);
 static HeapTuple find_target_tuple(Relation rel, ScanKey key, int nkeys,
 								   HeapTuple tup_key,
+								   Snapshot snapshot,
 								   IndexInsertState *iistate,
 								   TupleTableSlot *ident_slot,
 								   IndexScanDesc *scan_p);
@@ -450,6 +458,8 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	bool		verbose = ((params->options & CLUOPT_VERBOSE) != 0);
 	bool		recheck = ((params->options & CLUOPT_RECHECK) != 0);
 	bool		concurrent = ((params->options & CLUOPT_CONCURRENT) != 0);
+	bool		entered,
+				success;
 
 	/*
 	 * Check that the correct lock is held. The lock mode is
@@ -620,23 +630,30 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 		TransferPredicateLocksToHeapRelation(OldHeap);
 
 	/* rebuild_relation does all the dirty work */
+	entered = false;
+	success = false;
 	PG_TRY();
 	{
 		/*
-		 * For concurrent processing, make sure that our logical decoding
-		 * ignores data changes of other tables than the one we are
-		 * processing.
+		 * For concurrent processing, make sure that
+		 *
+		 * 1) our logical decoding ignores data changes of other tables than
+		 * the one we are processing.
+		 *
+		 * 2) other transactions treat this table as if it was a system / user
+		 * catalog, and WAL the relevant additional information.
 		 */
 		if (concurrent)
-			begin_concurrent_repack(OldHeap);
+			begin_concurrent_repack(OldHeap, &index, &entered);
 
 		rebuild_relation(cmd, usingindex, OldHeap, index, save_userid,
 						 verbose, concurrent);
+		success = true;
 	}
 	PG_FINALLY();
 	{
-		if (concurrent)
-			end_concurrent_repack();
+		if (concurrent && entered)
+			end_concurrent_repack(!success);
 	}
 	PG_END_TRY();
 
@@ -2397,6 +2414,47 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 
 
 /*
+ * Each relation being processed by REPACK CONCURRENTLY must be in the
+ * repackedRels hashtable.
+ */
+typedef struct RepackedRel
+{
+	Oid			relid;
+	Oid			dbid;
+} RepackedRel;
+
+static HTAB *RepackedRelsHash = NULL;
+
+/*
+ * Maximum number of entries in the hashtable.
+ *
+ * A replication slot is needed for the processing, so use this GUC to
+ * allocate memory for the hashtable.
+ */
+#define	MAX_REPACKED_RELS	(max_replication_slots)
+
+Size
+RepackShmemSize(void)
+{
+	return hash_estimate_size(MAX_REPACKED_RELS, sizeof(RepackedRel));
+}
+
+void
+RepackShmemInit(void)
+{
+	HASHCTL		info;
+
+	info.keysize = sizeof(RepackedRel);
+	info.entrysize = info.keysize;
+
+	RepackedRelsHash = ShmemInitHash("Repacked Relations",
+									 MAX_REPACKED_RELS,
+									 MAX_REPACKED_RELS,
+									 &info,
+									 HASH_ELEM | HASH_BLOBS);
+}
+
+/*
  * Call this function before REPACK CONCURRENTLY starts to setup logical
  * decoding. It makes sure that other users of the table put enough
  * information into WAL.
@@ -2410,11 +2468,119 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
  *
  * Note that TOAST table needs no attention here as it's not scanned using
  * historic snapshot.
+ *
+ * 'index_p' is in/out argument because the function unlocks the index
+ * temporarily.
+ *
+ * 'enter_p' receives a bool value telling whether relation OID was entered
+ * into RepackedRelsHash or not.
  */
 static void
-begin_concurrent_repack(Relation rel)
+begin_concurrent_repack(Relation rel, Relation *index_p, bool *entered_p)
 {
-	Oid			toastrelid;
+	Oid			relid,
+				toastrelid;
+	Relation	index = NULL;
+	Oid			indexid = InvalidOid;
+	RepackedRel key,
+			   *entry;
+	bool		found;
+	static bool before_shmem_exit_callback_setup = false;
+
+	relid = RelationGetRelid(rel);
+	index = index_p ? *index_p : NULL;
+
+	/*
+	 * Make sure that we do not leave an entry in RepackedRelsHash if exiting
+	 * due to FATAL.
+	 */
+	if (!before_shmem_exit_callback_setup)
+	{
+		before_shmem_exit(cluster_before_shmem_exit_callback, 0);
+		before_shmem_exit_callback_setup = true;
+	}
+
+	memset(&key, 0, sizeof(key));
+	key.relid = relid;
+	key.dbid = MyDatabaseId;
+
+	*entered_p = false;
+	LWLockAcquire(RepackedRelsLock, LW_EXCLUSIVE);
+	entry = (RepackedRel *)
+		hash_search(RepackedRelsHash, &key, HASH_ENTER_NULL, &found);
+	if (found)
+	{
+		/*
+		 * Since REPACK CONCURRENTLY takes ShareRowExclusiveLock, a conflict
+		 * should occur much earlier. However that lock may be released
+		 * temporarily, see below.  Anyway, we should complain whatever the
+		 * reason of the conflict might be.
+		 */
+		ereport(ERROR,
+				(errmsg("relation \"%s\" is already being processed by REPACK CONCURRENTLY",
+						RelationGetRelationName(rel))));
+	}
+	if (entry == NULL)
+		ereport(ERROR,
+				(errmsg("too many requests for REPACK CONCURRENTLY at a time")),
+				(errhint("Please consider increasing the \"max_replication_slots\" configuration parameter.")));
+
+	/*
+	 * Even if anything fails below, the caller has to do cleanup in the
+	 * shared memory.
+	 */
+	*entered_p = true;
+
+	/*
+	 * Enable the callback to remove the entry in case of exit. We should not
+	 * do this earlier, otherwise an attempt to insert already existing entry
+	 * could make us remove that entry (inserted by another backend) during
+	 * ERROR handling.
+	 */
+	Assert(!OidIsValid(repacked_rel));
+	repacked_rel = relid;
+
+	LWLockRelease(RepackedRelsLock);
+
+	/*
+	 * Make sure that other backends are aware of the new hash entry as soon
+	 * as they open our table.
+	 */
+	CacheInvalidateRelcacheImmediate(relid);
+
+	/*
+	 * Also make sure that the existing users of the table update their
+	 * relcache entry as soon as they try to run DML commands on it.
+	 *
+	 * ShareLock is the weakest lock that conflicts with DMLs. If any backend
+	 * has a lower lock, we assume it'll accept our invalidation message when
+	 * it changes the lock mode.
+	 *
+	 * Before upgrading the lock on the relation, close the index temporarily
+	 * to avoid a deadlock if another backend running DML already has its lock
+	 * (ShareLock) on the table and waits for the lock on the index.
+	 */
+	if (index)
+	{
+		indexid = RelationGetRelid(index);
+		index_close(index, ShareUpdateExclusiveLock);
+	}
+	LockRelationOid(relid, ShareLock);
+	UnlockRelationOid(relid, ShareLock);
+	if (OidIsValid(indexid))
+	{
+		/*
+		 * Re-open the index and check that it hasn't changed while unlocked.
+		 */
+		check_index_is_clusterable(rel, indexid, ShareUpdateExclusiveLock);
+
+		/*
+		 * Return the new relcache entry to the caller. (It's been locked by
+		 * the call above.)
+		 */
+		index = index_open(indexid, NoLock);
+		*index_p = index;
+	}
 
 	/* Avoid logical decoding of other relations by this backend. */
 	repacked_rel_locator = rel->rd_locator;
@@ -2432,15 +2598,122 @@ begin_concurrent_repack(Relation rel)
 
 /*
  * Call this when done with REPACK CONCURRENTLY.
+ *
+ * 'error' tells whether the function is being called in order to handle
+ * error.
  */
 static void
-end_concurrent_repack(void)
+end_concurrent_repack(bool error)
 {
+	RepackedRel key;
+	RepackedRel *entry = NULL;
+	Oid			relid = repacked_rel;
+
+	/* Remove the relation from the hash if we managed to insert one. */
+	if (OidIsValid(repacked_rel))
+	{
+		memset(&key, 0, sizeof(key));
+		key.relid = repacked_rel;
+		key.dbid = MyDatabaseId;
+		LWLockAcquire(RepackedRelsLock, LW_EXCLUSIVE);
+		entry = hash_search(RepackedRelsHash, &key, HASH_REMOVE, NULL);
+		LWLockRelease(RepackedRelsLock);
+
+		/*
+		 * Make others refresh their information whether they should still
+		 * treat the table as catalog from the perspective of writing WAL.
+		 *
+		 * XXX Unlike entering the entry into the hashtable, we do not bother
+		 * with locking and unlocking the table here:
+		 *
+		 * 1) On normal completion (and sometimes even on ERROR), the caller
+		 * is already holding AccessExclusiveLock on the table, so there
+		 * should be no relcache reference unaware of this change.
+		 *
+		 * 2) In the other cases, the worst scenario is that the other
+		 * backends will write unnecessary information to WAL until they close
+		 * the relation.
+		 *
+		 * Should we use ShareLock mode to fix 2) at least for the non-FATAL
+		 * errors? (Our before_shmem_exit callback is in charge of FATAL, and
+		 * that probably should not try to acquire any lock.)
+		 */
+		CacheInvalidateRelcacheImmediate(repacked_rel);
+
+		/*
+		 * By clearing this variable we also disable
+		 * cluster_before_shmem_exit_callback().
+		 */
+		repacked_rel = InvalidOid;
+	}
+
 	/*
 	 * Restore normal function of (future) logical decoding for this backend.
 	 */
 	repacked_rel_locator.relNumber = InvalidOid;
 	repacked_rel_toast_locator.relNumber = InvalidOid;
+
+	/*
+	 * On normal completion (!error), we should not really fail to remove the
+	 * entry. But if it wasn't there for any reason, raise ERROR to make sure
+	 * the transaction is aborted: if other transactions, while changing the
+	 * contents of the relation, didn't know that REPACK CONCURRENTLY was in
+	 * progress, they could have missed to WAL enough information, and thus we
+	 * could have produced an inconsistent table contents.
+	 *
+	 * On the other hand, if we are already handling an error, there's no
+	 * reason to worry about inconsistent contents of the new storage because
+	 * the transaction is going to be rolled back anyway. Furthermore, by
+	 * raising ERROR here we'd shadow the original error.
+	 */
+	if (!error)
+	{
+		char	   *relname;
+
+		if (OidIsValid(relid) && entry == NULL)
+		{
+			relname = get_rel_name(relid);
+			if (!relname)
+				ereport(ERROR,
+						(errmsg("cache lookup failed for relation %u",
+								relid)));
+
+			ereport(ERROR,
+					(errmsg("relation \"%s\" not found among repacked relations",
+							relname)));
+		}
+	}
+}
+
+/*
+ * A wrapper to call end_concurrent_repack() as a before_shmem_exit callback.
+ */
+static void
+cluster_before_shmem_exit_callback(int code, Datum arg)
+{
+	if (OidIsValid(repacked_rel))
+		end_concurrent_repack(true);
+}
+
+/*
+ * Check if relation is currently being processed by REPACK CONCURRENTLY.
+ */
+bool
+is_concurrent_repack_in_progress(Oid relid)
+{
+	RepackedRel key,
+			   *entry;
+
+	memset(&key, 0, sizeof(key));
+	key.relid = relid;
+	key.dbid = MyDatabaseId;
+
+	LWLockAcquire(RepackedRelsLock, LW_SHARED);
+	entry = (RepackedRel *)
+		hash_search(RepackedRelsHash, &key, HASH_FIND, NULL);
+	LWLockRelease(RepackedRelsLock);
+
+	return entry != NULL;
 }
 
 /*
@@ -2502,6 +2775,9 @@ setup_logical_decoding(Oid relid, const char *slotname, TupleDesc tupdesc)
 	dstate->relid = relid;
 	dstate->tstore = tuplestore_begin_heap(false, false,
 										   maintenance_work_mem);
+#ifdef USE_ASSERT_CHECKING
+	dstate->last_change_xid = InvalidTransactionId;
+#endif
 
 	dstate->tupdesc = tupdesc;
 
@@ -2649,6 +2925,7 @@ apply_concurrent_changes(RepackDecodingState *dstate, Relation rel,
 		char	   *change_raw,
 				   *src;
 		ConcurrentChange change;
+		Snapshot	snapshot;
 		bool		isnull[1];
 		Datum		values[1];
 
@@ -2717,8 +2994,30 @@ apply_concurrent_changes(RepackDecodingState *dstate, Relation rel,
 
 			/*
 			 * Find the tuple to be updated or deleted.
+			 *
+			 * As the table being REPACKed concurrently is treated like a
+			 * catalog, new CID is WAL-logged and decoded. And since we use
+			 * the same XID that the original DMLs did, the snapshot used for
+			 * the logical decoding (by now converted to a non-historic MVCC
+			 * snapshot) should see the tuples inserted previously into the
+			 * new heap and/or updated there.
 			 */
-			tup_exist = find_target_tuple(rel, key, nkeys, tup_key,
+			snapshot = change.snapshot;
+
+			/*
+			 * Set what should be considered current transaction (and
+			 * subtransactions) during visibility check.
+			 *
+			 * Note that this snapshot was created from a historic snapshot
+			 * using SnapBuildMVCCFromHistoric(), which does not touch
+			 * 'subxip'. Thus, unlike in a regular MVCC snapshot, the array
+			 * only contains the transactions whose data changes we are
+			 * applying, and its subtransactions. That's exactly what we need
+			 * to check if particular xact is a "current transaction:".
+			 */
+			SetRepackCurrentXids(snapshot->subxip, snapshot->subxcnt);
+
+			tup_exist = find_target_tuple(rel, key, nkeys, tup_key, snapshot,
 										  iistate, ident_slot, &ind_scan);
 			if (tup_exist == NULL)
 				elog(ERROR, "Failed to find target tuple");
@@ -2728,6 +3027,8 @@ apply_concurrent_changes(RepackDecodingState *dstate, Relation rel,
 										index_slot);
 			else
 				apply_concurrent_delete(rel, tup_exist, &change);
+
+			ResetRepackCurrentXids();
 
 			if (tup_old != NULL)
 			{
@@ -2741,14 +3042,14 @@ apply_concurrent_changes(RepackDecodingState *dstate, Relation rel,
 		else
 			elog(ERROR, "Unrecognized kind of change: %d", change.kind);
 
-		/*
-		 * If a change was applied now, increment CID for next writes and
-		 * update the snapshot so it sees the changes we've applied so far.
-		 */
-		if (change.kind != CHANGE_UPDATE_OLD)
+		/* Free the snapshot if this is the last change that needed it. */
+		Assert(change.snapshot->active_count > 0);
+		change.snapshot->active_count--;
+		if (change.snapshot->active_count == 0)
 		{
-			CommandCounterIncrement();
-			UpdateActiveSnapshotCommandId();
+			if (change.snapshot == dstate->snapshot)
+				dstate->snapshot = NULL;
+			FreeSnapshot(change.snapshot);
 		}
 
 		/* TTSOpsMinimalTuple has .get_heap_tuple==NULL. */
@@ -2768,16 +3069,35 @@ static void
 apply_concurrent_insert(Relation rel, ConcurrentChange *change, HeapTuple tup,
 						IndexInsertState *iistate, TupleTableSlot *index_slot)
 {
+	Snapshot	snapshot = change->snapshot;
 	List	   *recheck;
 
+	/*
+	 * For INSERT, the visibility information is not important, but we use the
+	 * snapshot to get CID. Index functions might need the whole snapshot
+	 * anyway.
+	 */
+	SetRepackCurrentXids(snapshot->subxip, snapshot->subxcnt);
+
+	/*
+	 * Write the tuple into the new heap.
+	 *
+	 * The snapshot is the one we used to decode the insert (though converted
+	 * to "non-historic" MVCC snapshot), i.e. the snapshot's curcid is the
+	 * tuple CID incremented by one (due to the "new CID" WAL record that got
+	 * written along with the INSERT record). Thus if we want to use the
+	 * original CID, we need to subtract 1 from curcid.
+	 */
+	Assert(snapshot->curcid != InvalidCommandId &&
+		   snapshot->curcid > FirstCommandId);
 
 	/*
 	 * Like simple_heap_insert(), but make sure that the INSERT is not
 	 * logically decoded - see reform_and_rewrite_tuple() for more
 	 * information.
 	 */
-	heap_insert(rel, tup, GetCurrentCommandId(true), HEAP_INSERT_NO_LOGICAL,
-				NULL);
+	heap_insert(rel, tup, change->xid, snapshot->curcid - 1,
+				HEAP_INSERT_NO_LOGICAL, NULL);
 
 	/*
 	 * Update indexes.
@@ -2785,6 +3105,7 @@ apply_concurrent_insert(Relation rel, ConcurrentChange *change, HeapTuple tup,
 	 * In case functions in the index need the active snapshot and caller
 	 * hasn't set one.
 	 */
+	PushActiveSnapshot(snapshot);
 	ExecStoreHeapTuple(tup, index_slot, false);
 	recheck = ExecInsertIndexTuples(iistate->rri,
 									index_slot,
@@ -2795,6 +3116,8 @@ apply_concurrent_insert(Relation rel, ConcurrentChange *change, HeapTuple tup,
 									NIL,	/* arbiterIndexes */
 									false	/* onlySummarizing */
 		);
+	PopActiveSnapshot();
+	ResetRepackCurrentXids();
 
 	/*
 	 * If recheck is required, it must have been preformed on the source
@@ -2816,6 +3139,7 @@ apply_concurrent_update(Relation rel, HeapTuple tup, HeapTuple tup_target,
 	TU_UpdateIndexes update_indexes;
 	TM_Result	res;
 	List	   *recheck;
+	Snapshot	snapshot = change->snapshot;
 
 	/*
 	 * Write the new tuple into the new heap. ('tup' gets the TID assigned
@@ -2823,13 +3147,19 @@ apply_concurrent_update(Relation rel, HeapTuple tup, HeapTuple tup_target,
 	 *
 	 * Do it like in simple_heap_update(), except for 'wal_logical' (and
 	 * except for 'wait').
+	 *
+	 * Regarding CID, see the comment in apply_concurrent_insert().
 	 */
+	Assert(snapshot->curcid != InvalidCommandId &&
+		   snapshot->curcid > FirstCommandId);
+
 	res = heap_update(rel, &tup_target->t_self, tup,
-					  GetCurrentCommandId(true),
+					  change->xid, snapshot->curcid - 1,
 					  InvalidSnapshot,
 					  false,	/* no wait - only we are doing changes */
 					  &tmfd, &lockmode, &update_indexes,
-					  false /* wal_logical */ );
+	/* wal_logical */
+					  false);
 	if (res != TM_Ok)
 		ereport(ERROR, (errmsg("failed to apply concurrent UPDATE")));
 
@@ -2837,6 +3167,7 @@ apply_concurrent_update(Relation rel, HeapTuple tup, HeapTuple tup_target,
 
 	if (update_indexes != TU_None)
 	{
+		PushActiveSnapshot(snapshot);
 		recheck = ExecInsertIndexTuples(iistate->rri,
 										index_slot,
 										iistate->estate,
@@ -2846,6 +3177,7 @@ apply_concurrent_update(Relation rel, HeapTuple tup, HeapTuple tup_target,
 										NIL,	/* arbiterIndexes */
 		/* onlySummarizing */
 										update_indexes == TU_Summarizing);
+		PopActiveSnapshot();
 		list_free(recheck);
 	}
 
@@ -2858,6 +3190,12 @@ apply_concurrent_delete(Relation rel, HeapTuple tup_target,
 {
 	TM_Result	res;
 	TM_FailureData tmfd;
+	Snapshot	snapshot = change->snapshot;
+
+
+	/* Regarding CID, see the comment in apply_concurrent_insert(). */
+	Assert(snapshot->curcid != InvalidCommandId &&
+		   snapshot->curcid > FirstCommandId);
 
 	/*
 	 * Delete tuple from the new heap.
@@ -2865,11 +3203,11 @@ apply_concurrent_delete(Relation rel, HeapTuple tup_target,
 	 * Do it like in simple_heap_delete(), except for 'wal_logical' (and
 	 * except for 'wait').
 	 */
-	res = heap_delete(rel, &tup_target->t_self, GetCurrentCommandId(true),
-					  InvalidSnapshot, false,
-					  &tmfd,
-					  false,	/* no wait - only we are doing changes */
-					  false /* wal_logical */ );
+	res = heap_delete(rel, &tup_target->t_self, change->xid,
+					  snapshot->curcid - 1, InvalidSnapshot, false,
+					  &tmfd, false,
+	/* wal_logical */
+					  false);
 
 	if (res != TM_Ok)
 		ereport(ERROR, (errmsg("failed to apply concurrent DELETE")));
@@ -2890,7 +3228,7 @@ apply_concurrent_delete(Relation rel, HeapTuple tup_target,
  */
 static HeapTuple
 find_target_tuple(Relation rel, ScanKey key, int nkeys, HeapTuple tup_key,
-				  IndexInsertState *iistate,
+				  Snapshot snapshot, IndexInsertState *iistate,
 				  TupleTableSlot *ident_slot, IndexScanDesc *scan_p)
 {
 	IndexScanDesc scan;
@@ -2899,7 +3237,7 @@ find_target_tuple(Relation rel, ScanKey key, int nkeys, HeapTuple tup_key,
 	HeapTuple	result = NULL;
 
 	/* XXX no instrumentation for now */
-	scan = index_beginscan(rel, iistate->ident_index, GetActiveSnapshot(),
+	scan = index_beginscan(rel, iistate->ident_index, snapshot,
 						   NULL, nkeys, 0);
 	*scan_p = scan;
 	index_rescan(scan, key, nkeys, NULL, 0);
@@ -2971,6 +3309,8 @@ process_concurrent_changes(LogicalDecodingContext *ctx, XLogRecPtr end_of_wal,
 	}
 	PG_FINALLY();
 	{
+		ResetRepackCurrentXids();
+
 		if (rel_src)
 			rel_dst->rd_toastoid = InvalidOid;
 	}

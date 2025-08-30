@@ -1279,6 +1279,10 @@ retry:
 	/* make sure relation is marked as having no open file yet */
 	relation->rd_smgr = NULL;
 
+	/* Is REPACK CONCURRENTLY in progress? */
+	relation->rd_repack_concurrent =
+		is_concurrent_repack_in_progress(targetRelId);
+
 	/*
 	 * now we can free the memory allocated for pg_class_tuple
 	 */

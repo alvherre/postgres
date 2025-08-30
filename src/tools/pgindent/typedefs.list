@@ -2540,6 +2540,7 @@ ReorderBufferTupleCidKey
 ReorderBufferUpdateProgressTxnCB
 ReorderTuple
 RepOriginId
+RepackedRel
 RepackCommand
 RepackDecodingState
 RepackStmt

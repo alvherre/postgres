@@ -127,6 +127,18 @@ static int	nParallelCurrentXids = 0;
 static TransactionId *ParallelCurrentXids;
 
 /*
+ * Another case that requires TransactionIdIsCurrentTransactionId() to behave
+ * specially is when REPACK CONCURRENTLY is processing data changes made in
+ * the old storage of a table by other transactions. When applying the changes
+ * to the new storage, the backend executing the CLUSTER command needs to act
+ * on behalf on those other transactions. The transactions responsible for the
+ * changes in the old storage are stored in this array, sorted by
+ * xidComparator.
+ */
+static int	nRepackCurrentXids = 0;
+static TransactionId *RepackCurrentXids = NULL;
+
+/*
  * Miscellaneous flag bits to record events which occur on the top level
  * transaction. These flags are only persisted in MyXactFlags and are intended
  * so we remember to do certain things later on in the transaction. This is
@@ -973,6 +985,8 @@ TransactionIdIsCurrentTransactionId(TransactionId xid)
 		int			low,
 					high;
 
+		Assert(nRepackCurrentXids == 0);
+
 		low = 0;
 		high = nParallelCurrentXids - 1;
 		while (low <= high)
@@ -990,6 +1004,21 @@ TransactionIdIsCurrentTransactionId(TransactionId xid)
 				high = middle - 1;
 		}
 		return false;
+	}
+
+	/*
+	 * When executing CLUSTER CONCURRENTLY, the array of current transactions
+	 * is given.
+	 */
+	if (nRepackCurrentXids > 0)
+	{
+		Assert(nParallelCurrentXids == 0);
+
+		return bsearch(&xid,
+					   RepackCurrentXids,
+					   nRepackCurrentXids,
+					   sizeof(TransactionId),
+					   xidComparator) != NULL;
 	}
 
 	/*
@@ -5659,6 +5688,29 @@ EndParallelWorkerTransaction(void)
 	Assert(CurrentTransactionState->blockState == TBLOCK_PARALLEL_INPROGRESS);
 	CommitTransaction();
 	CurrentTransactionState->blockState = TBLOCK_DEFAULT;
+}
+
+/*
+ * SetRepackCurrentXids
+ *		Set the XID array that TransactionIdIsCurrentTransactionId() should
+ *		use.
+ */
+void
+SetRepackCurrentXids(TransactionId *xip, int xcnt)
+{
+	RepackCurrentXids = xip;
+	nRepackCurrentXids = xcnt;
+}
+
+/*
+ * ResetRepackCurrentXids
+ *		Undo the effect of SetRepackCurrentXids().
+ */
+void
+ResetRepackCurrentXids(void)
+{
+	RepackCurrentXids = NULL;
+	nRepackCurrentXids = 0;
 }
 
 /*

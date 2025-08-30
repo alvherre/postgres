@@ -253,7 +253,8 @@ heapam_tuple_insert(Relation relation, TupleTableSlot *slot, CommandId cid,
 	tuple->t_tableOid = slot->tts_tableOid;
 
 	/* Perform the insertion, and copy the resulting ItemPointer */
-	heap_insert(relation, tuple, cid, options, bistate);
+	heap_insert(relation, tuple, GetCurrentTransactionId(), cid, options,
+				bistate);
 	ItemPointerCopy(&tuple->t_self, &slot->tts_tid);
 
 	if (shouldFree)
@@ -276,7 +277,8 @@ heapam_tuple_insert_speculative(Relation relation, TupleTableSlot *slot,
 	options |= HEAP_INSERT_SPECULATIVE;
 
 	/* Perform the insertion, and copy the resulting ItemPointer */
-	heap_insert(relation, tuple, cid, options, bistate);
+	heap_insert(relation, tuple, GetCurrentTransactionId(), cid, options,
+				bistate);
 	ItemPointerCopy(&tuple->t_self, &slot->tts_tid);
 
 	if (shouldFree)
@@ -310,8 +312,8 @@ heapam_tuple_delete(Relation relation, ItemPointer tid, CommandId cid,
 	 * the storage itself is cleaning the dead tuples by itself, it is the
 	 * time to call the index tuple deletion also.
 	 */
-	return heap_delete(relation, tid, cid, crosscheck, wait, tmfd, changingPart,
-					   true);
+	return heap_delete(relation, tid, GetCurrentTransactionId(), cid,
+					   crosscheck, wait, tmfd, changingPart, true);
 }
 
 
@@ -329,7 +331,8 @@ heapam_tuple_update(Relation relation, ItemPointer otid, TupleTableSlot *slot,
 	slot->tts_tableOid = RelationGetRelid(relation);
 	tuple->t_tableOid = slot->tts_tableOid;
 
-	result = heap_update(relation, otid, tuple, cid, crosscheck, wait,
+	result = heap_update(relation, otid, tuple, GetCurrentTransactionId(),
+						 cid, crosscheck, wait,
 						 tmfd, lockmode, update_indexes, true);
 	ItemPointerCopy(&tuple->t_self, &slot->tts_tid);
 
@@ -2477,9 +2480,15 @@ reform_and_rewrite_tuple(HeapTuple tuple,
 		 * flag to skip logical decoding: as soon as REPACK CONCURRENTLY swaps
 		 * the relation files, it drops this relation, so no logical
 		 * replication subscription should need the data.
+		 *
+		 * It is also crucial to stamp the new record with the exact same xid
+		 * and cid, because the tuple must be visible to the snapshot of the
+		 * applied concurrent change later.
 		 */
-		heap_insert(NewHeap, copiedTuple, GetCurrentCommandId(true),
-					HEAP_INSERT_NO_LOGICAL, NULL);
+		CommandId	cid = HeapTupleHeaderGetRawCommandId(tuple->t_data);
+		TransactionId xid = HeapTupleHeaderGetXmin(tuple->t_data);
+
+		heap_insert(NewHeap, copiedTuple, xid, cid, HEAP_INSERT_NO_LOGICAL, NULL);
 	}
 
 	heap_freetuple(copiedTuple);

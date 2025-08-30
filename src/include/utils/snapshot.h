@@ -13,6 +13,7 @@
 #ifndef SNAPSHOT_H
 #define SNAPSHOT_H
 
+#include "access/xlogdefs.h"
 #include "lib/pairingheap.h"
 
 
@@ -200,6 +201,8 @@ typedef struct SnapshotData
 	uint32		active_count;	/* refcount on ActiveSnapshot stack */
 	uint32		regd_count;		/* refcount on RegisteredSnapshots */
 	pairingheap_node ph_node;	/* link in the RegisteredSnapshots heap */
+
+	XLogRecPtr	lsn;			/* position in the WAL stream when taken */
 
 	/*
 	 * The transaction completion count at the time GetSnapshotData() built

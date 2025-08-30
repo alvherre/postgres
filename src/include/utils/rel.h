@@ -253,6 +253,9 @@ typedef struct RelationData
 	bool		pgstat_enabled; /* should relation stats be counted */
 	/* use "struct" here to avoid needing to include pgstat.h: */
 	struct PgStat_TableStatus *pgstat_info; /* statistics collection area */
+
+	/* Is REPACK CONCURRENTLY being performed on this relation? */
+	bool		rd_repack_concurrent;
 } RelationData;
 
 
@@ -695,7 +698,9 @@ RelationCloseSmgr(Relation relation)
 #define RelationIsAccessibleInLogicalDecoding(relation) \
 	(XLogLogicalInfoActive() && \
 	 RelationNeedsWAL(relation) && \
-	 (IsCatalogRelation(relation) || RelationIsUsedAsCatalogTable(relation)))
+	 (IsCatalogRelation(relation) || \
+	  RelationIsUsedAsCatalogTable(relation) || \
+	  (relation)->rd_repack_concurrent))
 
 /*
  * RelationIsLogicallyLogged

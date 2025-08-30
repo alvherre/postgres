@@ -61,6 +61,14 @@ typedef struct ConcurrentChange
 	/* See the enum above. */
 	ConcurrentChangeKind kind;
 
+	/* Transaction that changes the data. */
+	TransactionId xid;
+
+	/*
+	 * Historic catalog snapshot that was used to decode this change.
+	 */
+	Snapshot	snapshot;
+
 	/*
 	 * The actual tuple.
 	 *
@@ -92,6 +100,8 @@ typedef struct RepackDecodingState
 	 * tuplestore does this transparently.
 	 */
 	Tuplestorestate *tstore;
+	/* XID of the last change added to tstore. */
+	TransactionId last_change_xid PG_USED_FOR_ASSERTS_ONLY;
 
 	/* The current number of changes in tstore. */
 	double		nchanges;
@@ -111,6 +121,14 @@ typedef struct RepackDecodingState
 
 	/* Slot to retrieve data from tstore. */
 	TupleTableSlot *tsslot;
+
+	/*
+	 * Historic catalog snapshot that was used to decode the most recent
+	 * change.
+	 */
+	Snapshot	snapshot;
+	/* LSN of the record  */
+	XLogRecPtr	snapshot_lsn;
 
 	ResourceOwner resowner;
 } RepackDecodingState;
@@ -140,5 +158,9 @@ extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 							 TransactionId frozenXid,
 							 MultiXactId cutoffMulti,
 							 char newrelpersistence);
+
+extern Size RepackShmemSize(void);
+extern void RepackShmemInit(void);
+extern bool is_concurrent_repack_in_progress(Oid relid);
 
 #endif							/* CLUSTER_H */

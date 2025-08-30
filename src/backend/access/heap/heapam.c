@@ -2070,7 +2070,7 @@ ReleaseBulkInsertStatePin(BulkInsertState bistate)
 /*
  *	heap_insert		- insert tuple into a heap
  *
- * The new tuple is stamped with current transaction ID and the specified
+ * The new tuple is stamped with specified transaction ID and the specified
  * command ID.
  *
  * See table_tuple_insert for comments about most of the input flags, except
@@ -2086,14 +2086,15 @@ ReleaseBulkInsertStatePin(BulkInsertState bistate)
  * reflected into *tup.
  */
 void
-heap_insert(Relation relation, HeapTuple tup, CommandId cid,
-			int options, BulkInsertState bistate)
+heap_insert(Relation relation, HeapTuple tup, TransactionId xid,
+			CommandId cid, int options, BulkInsertState bistate)
 {
-	TransactionId xid = GetCurrentTransactionId();
 	HeapTuple	heaptup;
 	Buffer		buffer;
 	Buffer		vmbuffer = InvalidBuffer;
 	bool		all_visible_cleared = false;
+
+	Assert(TransactionIdIsValid(xid));
 
 	/* Cheap, simplistic check that the tuple matches the rel's rowtype. */
 	Assert(HeapTupleHeaderGetNatts(tup->t_data) <=
@@ -2176,8 +2177,15 @@ heap_insert(Relation relation, HeapTuple tup, CommandId cid,
 		/*
 		 * If this is a catalog, we need to transmit combo CIDs to properly
 		 * decode, so log that as well.
+		 *
+		 * HEAP_INSERT_NO_LOGICAL should be set when applying data changes
+		 * done by other transactions during REPACK CONCURRENTLY. In such a
+		 * case, the insertion should not be decoded at all - see
+		 * heap_decode(). (It's also set by raw_heap_insert() for TOAST, but
+		 * TOAST does not pass this test anyway.)
 		 */
-		if (RelationIsAccessibleInLogicalDecoding(relation))
+		if ((options & HEAP_INSERT_NO_LOGICAL) == 0 &&
+			RelationIsAccessibleInLogicalDecoding(relation))
 			log_heap_new_cid(relation, heaptup);
 
 		/*
@@ -2723,7 +2731,8 @@ heap_multi_insert(Relation relation, TupleTableSlot **slots, int ntuples,
 void
 simple_heap_insert(Relation relation, HeapTuple tup)
 {
-	heap_insert(relation, tup, GetCurrentCommandId(true), 0, NULL);
+	heap_insert(relation, tup, GetCurrentTransactionId(),
+				GetCurrentCommandId(true), 0, NULL);
 }
 
 /*
@@ -2780,11 +2789,11 @@ xmax_infomask_changed(uint16 new_infomask, uint16 old_infomask)
  */
 TM_Result
 heap_delete(Relation relation, ItemPointer tid,
-			CommandId cid, Snapshot crosscheck, bool wait,
-			TM_FailureData *tmfd, bool changingPart, bool wal_logical)
+			TransactionId xid, CommandId cid, Snapshot crosscheck, bool wait,
+			TM_FailureData *tmfd, bool changingPart,
+			bool wal_logical)
 {
 	TM_Result	result;
-	TransactionId xid = GetCurrentTransactionId();
 	ItemId		lp;
 	HeapTupleData tp;
 	Page		page;
@@ -2801,6 +2810,7 @@ heap_delete(Relation relation, ItemPointer tid,
 	bool		old_key_copied = false;
 
 	Assert(ItemPointerIsValid(tid));
+	Assert(TransactionIdIsValid(xid));
 
 	AssertHasSnapshotForToast(relation);
 
@@ -3097,8 +3107,12 @@ l1:
 		/*
 		 * For logical decode we need combo CIDs to properly decode the
 		 * catalog
+		 *
+		 * Like in heap_insert(), visibility is unchanged when called from
+		 * VACUUM FULL / CLUSTER.
 		 */
-		if (RelationIsAccessibleInLogicalDecoding(relation))
+		if (wal_logical &&
+			RelationIsAccessibleInLogicalDecoding(relation))
 			log_heap_new_cid(relation, &tp);
 
 		xlrec.flags = 0;
@@ -3217,11 +3231,12 @@ simple_heap_delete(Relation relation, ItemPointer tid)
 	TM_Result	result;
 	TM_FailureData tmfd;
 
-	result = heap_delete(relation, tid,
+	result = heap_delete(relation, tid, GetCurrentTransactionId(),
 						 GetCurrentCommandId(true), InvalidSnapshot,
 						 true /* wait for commit */ ,
 						 &tmfd, false,	/* changingPart */
 						 true /* wal_logical */ );
+
 	switch (result)
 	{
 		case TM_SelfModified:
@@ -3260,12 +3275,11 @@ simple_heap_delete(Relation relation, ItemPointer tid)
  */
 TM_Result
 heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
-			CommandId cid, Snapshot crosscheck, bool wait,
-			TM_FailureData *tmfd, LockTupleMode *lockmode,
+			TransactionId xid, CommandId cid, Snapshot crosscheck,
+			bool wait, TM_FailureData *tmfd, LockTupleMode *lockmode,
 			TU_UpdateIndexes *update_indexes, bool wal_logical)
 {
 	TM_Result	result;
-	TransactionId xid = GetCurrentTransactionId();
 	Bitmapset  *hot_attrs;
 	Bitmapset  *sum_attrs;
 	Bitmapset  *key_attrs;
@@ -3305,6 +3319,7 @@ heap_update(Relation relation, ItemPointer otid, HeapTuple newtup,
 				infomask2_new_tuple;
 
 	Assert(ItemPointerIsValid(otid));
+	Assert(TransactionIdIsValid(xid));
 
 	/* Cheap, simplistic check that the tuple matches the rel's rowtype. */
 	Assert(HeapTupleHeaderGetNatts(newtup->t_data) <=
@@ -4144,8 +4159,12 @@ l2:
 		/*
 		 * For logical decoding we need combo CIDs to properly decode the
 		 * catalog.
+		 *
+		 * Like in heap_insert(), visibility is unchanged when called from
+		 * VACUUM FULL / CLUSTER.
 		 */
-		if (RelationIsAccessibleInLogicalDecoding(relation))
+		if (wal_logical &&
+			RelationIsAccessibleInLogicalDecoding(relation))
 		{
 			log_heap_new_cid(relation, &oldtup);
 			log_heap_new_cid(relation, heaptup);
@@ -4511,7 +4530,7 @@ simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup,
 	TM_FailureData tmfd;
 	LockTupleMode lockmode;
 
-	result = heap_update(relation, otid, tup,
+	result = heap_update(relation, otid, tup, GetCurrentTransactionId(),
 						 GetCurrentCommandId(true), InvalidSnapshot,
 						 true /* wait for commit */ ,
 						 &tmfd, &lockmode, update_indexes,

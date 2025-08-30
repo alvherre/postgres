@@ -1644,6 +1644,27 @@ CacheInvalidateRelcache(Relation relation)
 }
 
 /*
+ * CacheInvalidateRelcacheImmediate
+ *		Send invalidation message for the specified relation's relcache entry.
+ *
+ * Currently this is used in REPACK CONCURRENTLY, to make sure that other
+ * backends are aware that the command is being executed for the relation.
+ */
+void
+CacheInvalidateRelcacheImmediate(Oid relid)
+{
+	SharedInvalidationMessage msg;
+
+	msg.rc.id = SHAREDINVALRELCACHE_ID;
+	msg.rc.dbId = MyDatabaseId;
+	msg.rc.relId = relid;
+	/* check AddCatcacheInvalidationMessage() for an explanation */
+	VALGRIND_MAKE_MEM_DEFINED(&msg, sizeof(msg));
+
+	SendSharedInvalidMessages(&msg, 1);
+}
+
+/*
  * CacheInvalidateRelcacheAll
  *		Register invalidation of the whole relcache at the end of command.
  *

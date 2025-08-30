@@ -50,6 +50,8 @@ extern void CacheInvalidateCatalog(Oid catalogId);
 
 extern void CacheInvalidateRelcache(Relation relation);
 
+extern void CacheInvalidateRelcacheImmediate(Oid relid);
+
 extern void CacheInvalidateRelcacheAll(void);
 
 extern void CacheInvalidateRelcacheByTuple(HeapTuple classTuple);

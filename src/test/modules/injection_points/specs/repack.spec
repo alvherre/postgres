@@ -86,9 +86,6 @@ step change_new
 # When applying concurrent data changes, we should see the effects of an
 # in-progress subtransaction.
 #
-# XXX Not sure this test is useful now - it was designed for the patch that
-# preserves tuple visibility and which therefore modifies
-# TransactionIdIsCurrentTransactionId().
 step change_subxact1
 {
 	BEGIN;
@@ -103,7 +100,6 @@ step change_subxact1
 # When applying concurrent data changes, we should not see the effects of a
 # rolled back subtransaction.
 #
-# XXX Is this test useful? See above.
 step change_subxact2
 {
 	BEGIN;
