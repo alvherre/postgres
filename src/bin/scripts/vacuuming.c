@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  * vacuuming.c
- *		Helper routines for vacuumdb
+ *		Helper routines for vacuumdb and pg_repackdb
  *
  * Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -42,8 +42,8 @@ static SimpleStringList *retrieve_objects(PGconn *conn,
 										  bool echo);
 static void prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
 								   vacuumingOptions *vacopts, const char *table);
-static void run_vacuum_command(PGconn *conn, const char *sql, bool echo,
-							   const char *table);
+static void run_vacuum_command(PGconn *conn, vacuumingOptions *vacopts,
+							   const char *sql, bool echo, const char *table);
 
 /*
  * Executes vacuum/analyze as indicated.  Returns 0 if the plan is carried
@@ -188,6 +188,14 @@ vacuum_one_database(ConnParams *cparams,
 
 	conn = connectDatabase(cparams, progname, echo, false, true);
 
+	if (vacopts->mode == MODE_REPACK && PQserverVersion(conn) < 190000)
+	{
+		/* XXX arguably, here we should use VACUUM FULL instead of failing */
+		PQfinish(conn);
+		pg_fatal("cannot use the \"%s\" command on server versions older than PostgreSQL %s",
+				 "REPACK", "19");
+	}
+
 	if (vacopts->disable_page_skipping && PQserverVersion(conn) < 90600)
 	{
 		PQfinish(conn);
@@ -280,9 +288,15 @@ vacuum_one_database(ConnParams *cparams,
 		if (vacopts->mode == MODE_ANALYZE_IN_STAGES)
 			printf(_("%s: processing database \"%s\": %s\n"),
 				   progname, PQdb(conn), _(stage_messages[stage]));
-		else
+		else if (vacopts->mode == MODE_VACUUM)
 			printf(_("%s: vacuuming database \"%s\"\n"),
 				   progname, PQdb(conn));
+		else
+		{
+			Assert(vacopts->mode == MODE_REPACK);
+			printf(_("%s: repacking database \"%s\"\n"),
+				   progname, PQdb(conn));
+		}
 		fflush(stdout);
 	}
 
@@ -372,7 +386,7 @@ vacuum_one_database(ConnParams *cparams,
 		 * through ParallelSlotsGetIdle.
 		 */
 		ParallelSlotSetHandler(free_slot, TableCommandResultHandler, NULL);
-		run_vacuum_command(free_slot->connection, sql.data,
+		run_vacuum_command(free_slot->connection, vacopts, sql.data,
 						   echo, tabname);
 
 		cell = cell->next;
@@ -397,7 +411,7 @@ vacuum_one_database(ConnParams *cparams,
 		}
 
 		ParallelSlotSetHandler(free_slot, TableCommandResultHandler, NULL);
-		run_vacuum_command(free_slot->connection, cmd, echo, NULL);
+		run_vacuum_command(free_slot->connection, vacopts, cmd, echo, NULL);
 
 		if (!ParallelSlotsWaitCompletion(sa))
 			ret = EXIT_FAILURE; /* error already reported by handler */
@@ -616,6 +630,23 @@ retrieve_objects(PGconn *conn, vacuumingOptions *vacopts,
 	}
 
 	/*
+	 * In REPACK mode, if the 'using_index' option was given but no index
+	 * name, filter only tables that have an index with indisclustered set.
+	 * (If an index name is given, we trust the user to pass a reasonable list
+	 * of tables.)
+	 *
+	 * XXX it may be worth printing an error if an index name is given with
+	 * no list of tables.
+	 */
+	if (vacopts->mode == MODE_REPACK &&
+		vacopts->using_index && !vacopts->indexname)
+	{
+		appendPQExpBufferStr(&catalog_query,
+							 " AND EXISTS (SELECT 1 FROM pg_catalog.pg_index\n"
+							 "    WHERE indrelid = c.oid AND indisclustered)\n");
+	}
+
+	/*
 	 * If no tables were listed, filter for the relevant relation types.  If
 	 * tables were given via --table, don't bother filtering by relation type.
 	 * Instead, let the server decide whether a given relation can be
@@ -802,8 +833,31 @@ prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
 
 	resetPQExpBuffer(sql);
 
-	if (vacopts->mode == MODE_ANALYZE ||
-		vacopts->mode == MODE_ANALYZE_IN_STAGES)
+	if (vacopts->mode == MODE_REPACK)
+	{
+		appendPQExpBufferStr(sql, "REPACK");
+
+		if (vacopts->verbose)
+		{
+			appendPQExpBuffer(sql, "%sVERBOSE", sep);
+			sep = comma;
+		}
+
+		if (sep != paren)
+			appendPQExpBufferChar(sql, ')');
+
+		appendPQExpBuffer(sql, " %s", table);
+
+		if (vacopts->using_index)
+		{
+			appendPQExpBuffer(sql, " USING INDEX");
+			if (vacopts->indexname)
+				appendPQExpBuffer(sql, " %s", fmtIdEnc(vacopts->indexname,
+													   PQclientEncoding(conn)));
+		}
+	}
+	else if (vacopts->mode == MODE_ANALYZE ||
+			 vacopts->mode == MODE_ANALYZE_IN_STAGES)
 	{
 		appendPQExpBufferStr(sql, "ANALYZE");
 
@@ -954,7 +1008,10 @@ prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
 		}
 	}
 
-	appendPQExpBuffer(sql, " %s;", table);
+	if (vacopts->mode != MODE_REPACK)
+		appendPQExpBuffer(sql, " %s", table);
+
+	appendPQExpBufferChar(sql, ';');
 }
 
 /*
@@ -964,8 +1021,8 @@ prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
  * Any errors during command execution are reported to stderr.
  */
 static void
-run_vacuum_command(PGconn *conn, const char *sql, bool echo,
-				   const char *table)
+run_vacuum_command(PGconn *conn, vacuumingOptions *vacopts,
+				   const char *sql, bool echo, const char *table)
 {
 	bool		status;
 
@@ -978,13 +1035,21 @@ run_vacuum_command(PGconn *conn, const char *sql, bool echo,
 	{
 		if (table)
 		{
-			pg_log_error("vacuuming of table \"%s\" in database \"%s\" failed: %s",
-						 table, PQdb(conn), PQerrorMessage(conn));
+			if (vacopts->mode == MODE_VACUUM)
+				pg_log_error("vacuuming of table \"%s\" in database \"%s\" failed: %s",
+							 table, PQdb(conn), PQerrorMessage(conn));
+			else
+				pg_log_error("repacking of table \"%s\" in database \"%s\" failed: %s",
+							 table, PQdb(conn), PQerrorMessage(conn));
 		}
 		else
 		{
-			pg_log_error("vacuuming of database \"%s\" failed: %s",
-						 PQdb(conn), PQerrorMessage(conn));
+			if (vacopts->mode == MODE_VACUUM)
+				pg_log_error("vacuuming of database \"%s\" failed: %s",
+							 PQdb(conn), PQerrorMessage(conn));
+			else
+				pg_log_error("repacking of database \"%s\" failed: %s",
+							 PQdb(conn), PQerrorMessage(conn));
 		}
 	}
 }

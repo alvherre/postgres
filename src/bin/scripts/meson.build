@@ -42,6 +42,7 @@ vacuuming_common = static_library('libvacuuming_common',
 
 binaries = [
   'vacuumdb',
+  'pg_repackdb',
 ]
 foreach binary : binaries
   binary_sources = files('@0@.c'.format(binary))
@@ -80,6 +81,7 @@ tests += {
       't/100_vacuumdb.pl',
       't/101_vacuumdb_all.pl',
       't/102_vacuumdb_stages.pl',
+      't/103_repackdb.pl',
       't/200_connstr.pl',
     ],
   },

@@ -1279,6 +1279,32 @@ CREATE VIEW pg_stat_progress_cluster AS
     FROM pg_stat_get_progress_info('CLUSTER') AS S
         LEFT JOIN pg_database D ON S.datid = D.oid;
 
+CREATE VIEW pg_stat_progress_repack AS
+    SELECT
+        S.pid AS pid,
+        S.datid AS datid,
+        D.datname AS datname,
+        S.relid AS relid,
+	-- param1 is currently unused
+        CASE S.param2 WHEN 0 THEN 'initializing'
+                      WHEN 1 THEN 'seq scanning heap'
+                      WHEN 2 THEN 'index scanning heap'
+                      WHEN 3 THEN 'sorting tuples'
+                      WHEN 4 THEN 'writing new heap'
+                      WHEN 5 THEN 'swapping relation files'
+                      WHEN 6 THEN 'rebuilding index'
+                      WHEN 7 THEN 'performing final cleanup'
+                      END AS phase,
+        CAST(S.param3 AS oid) AS repack_index_relid,
+        S.param4 AS heap_tuples_scanned,
+        S.param5 AS heap_tuples_written,
+        S.param6 AS heap_blks_total,
+        S.param7 AS heap_blks_scanned,
+        S.param8 AS index_rebuild_count
+    FROM pg_stat_get_progress_info('REPACK') AS S
+        LEFT JOIN pg_database D ON S.datid = D.oid;
+
+
 CREATE VIEW pg_stat_progress_create_index AS
     SELECT
         S.pid AS pid, S.datid AS datid, D.datname AS datname,

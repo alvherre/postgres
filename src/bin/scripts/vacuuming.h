@@ -20,6 +20,7 @@
 typedef enum
 {
 	MODE_VACUUM,
+	MODE_REPACK,
 	MODE_ANALYZE,
 	MODE_ANALYZE_IN_STAGES
 } RunMode;
@@ -37,6 +38,8 @@ typedef struct vacuumingOptions
 	bool		and_analyze;
 	bool		full;
 	bool		freeze;
+	bool		using_index;
+	char	   *indexname;
 	bool		disable_page_skipping;
 	bool		skip_locked;
 	int			min_xid_age;
