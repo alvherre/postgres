@@ -102,15 +102,15 @@ RepackCommandAsString(RepackCommand cmd)
 	return "???";
 }
 
-/*---------------------------------------------------------------------------
- * This cluster code allows for clustering multiple tables at once. Because
+/*
+ * This repack code allows for processing multiple tables at once. Because
  * of this, we cannot just run everything on a single transaction, or we
  * would be forced to acquire exclusive locks on all the tables being
  * clustered, simultaneously --- very likely leading to deadlock.
  *
- * To solve this we follow a similar strategy to VACUUM code,
- * clustering each relation in a separate transaction. For this to work,
- * we need to:
+ * To solve this we follow a similar strategy to VACUUM code, processing each
+ * relation in a separate transaction. For this to work, we need to:
+ *
  *	- provide a separate memory context so that we can pass information in
  *	  a way that survives across transactions
  *	- start a new transaction every time a new relation is clustered
@@ -121,10 +121,9 @@ RepackCommandAsString(RepackCommand cmd)
  *
  * The single-relation case does not have any such overhead.
  *
- * We also allow a relation to be specified without index.  In that case,
- * the indisclustered bit will be looked up, and an ERROR will be thrown
- * if there is no index with the bit set.
- *---------------------------------------------------------------------------
+ * We also allow a relation to be repacked following an index, but without
+ * naming a specific one.  In that case, the indisclustered bit will be
+ * looked up, and an ERROR will be thrown if no so-marked index is found.
  */
 void
 ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
@@ -350,10 +349,10 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	 * *must* skip the one on indisclustered since it would reject an attempt
 	 * to cluster a not-previously-clustered index.
 	 */
-	if (recheck)
-		if (!cluster_rel_recheck(cmd, OldHeap, indexOid, save_userid,
-								 params->options))
-			goto out;
+	if (recheck &&
+		!cluster_rel_recheck(cmd, OldHeap, indexOid, save_userid,
+							 params->options))
+		goto out;
 
 	/*
 	 * We allow repacking shared catalogs only when not using an index. It
@@ -983,18 +982,18 @@ copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex, bool verb
 	/* Log what we're doing */
 	if (OldIndex != NULL && !use_sort)
 		ereport(elevel,
-				(errmsg("clustering \"%s.%s\" using index scan on \"%s\"",
+				(errmsg("repacking \"%s.%s\" using index scan on \"%s\"",
 						nspname,
 						RelationGetRelationName(OldHeap),
 						RelationGetRelationName(OldIndex))));
 	else if (use_sort)
 		ereport(elevel,
-				(errmsg("clustering \"%s.%s\" using sequential scan and sort",
+				(errmsg("repacking \"%s.%s\" using sequential scan and sort",
 						nspname,
 						RelationGetRelationName(OldHeap))));
 	else
 		ereport(elevel,
-				(errmsg("vacuuming \"%s.%s\"",
+				(errmsg("repacking \"%s.%s\" in physical order",
 						nspname,
 						RelationGetRelationName(OldHeap))));
 
@@ -1670,8 +1669,7 @@ finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
  * Return it as a list of RelToCluster in the given memory context.
  */
 static List *
-get_tables_to_repack(RepackCommand command, bool usingindex,
-					 MemoryContext permcxt)
+get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 {
 	Relation	catalog;
 	TableScanDesc scan;
@@ -1703,7 +1701,7 @@ get_tables_to_repack(RepackCommand command, bool usingindex,
 			 * ConditionalLockRelationOid+SearchSysCacheExists dance that we
 			 * do below.
 			 */
-			if (!cluster_is_permitted_for_relation(command, index->indrelid,
+			if (!cluster_is_permitted_for_relation(cmd, index->indrelid,
 												   GetUserId()))
 				continue;
 
@@ -1753,7 +1751,7 @@ get_tables_to_repack(RepackCommand command, bool usingindex,
 				class->relkind != RELKIND_MATVIEW)
 				continue;
 
-			if (!cluster_is_permitted_for_relation(command, class->oid,
+			if (!cluster_is_permitted_for_relation(cmd, class->oid,
 												   GetUserId()))
 				continue;
 

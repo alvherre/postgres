@@ -26,7 +26,7 @@
 #include "vacuuming.h"
 
 static void help(const char *progname);
-void		check_objfilter(bits32 objfilter);
+static void check_objfilter(bits32 objfilter);
 
 int
 main(int argc, char *argv[])
@@ -40,6 +40,7 @@ main(int argc, char *argv[])
 		{"echo", no_argument, NULL, 'e'},
 		{"quiet", no_argument, NULL, 'q'},
 		{"dbname", required_argument, NULL, 'd'},
+		{"analyze", no_argument, NULL, 'z'},
 		{"all", no_argument, NULL, 'a'},
 		/* XXX this could be 'i', but optional_arg is messy */
 		{"index", optional_argument, NULL, 1},
@@ -135,6 +136,9 @@ main(int argc, char *argv[])
 			case 'W':
 				cparams.prompt_password = TRI_YES;
 				break;
+			case 'z':
+				vacopts.and_analyze = true;
+				break;
 			case 1:
 				vacopts.using_index = true;
 				if (optarg)
@@ -216,6 +220,7 @@ help(const char *progname)
 	printf(_("  -a, --all                       repack all databases\n"));
 	printf(_("  -d, --dbname=DBNAME             database to repack\n"));
 	printf(_("  -e, --echo                      show the commands being sent to the server\n"));
+	printf(_("      --index[=INDEX]             repack following an index\n"));
 	printf(_("  -j, --jobs=NUM                  use this many concurrent connections to repack\n"));
 	printf(_("  -n, --schema=SCHEMA             repack tables in the specified schema(s) only\n"));
 	printf(_("  -N, --exclude-schema=SCHEMA     do not repack tables in the specified schema(s)\n"));

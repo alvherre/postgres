@@ -285,7 +285,8 @@ vacuum_one_database(ConnParams *cparams,
 
 	if (!quiet)
 	{
-		if (vacopts->mode == MODE_ANALYZE_IN_STAGES)
+		if (vacopts->mode == MODE_ANALYZE_IN_STAGES ||
+			vacopts->mode == MODE_ANALYZE)
 			printf(_("%s: processing database \"%s\": %s\n"),
 				   progname, PQdb(conn), _(stage_messages[stage]));
 		else if (vacopts->mode == MODE_VACUUM)
@@ -833,31 +834,8 @@ prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
 
 	resetPQExpBuffer(sql);
 
-	if (vacopts->mode == MODE_REPACK)
-	{
-		appendPQExpBufferStr(sql, "REPACK");
-
-		if (vacopts->verbose)
-		{
-			appendPQExpBuffer(sql, "%sVERBOSE", sep);
-			sep = comma;
-		}
-
-		if (sep != paren)
-			appendPQExpBufferChar(sql, ')');
-
-		appendPQExpBuffer(sql, " %s", table);
-
-		if (vacopts->using_index)
-		{
-			appendPQExpBuffer(sql, " USING INDEX");
-			if (vacopts->indexname)
-				appendPQExpBuffer(sql, " %s", fmtIdEnc(vacopts->indexname,
-													   PQclientEncoding(conn)));
-		}
-	}
-	else if (vacopts->mode == MODE_ANALYZE ||
-			 vacopts->mode == MODE_ANALYZE_IN_STAGES)
+	if (vacopts->mode == MODE_ANALYZE ||
+		vacopts->mode == MODE_ANALYZE_IN_STAGES)
 	{
 		appendPQExpBufferStr(sql, "ANALYZE");
 
@@ -891,8 +869,10 @@ prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
 			if (vacopts->verbose)
 				appendPQExpBufferStr(sql, " VERBOSE");
 		}
+
+		appendPQExpBuffer(sql, " %s", table);
 	}
-	else
+	else if (vacopts->mode == MODE_VACUUM)
 	{
 		appendPQExpBufferStr(sql, "VACUUM");
 
@@ -1006,10 +986,37 @@ prepare_vacuum_command(PGconn *conn, PQExpBuffer sql,
 			if (vacopts->and_analyze)
 				appendPQExpBufferStr(sql, " ANALYZE");
 		}
-	}
 
-	if (vacopts->mode != MODE_REPACK)
 		appendPQExpBuffer(sql, " %s", table);
+	}
+	else if (vacopts->mode == MODE_REPACK)
+	{
+		appendPQExpBufferStr(sql, "REPACK");
+
+		if (vacopts->verbose)
+		{
+			appendPQExpBuffer(sql, "%sVERBOSE", sep);
+			sep = comma;
+		}
+		if (vacopts->and_analyze)
+		{
+			appendPQExpBuffer(sql, "%sANALYZE", sep);
+			sep = comma;
+		}
+
+		if (sep != paren)
+			appendPQExpBufferChar(sql, ')');
+
+		appendPQExpBuffer(sql, " %s", table);
+
+		if (vacopts->using_index)
+		{
+			appendPQExpBuffer(sql, " USING INDEX");
+			if (vacopts->indexname)
+				appendPQExpBuffer(sql, " %s", fmtIdEnc(vacopts->indexname,
+													   PQclientEncoding(conn)));
+		}
+	}
 
 	appendPQExpBufferChar(sql, ';');
 }
