@@ -1911,6 +1911,17 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 	}
 
 	/*
+	 * Make sure ANALYZE is specified if a column list is present.
+	 */
+	if (!(params->options & CLUOPT_ANALYZE))
+	{
+		if (stmt->relation->va_cols != NIL)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("ANALYZE option must be specified when a column list is provided")));
+	}
+
+	/*
 	 * For partitioned tables, let caller handle this.  Otherwise, process it
 	 * here and we're done.
 	 */
