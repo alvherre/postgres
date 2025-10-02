@@ -285,10 +285,12 @@ vacuum_one_database(ConnParams *cparams,
 
 	if (!quiet)
 	{
-		if (vacopts->mode == MODE_ANALYZE_IN_STAGES ||
-			vacopts->mode == MODE_ANALYZE)
+		if (vacopts->mode == MODE_ANALYZE_IN_STAGES)
 			printf(_("%s: processing database \"%s\": %s\n"),
 				   progname, PQdb(conn), _(stage_messages[stage]));
+		else if (vacopts->mode == MODE_ANALYZE)
+			printf(_("%s: analyzing database \"%s\"\n"),
+				   progname, PQdb(conn));
 		else if (vacopts->mode == MODE_VACUUM)
 			printf(_("%s: vacuuming database \"%s\"\n"),
 				   progname, PQdb(conn));
