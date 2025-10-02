@@ -112,9 +112,7 @@ PostgreSQL documentation
    is no effective difference between repacking and analyzing databases via
    this utility and via other methods for accessing the server.
   </para>
-
  </refsect1>
-
 
  <refsect1>
   <title>Options</title>
