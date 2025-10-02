@@ -1891,7 +1891,7 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 	 * AccessExclusiveLock right away to avoid lock-upgrade hazard in the
 	 * single-transaction case.
 	 */
-	tableOid = RangeVarGetRelidExtended(stmt->relation,
+	tableOid = RangeVarGetRelidExtended(stmt->relation->relation,
 										AccessExclusiveLock,
 										0,
 										RangeVarCallbackMaintainsTable,
@@ -1934,8 +1934,8 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 			vac_params.options |= VACOPT_ANALYZE;
 			if (params->options & CLUOPT_VERBOSE)
 				vac_params.options |= VACOPT_VERBOSE;
-			analyze_rel(RelationGetRelid(rel), NULL, vac_params, NIL, true,
-						NULL);
+			analyze_rel(RelationGetRelid(rel), NULL, vac_params,
+						stmt->relation->va_cols, true, NULL);
 		}
 
 		return NULL;

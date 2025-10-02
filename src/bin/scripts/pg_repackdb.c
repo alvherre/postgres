@@ -62,7 +62,6 @@ main(int argc, char *argv[])
 	bool		echo = false;
 	bool		quiet = false;
 	vacuumingOptions vacopts;
-	bits32		objfilter = 0;
 	SimpleStringList objects = {NULL, NULL};
 	int			concurrentCons = 1;
 	int			tbl_count = 0;
@@ -82,16 +81,16 @@ main(int argc, char *argv[])
 
 	handle_help_version_opts(argc, argv, progname, help);
 
-	while ((c = getopt_long(argc, argv, "ad:eh:j:n:N:p:qt:U:vwW",
+	while ((c = getopt_long(argc, argv, "ad:eh:j:n:N:p:qt:U:vwWz",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
 		{
 			case 'a':
-				objfilter |= OBJFILTER_ALL_DBS;
+				vacopts.objfilter |= OBJFILTER_ALL_DBS;
 				break;
 			case 'd':
-				objfilter |= OBJFILTER_DATABASE;
+				vacopts.objfilter |= OBJFILTER_DATABASE;
 				dbname = pg_strdup(optarg);
 				break;
 			case 'e':
@@ -106,11 +105,11 @@ main(int argc, char *argv[])
 					exit(1);
 				break;
 			case 'n':
-				objfilter |= OBJFILTER_SCHEMA;
+				vacopts.objfilter |= OBJFILTER_SCHEMA;
 				simple_string_list_append(&objects, optarg);
 				break;
 			case 'N':
-				objfilter |= OBJFILTER_SCHEMA_EXCLUDE;
+				vacopts.objfilter |= OBJFILTER_SCHEMA_EXCLUDE;
 				simple_string_list_append(&objects, optarg);
 				break;
 			case 'p':
@@ -120,7 +119,7 @@ main(int argc, char *argv[])
 				quiet = true;
 				break;
 			case 't':
-				objfilter |= OBJFILTER_TABLE;
+				vacopts.objfilter |= OBJFILTER_TABLE;
 				simple_string_list_append(&objects, optarg);
 				tbl_count++;
 				break;
@@ -162,7 +161,7 @@ main(int argc, char *argv[])
 	 */
 	if (optind < argc && dbname == NULL)
 	{
-		objfilter |= OBJFILTER_DATABASE;
+		vacopts.objfilter |= OBJFILTER_DATABASE;
 		dbname = argv[optind];
 		optind++;
 	}
@@ -228,6 +227,7 @@ help(const char *progname)
 	printf(_("  -t, --table='TABLE'             repack specific table(s) only\n"));
 	printf(_("  -v, --verbose                   write a lot of output\n"));
 	printf(_("  -V, --version                   output version information, then exit\n"));
+	printf(_("  -z, --analyze                   update optimizer statistics\n"));
 	printf(_("  -?, --help                      show this help, then exit\n"));
 	printf(_("\nConnection options:\n"));
 	printf(_("  -h, --host=HOSTNAME       database server host or socket directory\n"));

@@ -11919,7 +11919,7 @@ CreateConversionStmt:
 /*****************************************************************************
  *
  *		QUERY:
- *				REPACK [ (options) ] [ <qualified_name> [ USING INDEX <index_name> ] ]
+ *				REPACK [ (options) ] [ <qualified_name> [ <name_list> ] [ USING INDEX <index_name> ] ]
  *
  *			obsolete variants:
  *				CLUSTER (options) [ <qualified_name> [ USING <index_name> ] ]
@@ -11929,23 +11929,23 @@ CreateConversionStmt:
  *****************************************************************************/
 
 RepackStmt:
-			REPACK opt_utility_option_list qualified_name USING INDEX name
+			REPACK opt_utility_option_list vacuum_relation USING INDEX name
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_REPACK;
-					n->relation = $3;
+					n->relation = (VacuumRelation *) $3;
 					n->indexname = $6;
 					n->usingindex = true;
 					n->params = $2;
 					$$ = (Node *) n;
 				}
-			| REPACK opt_utility_option_list qualified_name opt_usingindex
+			| REPACK opt_utility_option_list vacuum_relation opt_usingindex
 				{
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_REPACK;
-					n->relation = $3;
+					n->relation = (VacuumRelation *) $3;
 					n->indexname = NULL;
 					n->usingindex = $4;
 					n->params = $2;
@@ -11978,7 +11978,8 @@ RepackStmt:
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_CLUSTER;
-					n->relation = $5;
+					n->relation = makeNode(VacuumRelation);
+					n->relation->relation = $5;
 					n->indexname = $6;
 					n->usingindex = true;
 					n->params = $3;
@@ -12001,7 +12002,8 @@ RepackStmt:
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_CLUSTER;
-					n->relation = $3;
+					n->relation = makeNode(VacuumRelation);
+					n->relation->relation = $3;
 					n->indexname = $4;
 					n->usingindex = true;
 					if ($2)
@@ -12026,7 +12028,8 @@ RepackStmt:
 					RepackStmt *n = makeNode(RepackStmt);
 
 					n->command = REPACK_COMMAND_CLUSTER;
-					n->relation = $5;
+					n->relation = makeNode(VacuumRelation);
+					n->relation->relation = $5;
 					n->indexname = $3;
 					n->usingindex = true;
 					if ($2)
