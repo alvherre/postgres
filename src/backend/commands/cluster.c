@@ -322,10 +322,8 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
 									 PROGRESS_REPACK_COMMAND_REPACK);
 	else if (cmd == REPACK_COMMAND_CLUSTER)
-	{
 		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
 									 PROGRESS_CLUSTER_COMMAND_CLUSTER);
-	}
 	else
 	{
 		Assert(cmd == REPACK_COMMAND_VACUUMFULL);
@@ -1861,7 +1859,7 @@ cluster_is_permitted_for_relation(RepackCommand cmd, Oid relid, Oid userid)
 	Assert(cmd == REPACK_COMMAND_CLUSTER || cmd == REPACK_COMMAND_REPACK);
 	ereport(WARNING,
 			errmsg("permission denied to execute %s on \"%s\", skipping it",
-				   cmd == REPACK_COMMAND_CLUSTER ? "CLUSTER" : "REPACK",
+				   RepackCommandAsString(cmd),
 				   get_rel_name(relid)));
 
 	return false;
