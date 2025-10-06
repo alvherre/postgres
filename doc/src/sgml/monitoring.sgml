@@ -4123,6 +4123,15 @@ description | Waiting for a newly initialized WAL file to reach durable storage
        cost-based delays.)
       </para></entry>
      </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
+        <structfield>stats_reset</structfield> <type>timestamp with time zone</type>
+       </para>
+       <para>
+        Time at which these statistics were last reset
+       </para></entry>
+     </row>
     </tbody>
    </tgroup>
   </table>
@@ -4242,6 +4251,15 @@ description | Waiting for a newly initialized WAL file to reach durable storage
        Number of live table rows fetched by simple index scans using this
        index
       </para></entry>
+     </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
+        <structfield>stats_reset</structfield> <type>timestamp with time zone</type>
+       </para>
+       <para>
+        Time at which these statistics were last reset
+       </para></entry>
      </row>
     </tbody>
    </tgroup>
@@ -4440,6 +4458,15 @@ description | Waiting for a newly initialized WAL file to reach durable storage
        Number of buffer hits in this table's TOAST table indexes (if any)
       </para></entry>
      </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
+        <structfield>stats_reset</structfield> <type>timestamp with time zone</type>
+       </para>
+       <para>
+        Time at which these statistics were last reset
+       </para></entry>
+     </row>
     </tbody>
    </tgroup>
   </table>
@@ -4539,6 +4566,15 @@ description | Waiting for a newly initialized WAL file to reach durable storage
       <para>
        Number of buffer hits in this index
       </para></entry>
+     </row>
+
+     <row>
+      <entry role="catalog_table_entry"><para role="column_definition">
+        <structfield>stats_reset</structfield> <type>timestamp with time zone</type>
+       </para>
+       <para>
+        Time at which these statistics were last reset
+       </para></entry>
      </row>
     </tbody>
    </tgroup>
