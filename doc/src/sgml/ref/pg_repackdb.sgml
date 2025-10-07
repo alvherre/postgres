@@ -160,6 +160,16 @@ PostgreSQL documentation
      </varlistentry>
 
      <varlistentry>
+      <term><option>--index<optional>=<replaceable class="parameter">index_name</replaceable></optional></option></term>
+      <listitem>
+       <para>
+        Pass the <literal>USING INDEX</literal> clause to <literal>REPACK</literal>,
+        and optionally the index name to specify.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
       <term><option>-j <replaceable class="parameter">njobs</replaceable></option></term>
       <term><option>--jobs=<replaceable class="parameter">njobs</replaceable></option></term>
       <listitem>
