@@ -232,6 +232,7 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 		PlannerInfo *subroot;
 		List	   *tlist;
 		bool		trivial_tlist;
+		char	   *plan_name;
 
 		Assert(subquery != NULL);
 
@@ -246,7 +247,9 @@ recurse_set_operations(Node *setOp, PlannerInfo *root,
 		 * parentOp, pass that down to encourage subquery_planner to consider
 		 * suitably-sorted Paths.
 		 */
-		subroot = rel->subroot = subquery_planner(root->glob, subquery, root,
+		plan_name = choose_plan_name(root->glob, "setop", true);
+		subroot = rel->subroot = subquery_planner(root->glob, subquery,
+												  plan_name, root,
 												  false, root->tuple_fraction,
 												  parentOp);
 
@@ -826,7 +829,6 @@ generate_union_paths(SetOperationStmt *op, PlannerInfo *root,
 	/* If all UNION children were dummy rels, make the resulting rel dummy */
 	if (cheapest_pathlist == NIL)
 	{
-		result_rel->reltarget = create_pathtarget(root, list_nth(tlist_list, 0));
 		mark_dummy_rel(result_rel);
 
 		return result_rel;
@@ -1185,6 +1187,69 @@ generate_nonunion_paths(SetOperationStmt *op, PlannerInfo *root,
 	else
 		result_rel->reltarget = create_setop_pathtarget(root, tlist,
 														list_make2(lpath, rpath));
+
+	/* Check for provably empty setop inputs and add short-circuit paths. */
+	if (op->op == SETOP_EXCEPT)
+	{
+		/*
+		 * For EXCEPTs, if the left side is dummy then there's no need to
+		 * inspect the right-hand side as scanning the right to find tuples to
+		 * remove won't make the left-hand input any more empty.
+		 */
+		if (is_dummy_rel(lrel))
+		{
+			mark_dummy_rel(result_rel);
+
+			return result_rel;
+		}
+
+		/* Handle EXCEPTs with dummy right input */
+		if (is_dummy_rel(rrel))
+		{
+			if (op->all)
+			{
+				Path	   *apath;
+
+				/*
+				 * EXCEPT ALL: If the right-hand input is dummy then we can
+				 * simply scan the left-hand input.  To keep createplan.c
+				 * happy, use a single child Append to handle the translation
+				 * between the set op targetlist and the targetlist of the
+				 * left input.  The Append will be removed in setrefs.c.
+				 */
+				apath = (Path *) create_append_path(root, result_rel, list_make1(lpath),
+													NIL, NIL, NULL, 0, false, -1);
+
+				add_path(result_rel, apath);
+
+				return result_rel;
+			}
+			else
+			{
+				/*
+				 * To make EXCEPT with a dummy RHS work means having to
+				 * deduplicate the left input.  That could be done with
+				 * AggPaths, but it doesn't seem worth the effort.  Let the
+				 * normal path generation code below handle this one.
+				 */
+			}
+		}
+	}
+	else
+	{
+		/*
+		 * For INTERSECT, if either input is a dummy rel then we can mark the
+		 * result_rel as dummy since intersecting with an empty relation can
+		 * never yield any results.  This is true regardless of INTERSECT or
+		 * INTERSECT ALL.
+		 */
+		if (is_dummy_rel(lrel) || is_dummy_rel(rrel))
+		{
+			mark_dummy_rel(result_rel);
+
+			return result_rel;
+		}
+	}
 
 	/*
 	 * Estimate number of distinct groups that we'll need hashtable entries
