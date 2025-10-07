@@ -2285,8 +2285,8 @@ vacuum_rel(Oid relid, RangeVar *relation, VacuumParams params,
 			if ((params.options & VACOPT_VERBOSE) != 0)
 				cluster_params.options |= CLUOPT_VERBOSE;
 
-			/* VACUUM FULL is now a variant of CLUSTER; see cluster.c */
-			cluster_rel(REPACK_COMMAND_VACUUMFULL, false, rel, InvalidOid,
+			/* VACUUM FULL is a variant of REPACK; see cluster.c */
+			cluster_rel(REPACK_COMMAND_VACUUMFULL, rel, InvalidOid,
 						&cluster_params);
 			/* cluster_rel closes the relation, but keeps lock */
 

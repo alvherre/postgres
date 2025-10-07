@@ -69,7 +69,7 @@ typedef struct
 
 static bool cluster_rel_recheck(RepackCommand cmd, Relation OldHeap,
 								Oid indexOid, Oid userid, int options);
-static void rebuild_relation(RepackCommand cmd, bool usingindex,
+static void rebuild_relation(RepackCommand cmd,
 							 Relation OldHeap, Relation index, bool verbose);
 static void copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex,
 							bool verbose, bool *pSwapToastByContent,
@@ -77,33 +77,19 @@ static void copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldInde
 static List *get_tables_to_repack(RepackCommand cmd, bool usingindex,
 								  MemoryContext permcxt);
 static List *get_tables_to_repack_partitioned(RepackCommand cmd,
-											  MemoryContext cluster_context,
-											  Oid relid, bool rel_is_index);
+											  Oid relid, bool rel_is_index,
+											  MemoryContext permcxt);
 static bool cluster_is_permitted_for_relation(RepackCommand cmd,
 											  Oid relid, Oid userid);
 static Relation process_single_relation(RepackStmt *stmt,
 										ClusterParams *params);
 static Oid	determine_clustered_index(Relation rel, bool usingindex,
 									  const char *indexname);
+static const char *RepackCommandAsString(RepackCommand cmd);
 
-
-static const char *
-RepackCommandAsString(RepackCommand cmd)
-{
-	switch (cmd)
-	{
-		case REPACK_COMMAND_REPACK:
-			return "REPACK";
-		case REPACK_COMMAND_VACUUMFULL:
-			return "VACUUM";
-		case REPACK_COMMAND_CLUSTER:
-			return "CLUSTER";
-	}
-	return "???";
-}
 
 /*
- * This repack code allows for processing multiple tables at once. Because
+ * The repack code allows for processing multiple tables at once. Because
  * of this, we cannot just run everything on a single transaction, or we
  * would be forced to acquire exclusive locks on all the tables being
  * clustered, simultaneously --- very likely leading to deadlock.
@@ -143,11 +129,11 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 			params.options |= defGetBoolean(opt) ? CLUOPT_ANALYZE : 0;
 		else
 			ereport(ERROR,
-					(errcode(ERRCODE_SYNTAX_ERROR),
-					 errmsg("unrecognized %s option \"%s\"",
-							RepackCommandAsString(stmt->command),
-							opt->defname),
-					 parser_errposition(pstate, opt->location)));
+					errcode(ERRCODE_SYNTAX_ERROR),
+					errmsg("unrecognized %s option \"%s\"",
+						   RepackCommandAsString(stmt->command),
+						   opt->defname),
+					parser_errposition(pstate, opt->location));
 	}
 
 	/*
@@ -158,14 +144,17 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 	{
 		rel = process_single_relation(stmt, &params);
 		if (rel == NULL)
-			return;
+			return;		/* all done */
 	}
 
-	/* Don't allow this for now.  Maybe we can add support for this later */
+	/*
+	 * Don't allow ANALYZE in the multiple-relation case for now.  Maybe we can
+	 * add support for this later.
+	 */
 	if (params.options & CLUOPT_ANALYZE)
 		ereport(ERROR,
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("cannot ANALYZE multiple tables"));
+				errmsg("cannot %s multiple tables", "REPACK (ANALYZE)"));
 
 	/*
 	 * By here, we know we are in a multi-table situation.  In order to avoid
@@ -201,21 +190,23 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		Assert(rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE);
 
 		/*
-		 * If an index name was specified, resolve it now and pass it down.
+		 * If USING INDEX was specified, resolve the index name now and pass it
+		 * down.
 		 */
 		if (stmt->usingindex)
 		{
 			/*
-			 * XXX how should this behave?  Passing no index to a partitioned
-			 * table could be useful to have certain partitions clustered by
-			 * some index, and other partitions by a different index.
+			 * If no index name was specified when repacking a partitioned
+			 * table, punt for now.  Maybe we can improve this later.
 			 */
 			if (!stmt->indexname)
 				ereport(ERROR,
+						errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 						errmsg("there is no previously clustered index for table \"%s\"",
 							   RelationGetRelationName(rel)));
 
-			relid = determine_clustered_index(rel, true, stmt->indexname);
+			relid = determine_clustered_index(rel, stmt->usingindex,
+											  stmt->indexname);
 			if (!OidIsValid(relid))
 				elog(ERROR, "unable to determine index to cluster on");
 			/* XXX is this the right place for this check? */
@@ -228,8 +219,9 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 			rel_is_index = false;
 		}
 
-		rtcs = get_tables_to_repack_partitioned(stmt->command, repack_context,
-												relid, rel_is_index);
+		rtcs = get_tables_to_repack_partitioned(stmt->command,
+												relid, rel_is_index,
+												repack_context);
 
 		/* close parent relation, releasing lock on it */
 		table_close(rel, AccessExclusiveLock);
@@ -262,8 +254,7 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
 		PushActiveSnapshot(GetTransactionSnapshot());
 
 		/* Process this table */
-		cluster_rel(stmt->command, stmt->usingindex,
-					rel, rtc->indexOid, &params);
+		cluster_rel(stmt->command, rel, rtc->indexOid, &params);
 		/* cluster_rel closes the relation, but keeps lock */
 
 		PopActiveSnapshot();
@@ -296,8 +287,8 @@ ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel)
  * messages.
  */
 void
-cluster_rel(RepackCommand cmd, bool usingindex,
-			Relation OldHeap, Oid indexOid, ClusterParams *params)
+cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
+			ClusterParams *params)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			save_userid;
@@ -360,10 +351,10 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	 * get marked as indisclustered in the current database, leading to
 	 * unexpected behavior if CLUSTER were later invoked in another database.
 	 */
-	if (usingindex && OldHeap->rd_rel->relisshared)
+	if (OidIsValid(indexOid) && OldHeap->rd_rel->relisshared)
 		ereport(ERROR,
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("cannot run \"%s\" on a shared catalog",
+				errmsg("cannot run %s on a shared catalog",
 					   RepackCommandAsString(cmd)));
 
 	/*
@@ -371,23 +362,10 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	 * manager is not going to cope.
 	 */
 	if (RELATION_IS_OTHER_TEMP(OldHeap))
-	{
-		if (cmd == REPACK_COMMAND_CLUSTER)
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("cannot cluster temporary tables of other sessions"));
-		else if (cmd == REPACK_COMMAND_REPACK)
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("cannot repack temporary tables of other sessions"));
-		else
-		{
-			Assert(cmd == REPACK_COMMAND_VACUUMFULL);
-			ereport(ERROR,
-					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("cannot vacuum temporary tables of other sessions"));
-		}
-	}
+		ereport(ERROR,
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot run %s on temporary tables of other sessions",
+					   RepackCommandAsString(cmd)));
 
 	/*
 	 * Also check for active uses of the relation in the current transaction,
@@ -433,7 +411,7 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	TransferPredicateLocksToHeapRelation(OldHeap);
 
 	/* rebuild_relation does all the dirty work */
-	rebuild_relation(cmd, usingindex, OldHeap, index, verbose);
+	rebuild_relation(cmd, OldHeap, index, verbose);
 	/* rebuild_relation closes OldHeap, and index if valid */
 
 out:
@@ -647,7 +625,7 @@ mark_index_clustered(Relation rel, Oid indexOid, bool is_internal)
  * On exit, they are closed, but locks on them are not released.
  */
 static void
-rebuild_relation(RepackCommand cmd, bool usingindex,
+rebuild_relation(RepackCommand cmd,
 				 Relation OldHeap, Relation index, bool verbose)
 {
 	Oid			tableOid = RelationGetRelid(OldHeap);
@@ -665,7 +643,7 @@ rebuild_relation(RepackCommand cmd, bool usingindex,
 		   (index == NULL || CheckRelationLockedByMe(index, AccessExclusiveLock, false)));
 
 	/* for CLUSTER or REPACK USING INDEX, mark the index as the one to use */
-	if (usingindex)
+	if (index != NULL)
 		mark_index_clustered(OldHeap, RelationGetRelid(index), true);
 
 	/* Remember info about rel before closing OldHeap */
@@ -980,20 +958,20 @@ copy_table_data(Relation NewHeap, Relation OldHeap, Relation OldIndex, bool verb
 	/* Log what we're doing */
 	if (OldIndex != NULL && !use_sort)
 		ereport(elevel,
-				(errmsg("repacking \"%s.%s\" using index scan on \"%s\"",
-						nspname,
-						RelationGetRelationName(OldHeap),
-						RelationGetRelationName(OldIndex))));
+				errmsg("repacking \"%s.%s\" using index scan on \"%s\"",
+					   nspname,
+					   RelationGetRelationName(OldHeap),
+					   RelationGetRelationName(OldIndex)));
 	else if (use_sort)
 		ereport(elevel,
-				(errmsg("repacking \"%s.%s\" using sequential scan and sort",
-						nspname,
-						RelationGetRelationName(OldHeap))));
+				errmsg("repacking \"%s.%s\" using sequential scan and sort",
+					   nspname,
+					   RelationGetRelationName(OldHeap)));
 	else
 		ereport(elevel,
-				(errmsg("repacking \"%s.%s\" in physical order",
-						nspname,
-						RelationGetRelationName(OldHeap))));
+				errmsg("repacking \"%s.%s\" in physical order",
+					   nspname,
+					   RelationGetRelationName(OldHeap)));
 
 	/*
 	 * Hand off the actual copying to AM specific function, the generic code
@@ -1672,7 +1650,6 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 	Relation	catalog;
 	TableScanDesc scan;
 	HeapTuple	tuple;
-	MemoryContext old_context;
 	List	   *rtcs = NIL;
 
 	if (usingindex)
@@ -1689,29 +1666,37 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 		{
 			RelToCluster *rtc;
 			Form_pg_index index;
+			MemoryContext	oldcxt;
 
 			index = (Form_pg_index) GETSTRUCT(tuple);
 
 			/*
-			 * XXX I think the only reason there's no test failure here is
-			 * that we seldom have clustered indexes that would be affected by
-			 * concurrency.  Maybe we should also do the
-			 * ConditionalLockRelationOid+SearchSysCacheExists dance that we
-			 * do below.
+			 * Try to obtain a light lock on the index's table, to ensure it
+			 * doesn't go away while we collect the list.  If we cannot, just
+			 * disregard it.
 			 */
+			if (!ConditionalLockRelationOid(index->indrelid, AccessShareLock))
+				continue;
+
+			/* Verify that the table still exists */
+			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(index->indrelid)))
+			{
+				/* Release useless lock */
+				UnlockRelationOid(index->indrelid, AccessShareLock);
+				continue;
+			}
+
 			if (!cluster_is_permitted_for_relation(cmd, index->indrelid,
 												   GetUserId()))
 				continue;
 
 			/* Use a permanent memory context for the result list */
-			old_context = MemoryContextSwitchTo(permcxt);
-
-			rtc = (RelToCluster *) palloc(sizeof(RelToCluster));
+			oldcxt = MemoryContextSwitchTo(permcxt);
+			rtc = palloc(sizeof(RelToCluster));
 			rtc->tableOid = index->indrelid;
 			rtc->indexOid = index->indexrelid;
 			rtcs = lappend(rtcs, rtc);
-
-			MemoryContextSwitchTo(old_context);
+			MemoryContextSwitchTo(oldcxt);
 		}
 	}
 	else
@@ -1723,20 +1708,19 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 		{
 			RelToCluster *rtc;
 			Form_pg_class class;
+			MemoryContext	oldcxt;
 
 			class = (Form_pg_class) GETSTRUCT(tuple);
 
 			/*
 			 * Try to obtain a light lock on the table, to ensure it doesn't
 			 * go away while we collect the list.  If we cannot, just
-			 * disregard the table.  XXX we could release at the bottom of the
-			 * loop, but for now just hold it until this transaction is
-			 * finished.
+			 * disregard the table.
 			 */
 			if (!ConditionalLockRelationOid(class->oid, AccessShareLock))
 				continue;
 
-			/* Verify that the table still exists. */
+			/* Verify that the table still exists */
 			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(class->oid)))
 			{
 				/* Release useless lock */
@@ -1749,19 +1733,18 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
 				class->relkind != RELKIND_MATVIEW)
 				continue;
 
+			/* noisily skip rels which the user can't process */
 			if (!cluster_is_permitted_for_relation(cmd, class->oid,
 												   GetUserId()))
 				continue;
 
 			/* Use a permanent memory context for the result list */
-			old_context = MemoryContextSwitchTo(permcxt);
-
-			rtc = (RelToCluster *) palloc(sizeof(RelToCluster));
+			oldcxt = MemoryContextSwitchTo(permcxt);
+			rtc = palloc(sizeof(RelToCluster));
 			rtc->tableOid = class->oid;
 			rtc->indexOid = InvalidOid;
 			rtcs = lappend(rtcs, rtc);
-
-			MemoryContextSwitchTo(old_context);
+			MemoryContextSwitchTo(oldcxt);
 		}
 	}
 
@@ -1782,61 +1765,58 @@ get_tables_to_repack(RepackCommand cmd, bool usingindex, MemoryContext permcxt)
  * owning relation.
  */
 static List *
-get_tables_to_repack_partitioned(RepackCommand cmd, MemoryContext cluster_context,
-								 Oid relid, bool rel_is_index)
+get_tables_to_repack_partitioned(RepackCommand cmd, Oid relid,
+								 bool rel_is_index, MemoryContext permcxt)
 {
 	List	   *inhoids;
-	ListCell   *lc;
 	List	   *rtcs = NIL;
-	MemoryContext old_context;
 
-	/* Do not lock the children until they're processed */
+	/*
+	 * Do not lock the children until they're processed.  Note that we do
+	 * hold a lock on the parent partitioned table.
+	 */
 	inhoids = find_all_inheritors(relid, NoLock, NULL);
-
-	foreach(lc, inhoids)
+	foreach_oid(child_oid, inhoids)
 	{
-		Oid			inhoid = lfirst_oid(lc);
-		Oid			inhrelid,
-					inhindid;
+		Oid			table_oid,
+					index_oid;
 		RelToCluster *rtc;
+		MemoryContext	oldcxt;
 
 		if (rel_is_index)
 		{
 			/* consider only leaf indexes */
-			if (get_rel_relkind(inhoid) != RELKIND_INDEX)
+			if (get_rel_relkind(child_oid) != RELKIND_INDEX)
 				continue;
 
-			inhrelid = IndexGetRelation(inhoid, false);
-			inhindid = inhoid;
+			table_oid = IndexGetRelation(child_oid, false);
+			index_oid = child_oid;
 		}
 		else
 		{
 			/* consider only leaf relations */
-			if (get_rel_relkind(inhoid) != RELKIND_RELATION)
+			if (get_rel_relkind(child_oid) != RELKIND_RELATION)
 				continue;
 
-			inhrelid = inhoid;
-			inhindid = InvalidOid;
+			table_oid = child_oid;
+			index_oid = InvalidOid;
 		}
 
 		/*
 		 * It's possible that the user does not have privileges to CLUSTER the
-		 * leaf partition despite having such privileges on the partitioned
-		 * table.  We skip any partitions which the user is not permitted to
-		 * CLUSTER.
+		 * leaf partition despite having them on the partitioned table.  Skip
+		 * if so.
 		 */
-		if (!cluster_is_permitted_for_relation(cmd, inhrelid, GetUserId()))
+		if (!cluster_is_permitted_for_relation(cmd, table_oid, GetUserId()))
 			continue;
 
 		/* Use a permanent memory context for the result list */
-		old_context = MemoryContextSwitchTo(cluster_context);
-
-		rtc = (RelToCluster *) palloc(sizeof(RelToCluster));
-		rtc->tableOid = inhrelid;
-		rtc->indexOid = inhindid;
+		oldcxt = MemoryContextSwitchTo(permcxt);
+		rtc = palloc(sizeof(RelToCluster));
+		rtc->tableOid = table_oid;
+		rtc->indexOid = index_oid;
 		rtcs = lappend(rtcs, rtc);
-
-		MemoryContextSwitchTo(old_context);
+		MemoryContextSwitchTo(oldcxt);
 	}
 
 	return rtcs;
@@ -1849,10 +1829,11 @@ get_tables_to_repack_partitioned(RepackCommand cmd, MemoryContext cluster_contex
 static bool
 cluster_is_permitted_for_relation(RepackCommand cmd, Oid relid, Oid userid)
 {
+	Assert(cmd == REPACK_COMMAND_CLUSTER || cmd == REPACK_COMMAND_REPACK);
+
 	if (pg_class_aclcheck(relid, userid, ACL_MAINTAIN) == ACLCHECK_OK)
 		return true;
 
-	Assert(cmd == REPACK_COMMAND_CLUSTER || cmd == REPACK_COMMAND_REPACK);
 	ereport(WARNING,
 			errmsg("permission denied to execute %s on \"%s\", skipping it",
 				   RepackCommandAsString(cmd),
@@ -1865,14 +1846,13 @@ cluster_is_permitted_for_relation(RepackCommand cmd, Oid relid, Oid userid)
 /*
  * Given a RepackStmt with an indicated relation name, resolve the relation
  * name, obtain lock on it, then determine what to do based on the relation
- * type: if it's not a partitioned table, repack it as indicated (using an
- * existing clustered index, or following the indicated index), and return
- * NULL.
+ * type: if it's table and not partitioned, repack it as indicated (using an
+ * existing clustered index, or following the given one), and return NULL.
  *
  * On the other hand, if the table is partitioned, do nothing further and
- * instead return the opened relcache entry, so that caller can process the
- * partitions using the multiple-table handling code.  The index name is not
- * resolve in this case.
+ * instead return the opened and locked relcache entry, so that caller can
+ * process the partitions using the multiple-table handling code.  In this
+ * case, if an index name is given, it's up to the caller to resolve it.
  */
 static Relation
 process_single_relation(RepackStmt *stmt, ClusterParams *params)
@@ -1901,23 +1881,18 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 	 * not going to cope.
 	 */
 	if (RELATION_IS_OTHER_TEMP(rel))
-	{
 		ereport(ERROR,
 				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				errmsg("cannot execute %s on temporary tables of other sessions",
 					   RepackCommandAsString(stmt->command)));
-	}
 
 	/*
 	 * Make sure ANALYZE is specified if a column list is present.
 	 */
-	if (!(params->options & CLUOPT_ANALYZE))
-	{
-		if (stmt->relation->va_cols != NIL)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("ANALYZE option must be specified when a column list is provided")));
-	}
+	if ((params->options & CLUOPT_ANALYZE) == 0 && stmt->relation->va_cols != NIL)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("ANALYZE option must be specified when a column list is provided")));
 
 	/*
 	 * For partitioned tables, let caller handle this.  Otherwise, process it
@@ -1933,7 +1908,7 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 											 stmt->indexname);
 		if (OidIsValid(indexOid))
 			check_index_is_clusterable(rel, indexOid, AccessExclusiveLock);
-		cluster_rel(stmt->command, stmt->usingindex, rel, indexOid, params);
+		cluster_rel(stmt->command, rel, indexOid, params);
 
 		/* Do an analyze, if requested */
 		if (params->options & CLUOPT_ANALYZE)
@@ -1953,11 +1928,11 @@ process_single_relation(RepackStmt *stmt, ClusterParams *params)
 
 /*
  * Given a relation and the usingindex/indexname options in a
- * REPACK USING INDEX or CLUSTER command, return the OID of the index to use
- * for clustering the table.
+ * REPACK USING INDEX or CLUSTER command, return the OID of the
+ * index to use for clustering the table.
  *
- * Caller must hold lock on the relation so that the set of indexes doesn't
- * change, and must call check_index_is_clusterable.
+ * Caller must hold lock on the relation so that the set of indexes
+ * doesn't change, and must call check_index_is_clusterable.
  */
 static Oid
 determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
@@ -1966,16 +1941,18 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 
 	if (indexname == NULL && usingindex)
 	{
-		ListCell   *lc;
-
-		/* Find an index with indisclustered set, or report error */
-		foreach(lc, RelationGetIndexList(rel))
+		/*
+		 * If USING INDEX with no name is given, find a clustered index, or
+		 * error out if none.
+		 */
+		indexOid = InvalidOid;
+		foreach_oid(idxoid, RelationGetIndexList(rel))
 		{
-			indexOid = lfirst_oid(lc);
-
-			if (get_index_isclustered(indexOid))
+			if (get_index_isclustered(idxoid))
+			{
+				indexOid = idxoid;
 				break;
-			indexOid = InvalidOid;
+			}
 		}
 
 		if (!OidIsValid(indexOid))
@@ -1986,12 +1963,8 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 	}
 	else if (indexname != NULL)
 	{
-		/*
-		 * An index was specified; figure out its OID.  It must be in the same
-		 * namespace as the relation.
-		 */
-		indexOid = get_relname_relid(indexname,
-									 rel->rd_rel->relnamespace);
+		/* An index was specified; obtain its OID. */
+		indexOid = get_relname_relid(indexname, rel->rd_rel->relnamespace);
 		if (!OidIsValid(indexOid))
 			ereport(ERROR,
 					errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -2002,4 +1975,19 @@ determine_clustered_index(Relation rel, bool usingindex, const char *indexname)
 		indexOid = InvalidOid;
 
 	return indexOid;
+}
+
+static const char *
+RepackCommandAsString(RepackCommand cmd)
+{
+	switch (cmd)
+	{
+		case REPACK_COMMAND_REPACK:
+			return "REPACK";
+		case REPACK_COMMAND_VACUUMFULL:
+			return "VACUUM";
+		case REPACK_COMMAND_CLUSTER:
+			return "CLUSTER";
+	}
+	return "???";
 }

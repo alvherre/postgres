@@ -35,8 +35,8 @@ typedef struct ClusterParams
 
 extern void ExecRepack(ParseState *pstate, RepackStmt *stmt, bool isTopLevel);
 
-extern void cluster_rel(RepackCommand command, bool usingindex,
-						Relation OldHeap, Oid indexOid, ClusterParams *params);
+extern void cluster_rel(RepackCommand command, Relation OldHeap, Oid indexOid,
+						ClusterParams *params);
 extern void check_index_is_clusterable(Relation OldHeap, Oid indexOid,
 									   LOCKMODE lockmode);
 extern void mark_index_clustered(Relation rel, Oid indexOid, bool is_internal);
