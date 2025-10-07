@@ -262,7 +262,8 @@ PostgreSQL documentation
       <term><option>--analyze</option></term>
       <listitem>
        <para>
-        Also calculate statistics for use by the optimizer.
+        Also calculate statistics for use by the optimizer.  If a column name
+        list is given, only compute statistics for those columns.
        </para>
       </listitem>
      </varlistentry>
