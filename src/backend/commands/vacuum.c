@@ -358,7 +358,6 @@ ExecVacuum(ParseState *pstate, VacuumStmt *vacstmt, bool isTopLevel)
 		}
 	}
 
-
 	/*
 	 * Sanity check DISABLE_PAGE_SKIPPING option.
 	 */
