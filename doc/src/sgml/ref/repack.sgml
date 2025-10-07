@@ -21,12 +21,16 @@ PostgreSQL documentation
 
  <refsynopsisdiv>
 <synopsis>
-REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <replaceable class="parameter">table_name</replaceable> [ USING INDEX [ <replaceable class="parameter">index_name</replaceable> ] ] ]
+REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <replaceable class="parameter">table_and_columns</replaceable> [ USING INDEX [ <replaceable class="parameter">index_name</replaceable> ] ] ]
 
 <phrase>where <replaceable class="parameter">option</replaceable> can be one of:</phrase>
 
     VERBOSE [ <replaceable class="parameter">boolean</replaceable> ]
     ANALYZE [ <replaceable class="parameter">boolean</replaceable> ]
+
+<phrase>and <replaceable class="parameter">table_and_columns</replaceable> is:</phrase>
+
+    <replaceable class="parameter">table_name</replaceable> [ ( <replaceable class="parameter">column_name</replaceable> [, ...] ) ]
 </synopsis>
  </refsynopsisdiv>
 
