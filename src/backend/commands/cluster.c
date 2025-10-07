@@ -362,9 +362,9 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	 */
 	if (usingindex && OldHeap->rd_rel->relisshared)
 		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot run \"%s\" on a shared catalog",
-						RepackCommandAsString(cmd))));
+				errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("cannot run \"%s\" on a shared catalog",
+					   RepackCommandAsString(cmd)));
 
 	/*
 	 * Don't process temp tables of other backends ... their local buffer
@@ -374,20 +374,18 @@ cluster_rel(RepackCommand cmd, bool usingindex,
 	{
 		if (cmd == REPACK_COMMAND_CLUSTER)
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot cluster temporary tables of other sessions")));
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("cannot cluster temporary tables of other sessions"));
 		else if (cmd == REPACK_COMMAND_REPACK)
-		{
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot repack temporary tables of other sessions")));
-		}
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("cannot repack temporary tables of other sessions"));
 		else
 		{
 			Assert(cmd == REPACK_COMMAND_VACUUMFULL);
 			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot vacuum temporary tables of other sessions")));
+					errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("cannot vacuum temporary tables of other sessions"));
 		}
 	}
 
