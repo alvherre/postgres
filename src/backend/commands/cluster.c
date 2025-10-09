@@ -370,6 +370,24 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 		index = NULL;
 
 	/*
+	 * When allow_system_table_mods is turned off, we disallow repacking a
+	 * catalog on a particular index unless that's already the clustered index
+	 * for that catalog.
+	 *
+	 * XXX We don't check for this in CLUSTER, because it's historically been
+	 * allowed.
+	 */
+	if (cmd != REPACK_COMMAND_CLUSTER &&
+		!allowSystemTableMods && OidIsValid(indexOid) &&
+		IsCatalogRelation(OldHeap) && !index->rd_index->indisclustered)
+		ereport(ERROR,
+				errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+				errmsg("permission denied: \"%s\" is a system catalog",
+					   RelationGetRelationName(OldHeap)),
+				errdetail("System catalogs can only be clustered by the index they're already clustered on, if any, unless \"%s\" is enabled.",
+						  "allow_system_table_mods"));
+
+	/*
 	 * Quietly ignore the request if this is a materialized view which has not
 	 * been populated from its query. No harm is done because there is no data
 	 * to deal with, and we don't want to throw an error if this is part of a
