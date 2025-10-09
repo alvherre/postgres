@@ -59,7 +59,9 @@
 /*
  * Progress parameters for REPACK.
  *
- * Note: Since REPACK shares some code with CLUSTER, these values are also
+ * Values for PROGRESS_REPACK_COMMAND are defined as in RepackCommand.
+ *
+ * Note: Since REPACK shares code with CLUSTER, these values are also
  * used by CLUSTER. (CLUSTER is now deprecated, so it makes little sense to
  * introduce a separate set of constants.)
  */
@@ -82,29 +84,6 @@
 #define PROGRESS_REPACK_PHASE_SWAP_REL_FILES	5
 #define PROGRESS_REPACK_PHASE_REBUILD_INDEX		6
 #define PROGRESS_REPACK_PHASE_FINAL_CLEANUP		7
-
-/*
- * Commands of PROGRESS_REPACK
- *
- * Currently we only have one command, so the PROGRESS_REPACK_COMMAND
- * parameter is not necessary. However it makes cluster.c simpler if we have
- * the same set of parameters for CLUSTER and REPACK - see the note on REPACK
- * parameters above.
- */
-#define PROGRESS_REPACK_COMMAND_REPACK			1
-
-/*
- * Progress parameters for cluster.
- *
- * Although we need to report REPACK and CLUSTER in separate views, the
- * parameters and phases of CLUSTER are a subset of those of REPACK. Therefore
- * we just use the appropriate values defined for REPACK above instead of
- * defining a separate set of constants here.
- */
-
-/* Commands of PROGRESS_CLUSTER */
-#define PROGRESS_CLUSTER_COMMAND_CLUSTER		1
-#define PROGRESS_CLUSTER_COMMAND_VACUUM_FULL	2
 
 /* Progress parameters for CREATE INDEX */
 /* 3, 4 and 5 reserved for "waitfor" metrics */

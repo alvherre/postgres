@@ -3987,7 +3987,7 @@ typedef struct VacuumRelation
  */
 typedef enum RepackCommand
 {
-	REPACK_COMMAND_CLUSTER,
+	REPACK_COMMAND_CLUSTER = 1,
 	REPACK_COMMAND_REPACK,
 	REPACK_COMMAND_VACUUMFULL,
 } RepackCommand;

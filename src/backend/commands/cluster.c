@@ -303,23 +303,8 @@ cluster_rel(RepackCommand cmd, Relation OldHeap, Oid indexOid,
 	/* Check for user-requested abort. */
 	CHECK_FOR_INTERRUPTS();
 
-	if (cmd == REPACK_COMMAND_REPACK)
-		pgstat_progress_start_command(PROGRESS_COMMAND_REPACK, tableOid);
-	else
-		pgstat_progress_start_command(PROGRESS_COMMAND_CLUSTER, tableOid);
-
-	if (cmd == REPACK_COMMAND_REPACK)
-		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
-									 PROGRESS_REPACK_COMMAND_REPACK);
-	else if (cmd == REPACK_COMMAND_CLUSTER)
-		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
-									 PROGRESS_CLUSTER_COMMAND_CLUSTER);
-	else
-	{
-		Assert(cmd == REPACK_COMMAND_VACUUMFULL);
-		pgstat_progress_update_param(PROGRESS_REPACK_COMMAND,
-									 PROGRESS_CLUSTER_COMMAND_VACUUM_FULL);
-	}
+	pgstat_progress_start_command(PROGRESS_COMMAND_REPACK, tableOid);
+	pgstat_progress_update_param(PROGRESS_REPACK_COMMAND, cmd);
 
 	/*
 	 * Switch to the table owner's userid, so that any index functions are run
