@@ -175,6 +175,17 @@ REPACK [ ( <replaceable class="parameter">option</replaceable> [, ...] ) ] [ <re
    </varlistentry>
 
    <varlistentry>
+    <term><replaceable class="parameter">column_name</replaceable></term>
+    <listitem>
+     <para>
+      The name of a specific column to analyze. Defaults to all columns.
+      If a column list is specific, <literal>ANALYZE</literal> must also
+      be specified.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
     <term><replaceable class="parameter">index_name</replaceable></term>
     <listitem>
      <para>
@@ -269,11 +280,30 @@ REPACK employees USING INDEX employees_ind;
   </para>
 
   <para>
+   Repack the table <literal>cases</literal> on physical ordering,
+   running an <command>ANALYZE</command> on the given columns once
+   repacking is done, showing informational messages:
+<programlisting>
+REPACK (ANALYZE, VERBOSE) cases (district, case_nr);
+</programlisting>
+  </para>
+
+  <para>
    Repack all tables in the database on which you have
    the <literal>MAINTAIN</literal> privilege:
 <programlisting>
 REPACK;
-</programlisting></para>
+</programlisting>
+  </para>
+
+  <para>
+   Repack all tables for which a clustering index has previously been
+   configured on which you have the <literal>MAINTAIN</literal> privilege,
+   showing informational messages:
+<programlisting>
+REPACK (VERBOSE) USING INDEX;
+</programlisting>
+
  </refsect1>
 
  <refsect1>
