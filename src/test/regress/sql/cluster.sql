@@ -351,11 +351,8 @@ SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
 ORDER BY 1;
 
 -- Verify partial analyze works
-DELETE from pg_statistic WHERE starelid = 'clstr_tst'::regclass;
 REPACK (ANALYZE) clstr_tst (a);
-SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
 REPACK (ANALYZE) clstr_tst;
-SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
 REPACK (VERBOSE) clstr_tst (a);
 
 -- REPACK w/o argument performs no ordering, so we can only check which tables

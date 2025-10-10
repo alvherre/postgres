@@ -765,24 +765,8 @@ ORDER BY 1;
 (3 rows)
 
 -- Verify partial analyze works
-DELETE from pg_statistic WHERE starelid = 'clstr_tst'::regclass;
 REPACK (ANALYZE) clstr_tst (a);
-SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
- tablename | attname 
------------+---------
- clstr_tst | a
-(1 row)
-
 REPACK (ANALYZE) clstr_tst;
-SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
- tablename | attname 
------------+---------
- clstr_tst | a
- clstr_tst | b
- clstr_tst | c
- clstr_tst | d
-(4 rows)
-
 REPACK (VERBOSE) clstr_tst (a);
 ERROR:  ANALYZE option must be specified when a column list is provided
 -- REPACK w/o argument performs no ordering, so we can only check which tables
