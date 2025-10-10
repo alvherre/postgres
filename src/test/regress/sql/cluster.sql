@@ -76,20 +76,6 @@ INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
 SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
 ORDER BY 1;
 
--- REPACK handles individual tables identically to CLUSTER, but it's worth
--- checking if it handles table hierarchies identically as well.
-REPACK clstr_tst USING INDEX clstr_tst_c;
-
--- Verify that inheritance link still works
-INSERT INTO clstr_tst_inh VALUES (0, 100, 'in child table 2');
-SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
-
--- Verify that foreign key link still works
-INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
-
-SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
-ORDER BY 1;
-
 SELECT relname, relkind,
     EXISTS(SELECT 1 FROM pg_class WHERE oid = c.reltoastrelid) AS hastoast
 FROM pg_class c WHERE relname LIKE 'clstr_tst%' ORDER BY relname;
@@ -171,34 +157,6 @@ INSERT INTO clstr_1 VALUES (2);
 INSERT INTO clstr_1 VALUES (1);
 CLUSTER clstr_1;
 SELECT * FROM clstr_1;
-
--- REPACK w/o argument performs no ordering, so we can only check which tables
--- have the relfilenode changed.
-RESET SESSION AUTHORIZATION;
-CREATE TEMP TABLE relnodes_old AS
-(SELECT relname, relfilenode
-FROM pg_class
-WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
-
-SET SESSION AUTHORIZATION regress_clstr_user;
-SET client_min_messages = ERROR;  -- order of "skipping" warnings may vary
-REPACK;
-RESET client_min_messages;
-
-RESET SESSION AUTHORIZATION;
-CREATE TEMP TABLE relnodes_new AS
-(SELECT relname, relfilenode
-FROM pg_class
-WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
-
--- Do the actual comparison. Unlike CLUSTER, clstr_3 should have been
--- processed because there is nothing like clustering index here.
-SELECT o.relname FROM relnodes_old o
-JOIN relnodes_new n ON o.relname = n.relname
-WHERE o.relfilenode <> n.relfilenode
-ORDER BY o.relname;
-
-SET SESSION AUTHORIZATION regress_clstr_user;
 
 -- Test MVCC-safety of cluster. There isn't much we can do to verify the
 -- results with a single backend...
@@ -371,6 +329,60 @@ SELECT * FROM clstr_expression WHERE upper(b) = 'PREFIX3';
 EXPLAIN (COSTS OFF) SELECT * FROM clstr_expression WHERE -a = -3 ORDER BY -a, b;
 SELECT * FROM clstr_expression WHERE -a = -3 ORDER BY -a, b;
 COMMIT;
+
+----------------------------------------------------------------------
+--
+-- REPACK
+--
+----------------------------------------------------------------------
+
+-- REPACK handles individual tables identically to CLUSTER, but it's worth
+-- checking if it handles table hierarchies identically as well.
+REPACK clstr_tst USING INDEX clstr_tst_c;
+
+-- Verify that inheritance link still works
+INSERT INTO clstr_tst_inh VALUES (0, 100, 'in child table 2');
+SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
+
+-- Verify that foreign key link still works
+INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
+
+SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
+ORDER BY 1;
+
+-- Verify partial analyze works
+DELETE from pg_statistic WHERE starelid = 'clstr_tst'::regclass;
+REPACK (ANALYZE) clstr_tst (a);
+SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
+REPACK (ANALYZE) clstr_tst;
+SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
+REPACK (VERBOSE) clstr_tst (a);
+
+-- REPACK w/o argument performs no ordering, so we can only check which tables
+-- have the relfilenode changed.
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE relnodes_old AS
+(SELECT relname, relfilenode
+FROM pg_class
+WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
+
+SET SESSION AUTHORIZATION regress_clstr_user;
+SET client_min_messages = ERROR;  -- order of "skipping" warnings may vary
+REPACK;
+RESET client_min_messages;
+
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE relnodes_new AS
+(SELECT relname, relfilenode
+FROM pg_class
+WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
+
+-- Do the actual comparison. Unlike CLUSTER, clstr_3 should have been
+-- processed because there is nothing like clustering index here.
+SELECT o.relname FROM relnodes_old o
+JOIN relnodes_new n ON o.relname = n.relname
+WHERE o.relfilenode <> n.relfilenode
+ORDER BY o.relname;
 
 -- clean up
 DROP TABLE clustertest;

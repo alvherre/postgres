@@ -254,63 +254,6 @@ ORDER BY 1;
  clstr_tst_pkey
 (3 rows)
 
--- REPACK handles individual tables identically to CLUSTER, but it's worth
--- checking if it handles table hierarchies identically as well.
-REPACK clstr_tst USING INDEX clstr_tst_c;
--- Verify that inheritance link still works
-INSERT INTO clstr_tst_inh VALUES (0, 100, 'in child table 2');
-SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
- a  |  b  |        c         |           substring            | length 
-----+-----+------------------+--------------------------------+--------
- 10 |  14 | catorce          |                                |       
- 18 |   5 | cinco            |                                |       
-  9 |   4 | cuatro           |                                |       
- 26 |  19 | diecinueve       |                                |       
- 12 |  18 | dieciocho        |                                |       
- 30 |  16 | dieciseis        |                                |       
- 24 |  17 | diecisiete       |                                |       
-  2 |  10 | diez             |                                |       
- 23 |  12 | doce             |                                |       
- 11 |   2 | dos              |                                |       
- 25 |   9 | nueve            |                                |       
- 31 |   8 | ocho             |                                |       
-  1 |  11 | once             |                                |       
- 28 |  15 | quince           |                                |       
- 32 |   6 | seis             | xyzzyxyzzyxyzzyxyzzyxyzzyxyzzy | 500000
- 29 |   7 | siete            |                                |       
- 15 |  13 | trece            |                                |       
- 22 |  30 | treinta          |                                |       
- 17 |  32 | treinta y dos    |                                |       
-  3 |  31 | treinta y uno    |                                |       
-  5 |   3 | tres             |                                |       
- 20 |   1 | uno              |                                |       
-  6 |  20 | veinte           |                                |       
- 14 |  25 | veinticinco      |                                |       
- 21 |  24 | veinticuatro     |                                |       
-  4 |  22 | veintidos        |                                |       
- 19 |  29 | veintinueve      |                                |       
- 16 |  28 | veintiocho       |                                |       
- 27 |  26 | veintiseis       |                                |       
- 13 |  27 | veintisiete      |                                |       
-  7 |  23 | veintitres       |                                |       
-  8 |  21 | veintiuno        |                                |       
-  0 | 100 | in child table   |                                |       
-  0 | 100 | in child table 2 |                                |       
-(34 rows)
-
--- Verify that foreign key link still works
-INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
-ERROR:  insert or update on table "clstr_tst" violates foreign key constraint "clstr_tst_con"
-DETAIL:  Key (b)=(1111) is not present in table "clstr_tst_s".
-SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
-ORDER BY 1;
-       conname        
-----------------------
- clstr_tst_a_not_null
- clstr_tst_con
- clstr_tst_pkey
-(3 rows)
-
 SELECT relname, relkind,
     EXISTS(SELECT 1 FROM pg_class WHERE oid = c.reltoastrelid) AS hastoast
 FROM pg_class c WHERE relname LIKE 'clstr_tst%' ORDER BY relname;
@@ -438,35 +381,6 @@ SELECT * FROM clstr_1;
  2
 (2 rows)
 
--- REPACK w/o argument performs no ordering, so we can only check which tables
--- have the relfilenode changed.
-RESET SESSION AUTHORIZATION;
-CREATE TEMP TABLE relnodes_old AS
-(SELECT relname, relfilenode
-FROM pg_class
-WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
-SET SESSION AUTHORIZATION regress_clstr_user;
-SET client_min_messages = ERROR;  -- order of "skipping" warnings may vary
-REPACK;
-RESET client_min_messages;
-RESET SESSION AUTHORIZATION;
-CREATE TEMP TABLE relnodes_new AS
-(SELECT relname, relfilenode
-FROM pg_class
-WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
--- Do the actual comparison. Unlike CLUSTER, clstr_3 should have been
--- processed because there is nothing like clustering index here.
-SELECT o.relname FROM relnodes_old o
-JOIN relnodes_new n ON o.relname = n.relname
-WHERE o.relfilenode <> n.relfilenode
-ORDER BY o.relname;
- relname 
----------
- clstr_1
- clstr_3
-(2 rows)
-
-SET SESSION AUTHORIZATION regress_clstr_user;
 -- Test MVCC-safety of cluster. There isn't much we can do to verify the
 -- results with a single backend...
 CREATE TABLE clustertest (key int PRIMARY KEY);
@@ -788,6 +702,117 @@ SELECT * FROM clstr_expression WHERE -a = -3 ORDER BY -a, b;
 (4 rows)
 
 COMMIT;
+----------------------------------------------------------------------
+--
+-- REPACK
+--
+----------------------------------------------------------------------
+-- REPACK handles individual tables identically to CLUSTER, but it's worth
+-- checking if it handles table hierarchies identically as well.
+REPACK clstr_tst USING INDEX clstr_tst_c;
+-- Verify that inheritance link still works
+INSERT INTO clstr_tst_inh VALUES (0, 100, 'in child table 2');
+SELECT a,b,c,substring(d for 30), length(d) from clstr_tst;
+ a  |  b  |        c         |           substring            | length 
+----+-----+------------------+--------------------------------+--------
+ 10 |  14 | catorce          |                                |       
+ 18 |   5 | cinco            |                                |       
+  9 |   4 | cuatro           |                                |       
+ 26 |  19 | diecinueve       |                                |       
+ 12 |  18 | dieciocho        |                                |       
+ 30 |  16 | dieciseis        |                                |       
+ 24 |  17 | diecisiete       |                                |       
+  2 |  10 | diez             |                                |       
+ 23 |  12 | doce             |                                |       
+ 11 |   2 | dos              |                                |       
+ 25 |   9 | nueve            |                                |       
+ 31 |   8 | ocho             |                                |       
+  1 |  11 | once             |                                |       
+ 28 |  15 | quince           |                                |       
+ 32 |   6 | seis             | xyzzyxyzzyxyzzyxyzzyxyzzyxyzzy | 500000
+ 29 |   7 | siete            |                                |       
+ 15 |  13 | trece            |                                |       
+ 22 |  30 | treinta          |                                |       
+ 17 |  32 | treinta y dos    |                                |       
+  3 |  31 | treinta y uno    |                                |       
+  5 |   3 | tres             |                                |       
+ 20 |   1 | uno              |                                |       
+  6 |  20 | veinte           |                                |       
+ 14 |  25 | veinticinco      |                                |       
+ 21 |  24 | veinticuatro     |                                |       
+  4 |  22 | veintidos        |                                |       
+ 19 |  29 | veintinueve      |                                |       
+ 16 |  28 | veintiocho       |                                |       
+ 27 |  26 | veintiseis       |                                |       
+ 13 |  27 | veintisiete      |                                |       
+  7 |  23 | veintitres       |                                |       
+  8 |  21 | veintiuno        |                                |       
+  0 | 100 | in child table   |                                |       
+  0 | 100 | in child table 2 |                                |       
+(34 rows)
+
+-- Verify that foreign key link still works
+INSERT INTO clstr_tst (b, c) VALUES (1111, 'this should fail');
+ERROR:  insert or update on table "clstr_tst" violates foreign key constraint "clstr_tst_con"
+DETAIL:  Key (b)=(1111) is not present in table "clstr_tst_s".
+SELECT conname FROM pg_constraint WHERE conrelid = 'clstr_tst'::regclass
+ORDER BY 1;
+       conname        
+----------------------
+ clstr_tst_a_not_null
+ clstr_tst_con
+ clstr_tst_pkey
+(3 rows)
+
+-- Verify partial analyze works
+DELETE from pg_statistic WHERE starelid = 'clstr_tst'::regclass;
+REPACK (ANALYZE) clstr_tst (a);
+SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
+ tablename | attname 
+-----------+---------
+ clstr_tst | a
+(1 row)
+
+REPACK (ANALYZE) clstr_tst;
+SELECT DISTINCT tablename, attname FROM pg_stats WHERE tablename = 'clstr_tst';
+ tablename | attname 
+-----------+---------
+ clstr_tst | a
+ clstr_tst | b
+ clstr_tst | c
+ clstr_tst | d
+(4 rows)
+
+REPACK (VERBOSE) clstr_tst (a);
+ERROR:  ANALYZE option must be specified when a column list is provided
+-- REPACK w/o argument performs no ordering, so we can only check which tables
+-- have the relfilenode changed.
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE relnodes_old AS
+(SELECT relname, relfilenode
+FROM pg_class
+WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
+SET SESSION AUTHORIZATION regress_clstr_user;
+SET client_min_messages = ERROR;  -- order of "skipping" warnings may vary
+REPACK;
+RESET client_min_messages;
+RESET SESSION AUTHORIZATION;
+CREATE TEMP TABLE relnodes_new AS
+(SELECT relname, relfilenode
+FROM pg_class
+WHERE relname IN ('clstr_1', 'clstr_2', 'clstr_3'));
+-- Do the actual comparison. Unlike CLUSTER, clstr_3 should have been
+-- processed because there is nothing like clustering index here.
+SELECT o.relname FROM relnodes_old o
+JOIN relnodes_new n ON o.relname = n.relname
+WHERE o.relfilenode <> n.relfilenode
+ORDER BY o.relname;
+ relname 
+---------
+ clstr_1
+ clstr_3
+(2 rows)
+
 -- clean up
 DROP TABLE clustertest;
 DROP TABLE clstr_1;
