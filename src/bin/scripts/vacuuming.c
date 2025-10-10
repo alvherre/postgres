@@ -650,6 +650,18 @@ retrieve_objects(PGconn *conn, vacuumingOptions *vacopts,
 	}
 
 	/*
+	 * In REPACK mode, only consider the tables that the current user has
+	 * MAINTAIN privileges on.  XXX maybe we should do this in all cases,
+	 * not just REPACK.  The vacuumdb output is too noisy for no reason.
+	 */
+	if (vacopts->mode == MODE_REPACK)
+	{
+		appendPQExpBufferStr(&catalog_query,
+							 " AND pg_catalog.has_table_privilege(current_user, "
+							 "c.oid, 'MAINTAIN')\n");
+	}
+
+	/*
 	 * If no tables were listed, filter for the relevant relation types.  If
 	 * tables were given via --table, don't bother filtering by relation type.
 	 * Instead, let the server decide whether a given relation can be
