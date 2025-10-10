@@ -303,6 +303,7 @@ REPACK;
 <programlisting>
 REPACK (VERBOSE) USING INDEX;
 </programlisting>
+  </para>
 
  </refsect1>
 
