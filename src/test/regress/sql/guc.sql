@@ -377,3 +377,21 @@ SELECT name FROM tab_settings_flags
   WHERE no_reset AND NOT no_reset_all
   ORDER BY 1;
 DROP TABLE tab_settings_flags;
+
+-- Test log_min_messages
+SET log_min_messages TO foo;  -- fail
+SET log_min_messages TO fatal;
+SHOW log_min_messages;
+SET log_min_messages TO 'fatal';
+SHOW log_min_messages;
+SET log_min_messages TO 'checkpointer:debug2, autovacuum:debug1';  --fail
+SET log_min_messages TO 'debug1, backend:error, fatal';  -- fail
+SET log_min_messages TO 'backend:error, debug1, backend:warning';  -- fail
+SET log_min_messages TO 'backend:error, foo:fatal, archiver:debug1';  -- fail
+SET log_min_messages TO 'backend:error, checkpointer:bar, archiver:debug1';  -- fail
+SET log_min_messages TO 'backend:error, checkpointer:debug3, fatal, archiver:debug2, autovacuum:debug1, walsender:debug3';
+SHOW log_min_messages;
+SET log_min_messages TO 'warning, autovacuum:debug1';
+SHOW log_min_messages;
+SET log_min_messages TO 'autovacuum:debug1, warning';
+SHOW log_min_messages;

@@ -266,7 +266,7 @@ GetBackendTypeDesc(BackendType backendType)
 
 	switch (backendType)
 	{
-#define PG_PROCTYPE(bktype, description, main_func, shmem_attach)	\
+#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach, log_min_messages)	\
 		case bktype: backendDesc = description; break;
 #include "postmaster/proctypelist.h"
 #undef PG_PROCTYPE

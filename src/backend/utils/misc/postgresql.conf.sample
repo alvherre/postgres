@@ -541,6 +541,8 @@
                                         #   log
                                         #   fatal
                                         #   panic
+                                        #   and an optional comma-separated list
+                                        #   of type:level
 
 #log_min_error_statement = error        # values in order of decreasing detail:
                                         #   debug5

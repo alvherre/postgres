@@ -235,7 +235,7 @@ is_log_level_output(int elevel, int log_min_level)
 static inline bool
 should_output_to_server(int elevel)
 {
-	return is_log_level_output(elevel, log_min_messages);
+	return is_log_level_output(elevel, log_min_messages[MyBackendType]);
 }
 
 /*
