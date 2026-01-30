@@ -371,12 +371,6 @@ handle_sig_alarm(SIGNAL_ARGS)
 	HOLD_INTERRUPTS();
 
 	/*
-	 * SIGALRM is always cause for waking anything waiting on the process
-	 * latch.
-	 */
-	SetLatch(MyLatch);
-
-	/*
 	 * Always reset signal_pending, even if !alarm_enabled, since indeed no
 	 * signal is now pending.
 	 */
@@ -448,6 +442,12 @@ handle_sig_alarm(SIGNAL_ARGS)
 			schedule_alarm(now);
 		}
 	}
+
+	/*
+	 * SIGALRM is always cause for waking anything waiting on the process
+	 * latch.
+	 */
+	SetLatch(MyLatch);
 
 	RESUME_INTERRUPTS();
 }

@@ -1391,7 +1391,6 @@ TransactionTimeoutHandler(void)
 {
 	TransactionTimeoutPending = true;
 	InterruptPending = true;
-	SetLatch(MyLatch);
 }
 
 static void
@@ -1399,7 +1398,6 @@ IdleInTransactionSessionTimeoutHandler(void)
 {
 	IdleInTransactionSessionTimeoutPending = true;
 	InterruptPending = true;
-	SetLatch(MyLatch);
 }
 
 static void
@@ -1407,7 +1405,6 @@ IdleSessionTimeoutHandler(void)
 {
 	IdleSessionTimeoutPending = true;
 	InterruptPending = true;
-	SetLatch(MyLatch);
 }
 
 static void
@@ -1415,7 +1412,6 @@ IdleStatsUpdateTimeoutHandler(void)
 {
 	IdleStatsUpdateTimeoutPending = true;
 	InterruptPending = true;
-	SetLatch(MyLatch);
 }
 
 static void
@@ -1423,7 +1419,6 @@ ClientCheckTimeoutHandler(void)
 {
 	CheckClientConnectionPending = true;
 	InterruptPending = true;
-	SetLatch(MyLatch);
 }
 
 /*
