@@ -9973,8 +9973,10 @@ ATAddCheckNNConstraint(List **wqueue, AlteredTableInfo *tab, Relation rel,
 		ObjectAddressSet(address, ConstraintRelationId, ccon->conoid);
 	}
 
-	/* At this point we must have a locked-down name to use */
-	Assert(newcons == NIL || constr->conname != NULL);
+	/* At this point, CHECK constraints must have a locked-down name to use */
+	Assert(newcons == NIL ||
+		   constr->contype != CONSTR_CHECK ||
+		   constr->conname != NULL);
 
 	/* Advance command counter in case same table is visited multiple times */
 	CommandCounterIncrement();
