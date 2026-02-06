@@ -1279,12 +1279,12 @@ check_standard_conforming_strings(bool *newval, void **extra, GucSource source)
 /*
  * GUC check_hook for log_min_messages
  *
- * The parsing consists of a comma-separated list of TYPE:LEVEL elements. TYPE
- * is log_min_messages_process_types.  LEVEL is server_message_level_options. A
- * single LEVEL element should be part of this list and it is applied as a
- * final step to the process types that are not specified. For backward
- * compatibility, the old syntax is still accepted and it means to apply the
- * LEVEL for all process types.
+ * This value is parsed as a comma-separated list of zero or more TYPE:LEVEL
+ * elements.  For each element, TYPE corresponds to a bk_category value (see
+ * postmaster/proctypelist.h), and LEVEL is one of log_min_message_lvls.
+ *
+ * In addition, there must be a single LEVEL element (with no TYPE part)
+ * which sets the default level for process types that aren't specified.
  */
 bool
 check_log_min_messages(char **newval, void **extra, GucSource source)
@@ -1295,20 +1295,20 @@ check_log_min_messages(char **newval, void **extra, GucSource source)
 	char	   *result;
 	bool		first = true;
 	int			newlevel[BACKEND_NUM_TYPES];
-	bool		assigned[BACKEND_NUM_TYPES];
+	bool		assigned[BACKEND_NUM_TYPES] = {0};
 	int			genericlevel = -1;	/* -1 means not assigned */
 
-	/* Initialize the array. */
-	for (int i = 0; i < BACKEND_NUM_TYPES; i++)
-	{
-		newlevel[i] = WARNING;
-		assigned[i] = false;
-	}
+	const char *const process_types[] = {
+#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach) \
+		[bktype] = bkcategory,
+#include "postmaster/proctypelist.h"
+#undef PG_PROCTYPE
+	};
 
 	/* Need a modifiable copy of string. */
 	rawstring = guc_strdup(LOG, *newval);
 
-	/* Parse string into list of identifiers. */
+	/* Parse the string into a list. */
 	if (!SplitGUCList(rawstring, ',', &elemlist))
 	{
 		/* syntax error in list */
@@ -1321,27 +1321,22 @@ check_log_min_messages(char **newval, void **extra, GucSource source)
 	/* Validate and assign log level and process type. */
 	foreach_ptr(char, tok, elemlist)
 	{
-		char	   *sep;
-		const struct config_enum_entry *entry;
+		char	   *sep = strchr(tok, ':');
 
 		/*
-		 * Check whether there is a process type following the log level. If
-		 * there is no separator, it means this is the generic log level. The
-		 * generic log level will be assigned to the process types that were
-		 * not informed.
+		 * If there's no ':' separator in the entry, this is the default
+		 * value.  Otherwise it's a process type-specific entry.
 		 */
-		sep = strchr(tok, ':');
 		if (sep == NULL)
 		{
+			const struct config_enum_entry *entry;
 			bool		found = false;
 
 			/* Reject duplicates for generic log level. */
 			if (genericlevel != -1)
 			{
-				GUC_check_errdetail("Generic log level was already assigned.");
-				guc_free(rawstring);
-				list_free(elemlist);
-				return false;
+				GUC_check_errdetail("Redundant specification of default log level.");
+				goto lmm_fail;
 			}
 
 			/* Is the log level valid? */
@@ -1358,9 +1353,7 @@ check_log_min_messages(char **newval, void **extra, GucSource source)
 			if (!found)
 			{
 				GUC_check_errdetail("Unrecognized log level: \"%s\".", tok);
-				guc_free(rawstring);
-				list_free(elemlist);
-				return false;
+				goto lmm_fail;
 			}
 		}
 		else
@@ -1368,23 +1361,19 @@ check_log_min_messages(char **newval, void **extra, GucSource source)
 			char	   *loglevel;
 			char	   *ptype;
 			bool		found = false;
+			int			level;
+			const struct config_enum_entry *entry;
 
-			ptype = guc_malloc(LOG, (sep - tok) + 1);
-			if (!ptype)
-			{
-				guc_free(rawstring);
-				list_free(elemlist);
-				return false;
-			}
-			memcpy(ptype, tok, sep - tok);
-			ptype[sep - tok] = '\0';
+			ptype = tok;
 			loglevel = sep + 1;
+			*sep = '\0';
 
 			/* Is the log level valid? */
 			for (entry = server_message_level_options; entry && entry->name; entry++)
 			{
 				if (pg_strcasecmp(entry->name, loglevel) == 0)
 				{
+					level = entry->val;
 					found = true;
 					break;
 				}
@@ -1392,50 +1381,49 @@ check_log_min_messages(char **newval, void **extra, GucSource source)
 
 			if (!found)
 			{
-				GUC_check_errdetail("Unrecognized log level: \"%s\".", loglevel);
-				guc_free(ptype);
-				guc_free(rawstring);
-				list_free(elemlist);
-				return false;
+				GUC_check_errdetail("Unrecognized log level for process type \"%s\": \"%s\".",
+									ptype, loglevel);
+				goto lmm_fail;
 			}
 
-			/*
-			 * Is the process type name valid? There might be multiple entries
-			 * per process type, don't bail out because it can assign the
-			 * value for multiple entries.
-			 */
+			/* Is the process type name valid and unique? */
 			found = false;
 			for (int i = 0; i < BACKEND_NUM_TYPES; i++)
 			{
-				if (pg_strcasecmp(log_min_messages_process_types[i], ptype) == 0)
+				if (pg_strcasecmp(process_types[i], ptype) == 0)
 				{
 					/* Reject duplicates for a process type. */
 					if (assigned[i])
 					{
-						GUC_check_errdetail("Process type \"%s\" was already assigned.", ptype);
-						guc_free(ptype);
-						guc_free(rawstring);
-						list_free(elemlist);
-						return false;
+						GUC_check_errdetail("Redundant log level specification for process type \"%s\".",
+											ptype);
+						goto lmm_fail;
 					}
 
-					newlevel[i] = entry->val;
+					newlevel[i] = level;
 					assigned[i] = true;
 					found = true;
+					break;
 				}
 			}
 
 			if (!found)
 			{
 				GUC_check_errdetail("Unrecognized process type: \"%s\".", ptype);
-				guc_free(ptype);
-				guc_free(rawstring);
-				list_free(elemlist);
-				return false;
+				goto lmm_fail;
 			}
 
-			guc_free(ptype);
+			/* Put the separator back in place */
+			*sep = ':';
 		}
+
+		/* all good */
+		continue;
+
+lmm_fail:
+		guc_free(rawstring);
+		list_free(elemlist);
+		return false;
 	}
 
 	/*
@@ -1443,7 +1431,7 @@ check_log_min_messages(char **newval, void **extra, GucSource source)
 	 */
 	if (genericlevel == -1)
 	{
-		GUC_check_errdetail("Generic log level was not defined.");
+		GUC_check_errdetail("Default log level was not defined.");
 		guc_free(rawstring);
 		list_free(elemlist);
 		return false;

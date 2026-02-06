@@ -7090,15 +7090,15 @@ local0.*    /var/log/postgresql
       </term>
       <listitem>
        <para>
-        Controls which <link linkend="runtime-config-severity-levels">message
-        levels</link> are written to the server log.
-        Valid values are a comma-separated list of <literal>type:level</literal>
-        and a single <literal>level</literal>. The list allows it to use
-        different levels per process type. Only the single <literal>level</literal>
-        is mandatory (order does not matter) and it is assigned to the process
-        types that are not specified in the list.
-        Valid process types are listed in the table below, each corresponding to
-        either postmaster, an auxiliary process type or a backend.
+        Controls which
+        <link linkend="runtime-config-severity-levels">message levels</link>
+        are written to the server log.  Valid values are a comma-separated
+        list of zero or more
+        <literal><replaceable>process type</replaceable>:<replaceable>level</replaceable></literal>
+        entries and exactly one mandatory
+        <literal><replaceable>level</replaceable></literal> entry,
+        which is the default for process types not listed.
+        Valid process types are listed in the table below.
         <simplelist type="vert" columns="4">
          <member><literal>archiver</literal></member>
          <member><literal>autovacuum</literal></member>

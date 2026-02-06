@@ -30,22 +30,27 @@
  */
 
 
-/* bktype, bkcategory, description, main_func, shmem_attach, log_min_messages */
-PG_PROCTYPE(B_ARCHIVER, "archiver", gettext_noop("archiver"), PgArchiverMain, true, WARNING)
-PG_PROCTYPE(B_AUTOVAC_LAUNCHER, "autovacuum", gettext_noop("autovacuum launcher"), AutoVacLauncherMain, true, WARNING)
-PG_PROCTYPE(B_AUTOVAC_WORKER, "autovacuum", gettext_noop("autovacuum worker"), AutoVacWorkerMain, true, WARNING)
-PG_PROCTYPE(B_BACKEND, "backend", gettext_noop("client backend"), BackendMain, true, WARNING)
-PG_PROCTYPE(B_BG_WORKER, "bgworker", gettext_noop("background worker"), BackgroundWorkerMain, true, WARNING)
-PG_PROCTYPE(B_BG_WRITER, "bgwriter", gettext_noop("background writer"), BackgroundWriterMain, true, WARNING)
-PG_PROCTYPE(B_CHECKPOINTER, "checkpointer", gettext_noop("checkpointer"), CheckpointerMain, true, WARNING)
-PG_PROCTYPE(B_DEAD_END_BACKEND, "backend", gettext_noop("dead-end client backend"), BackendMain, true, WARNING)
-PG_PROCTYPE(B_INVALID, "postmaster", gettext_noop("unrecognized"), NULL, false, WARNING)
-PG_PROCTYPE(B_IO_WORKER, "ioworker", gettext_noop("io worker"), IoWorkerMain, true, WARNING)
-PG_PROCTYPE(B_LOGGER, "syslogger", gettext_noop("syslogger"), SysLoggerMain, false, WARNING)
-PG_PROCTYPE(B_SLOTSYNC_WORKER, "slotsyncworker", gettext_noop("slotsync worker"), ReplSlotSyncWorkerMain, true, WARNING)
-PG_PROCTYPE(B_STANDALONE_BACKEND, "backend", gettext_noop("standalone backend"), NULL, false, WARNING)
-PG_PROCTYPE(B_STARTUP, "startup", gettext_noop("startup"), StartupProcessMain, true, WARNING)
-PG_PROCTYPE(B_WAL_RECEIVER, "walreceiver", gettext_noop("walreceiver"), WalReceiverMain, true, WARNING)
-PG_PROCTYPE(B_WAL_SENDER, "walsender", gettext_noop("walsender"), NULL, true, WARNING)
-PG_PROCTYPE(B_WAL_SUMMARIZER, "walsummarizer", gettext_noop("walsummarizer"), WalSummarizerMain, true, WARNING)
-PG_PROCTYPE(B_WAL_WRITER, "walwriter", gettext_noop("walwriter"), WalWriterMain, true, WARNING)
+/* bktype, bkcategory, description, main_func, shmem_attach */
+PG_PROCTYPE(B_ARCHIVER, "archiver", gettext_noop("archiver"), PgArchiverMain, true)
+PG_PROCTYPE(B_AUTOVAC_LAUNCHER, "autovacuum", gettext_noop("autovacuum launcher"), AutoVacLauncherMain, true)
+PG_PROCTYPE(B_AUTOVAC_WORKER, "autovacuum", gettext_noop("autovacuum worker"), AutoVacWorkerMain, true)
+PG_PROCTYPE(B_BACKEND, "backend", gettext_noop("client backend"), BackendMain, true)
+PG_PROCTYPE(B_BG_WORKER, "bgworker", gettext_noop("background worker"), BackgroundWorkerMain, true)
+PG_PROCTYPE(B_BG_WRITER, "bgwriter", gettext_noop("background writer"), BackgroundWriterMain, true)
+PG_PROCTYPE(B_CHECKPOINTER, "checkpointer", gettext_noop("checkpointer"), CheckpointerMain, true)
+PG_PROCTYPE(B_DEAD_END_BACKEND, "backend", gettext_noop("dead-end client backend"), BackendMain, true)
+PG_PROCTYPE(B_INVALID, "postmaster", gettext_noop("unrecognized"), NULL, false)
+PG_PROCTYPE(B_IO_WORKER, "ioworker", gettext_noop("io worker"), IoWorkerMain, true)
+PG_PROCTYPE(B_LOGGER, "syslogger", gettext_noop("syslogger"), SysLoggerMain, false)
+PG_PROCTYPE(B_SLOTSYNC_WORKER, "slotsyncworker", gettext_noop("slotsync worker"), ReplSlotSyncWorkerMain, true)
+PG_PROCTYPE(B_STANDALONE_BACKEND, "backend", gettext_noop("standalone backend"), NULL, false)
+PG_PROCTYPE(B_STARTUP, "startup", gettext_noop("startup"), StartupProcessMain, true)
+PG_PROCTYPE(B_WAL_RECEIVER, "walreceiver", gettext_noop("walreceiver"), WalReceiverMain, true)
+PG_PROCTYPE(B_WAL_SENDER, "walsender", gettext_noop("walsender"), NULL, true)
+PG_PROCTYPE(B_WAL_SUMMARIZER, "walsummarizer", gettext_noop("walsummarizer"), WalSummarizerMain, true)
+PG_PROCTYPE(B_WAL_WRITER, "walwriter", gettext_noop("walwriter"), WalWriterMain, true)
+
+#ifndef MAX_PROCTYPE_CATEGORY_LEN
+/* maximum length of bkcategory strings, excluding terminating \0 */
+#define MAX_PROCTYPE_CATEGORY_LEN	15
+#endif

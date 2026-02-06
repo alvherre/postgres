@@ -648,22 +648,14 @@ char	   *role_string;
 bool		in_hot_standby_guc;
 
 /*
- * log_min_messages
+ * set default log_min_messages to WARNING for all process types
  */
 int			log_min_messages[] = {
-#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach, log_min_messages) \
-	[bktype] = log_min_messages,
+#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach) \
+	[bktype] = WARNING,
 #include "postmaster/proctypelist.h"
 #undef PG_PROCTYPE
 };
-
-const char *const log_min_messages_process_types[] = {
-#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach, log_min_messages) \
-	[bktype] = bkcategory,
-#include "postmaster/proctypelist.h"
-#undef PG_PROCTYPE
-};
-
 
 /*
  * Displayable names for context types (enum GucContext)

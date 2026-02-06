@@ -178,7 +178,7 @@ typedef struct
 } child_process_kind;
 
 static child_process_kind child_process_kinds[] = {
-#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach, log_min_messages) \
+#define PG_PROCTYPE(bktype, bkcategory, description, main_func, shmem_attach) \
 	[bktype] = {description, main_func, shmem_attach},
 #include "postmaster/proctypelist.h"
 #undef PG_PROCTYPE

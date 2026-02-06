@@ -955,19 +955,19 @@ SHOW log_min_messages;
 
 SET log_min_messages TO 'checkpointer:debug2, autovacuum:debug1';  --fail
 ERROR:  invalid value for parameter "log_min_messages": "checkpointer:debug2, autovacuum:debug1"
-DETAIL:  Generic log level was not defined.
+DETAIL:  Default log level was not defined.
 SET log_min_messages TO 'debug1, backend:error, fatal';  -- fail
 ERROR:  invalid value for parameter "log_min_messages": "debug1, backend:error, fatal"
-DETAIL:  Generic log level was already assigned.
+DETAIL:  Redundant specification of default log level.
 SET log_min_messages TO 'backend:error, debug1, backend:warning';  -- fail
 ERROR:  invalid value for parameter "log_min_messages": "backend:error, debug1, backend:warning"
-DETAIL:  Process type "backend" was already assigned.
+DETAIL:  Redundant log level specification for process type "backend".
 SET log_min_messages TO 'backend:error, foo:fatal, archiver:debug1';  -- fail
 ERROR:  invalid value for parameter "log_min_messages": "backend:error, foo:fatal, archiver:debug1"
 DETAIL:  Unrecognized process type: "foo".
 SET log_min_messages TO 'backend:error, checkpointer:bar, archiver:debug1';  -- fail
 ERROR:  invalid value for parameter "log_min_messages": "backend:error, checkpointer:bar, archiver:debug1"
-DETAIL:  Unrecognized log level: "bar".
+DETAIL:  Unrecognized log level for process type "checkpointer": "bar".
 SET log_min_messages TO 'backend:error, checkpointer:debug3, fatal, archiver:debug2, autovacuum:debug1, walsender:debug3';
 SHOW log_min_messages;
                                         log_min_messages                                         
