@@ -2886,14 +2886,16 @@ MergeWithExistingConstraint(Relation rel, const char *ccname, Node *expr,
  * for each column, giving priority to user-specified ones, and setting
  * inhcount according to how many parents cause each column to get a
  * not-null constraint.  If a user-specified name clashes with another
- * user-specified name, an error is raised.
+ * user-specified name, an error is raised.  'existing_constraints'
+ * is a list of already defined constraints, whose names should be avoided
+ * when generating constraint names.
  *
  * Returns a list of AttrNumber for columns that need to have the attnotnull
  * flag set.
  */
 List *
 AddRelationNotNullConstraints(Relation rel, List *constraints,
-							  List *old_notnulls)
+							  List *old_notnulls, List *existing_constraints)
 {
 	List	   *givennames;
 	List	   *nnnames;
@@ -2906,6 +2908,12 @@ AddRelationNotNullConstraints(Relation rel, List *constraints,
 	 * system-generated name conflicts we just generate another.
 	 */
 	nnnames = NIL;
+	foreach_ptr(CookedConstraint, cons, existing_constraints)
+	{
+		if (cons->name != NULL)
+			nnnames = lappend(nnnames, cons->name);
+	}
+
 	givennames = NIL;
 
 	/*

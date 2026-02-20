@@ -105,6 +105,13 @@ SAVEPOINT q; DROP TABLE remember_node_subid; ROLLBACK TO q;
 COMMIT;
 DROP TABLE remember_node_subid;
 
+-- generated NOT NULL constraint names must not collide with explicitly named constraints
+CREATE TABLE two_not_null_constraints (
+   col integer NOT NULL,
+   CONSTRAINT two_not_null_constraints_col_not_null CHECK (col IS NOT NULL)
+);
+-- leave this table around, for pg_upgrade testing
+
 --
 -- Partitioned tables
 --

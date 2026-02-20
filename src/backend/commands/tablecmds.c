@@ -781,6 +781,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	List	   *rawDefaults;
 	List	   *cookedDefaults;
 	List	   *nncols;
+	List	   *conlist = NIL;
 	Datum		reloptions;
 	ListCell   *listptr;
 	AttrNumber	attnum;
@@ -1338,8 +1339,8 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 * up.
 	 */
 	if (stmt->constraints)
-		AddRelationNewConstraints(rel, NIL, stmt->constraints,
-								  true, true, false, queryString);
+		conlist = AddRelationNewConstraints(rel, NIL, stmt->constraints,
+											true, true, false, queryString);
 
 	/*
 	 * Finally, merge the not-null constraints that are declared directly with
@@ -1348,7 +1349,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 * columns that don't yet have it.
 	 */
 	nncols = AddRelationNotNullConstraints(rel, stmt->nnconstraints,
-										   old_notnulls);
+										   old_notnulls, conlist);
 	foreach_int(attrnum, nncols)
 		set_attnotnull(NULL, rel, attrnum, true, false);
 
