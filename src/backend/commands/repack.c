@@ -3017,6 +3017,9 @@ restore_tuple(BufFile *file, Relation relation, TupleTableSlot *slot)
 /*
  * Adjust 'dest' replacing any EXTERNAL_ONDISK toast pointers with the
  * corresponding ones from 'src'.
+ *
+ * We also take the opportunity to clear out the values in columns that were
+ * dropped.
  */
 static void
 adjust_toast_pointers(Relation relation, TupleTableSlot *dest, TupleTableSlot *src)
@@ -3029,7 +3032,10 @@ adjust_toast_pointers(Relation relation, TupleTableSlot *dest, TupleTableSlot *s
 		varlena    *varlena_dst;
 
 		if (attr->attisdropped)
+		{
+			dest->tts_isnull[i] = true;
 			continue;
+		}
 		if (attr->attlen != -1)
 			continue;
 		if (slot_attisnull(dest, i + 1))
