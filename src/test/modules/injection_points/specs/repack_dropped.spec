@@ -40,6 +40,10 @@ step s2_repack
 	REPACK (CONCURRENTLY) repack_dropped;
 }
 
+step s2_noop
+{
+}
+
 session s3
 step s3_updates
 {
@@ -51,4 +55,5 @@ permutation
 	s2_repack
 	s3_updates
 	s1_unlock
+	s2_noop
 	s1_size

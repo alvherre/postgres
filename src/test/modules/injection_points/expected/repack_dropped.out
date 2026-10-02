@@ -1,6 +1,6 @@
 Parsed test spec with 3 sessions
 
-starting permutation: s1_size s2_repack s3_updates s1_unlock s1_size
+starting permutation: s1_size s2_repack s3_updates s1_unlock s2_noop s1_size
 injection_points_attach
 -----------------------
                        
@@ -30,6 +30,8 @@ injection_points_wakeup
 (1 row)
 
 step s2_repack: <... completed>
+step s2_noop: 
+
 step s1_size: 
 	SELECT pg_column_size(repack_dropped) < current_setting('block_size')::int
 		FROM repack_dropped;
